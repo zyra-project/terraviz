@@ -5,6 +5,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import {
   __resetFormatterCacheForTests,
   formatDate,
+  formatDateRange,
   formatNumber,
   formatRegion,
   formatRelative,
@@ -22,6 +23,18 @@ describe('format helpers', () => {
     const out = formatDate('2010-06-15T00:00:00Z')
     expect(out.length).toBeGreaterThan(0)
     expect(out).toContain('2010')
+  })
+
+  it('formats a span as the language writes one, shared parts once', () => {
+    const opts = { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' } as const
+    const a = new Date('2024-01-01T00:00:00Z')
+    const b = new Date('2024-01-11T00:00:00Z')
+    const range = formatDateRange(a, b, opts)
+    expect(range).toContain('2024')
+    // The year is written once, not at both ends.
+    expect(range.match(/2024/g)).toHaveLength(1)
+    // The same date at both ends is just that date.
+    expect(formatDateRange(a, a, opts)).toBe(formatDate(a, opts))
   })
 
   it('formats numbers via the active locale', () => {

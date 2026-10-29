@@ -23,7 +23,10 @@ globe that stays up all the time:
   leaves, never during a talk.
 - **It says what it shows.** The floating text gives the title, the date
   in the animation, and a short credit. "About" in the menu gives the
-  abstract, the full credit and the licence.
+  abstract, the full credit and the licence. A kiosk screen beside the
+  globe, if you add one, shows all of that in full, with the dataset's
+  legend, and the floating text then leaves the date and the credit to
+  the screen.
 - **It plays a dataset's sound.** The movies have sound tracks, which
   each visitor hears at their own viewer's media volume, fainter with
   distance from the globe. The owner can turn it off.
@@ -34,20 +37,28 @@ item 4 and §9 Phase 2.
 
 | File | What it is |
 |---|---|
-| `terraviz-exhibit.lsl` | **The globe script.** Owns the address, the clock and the media: the smoke test's globe, taking requests from the others. The only one with settings to edit. |
+| `terraviz-exhibit.lsl` | **The globe script.** Owns the address, the clock and the media: the smoke test's globe, taking requests from the others. The one with settings to edit (the names `/9 show` knows are the owner script's). |
 | `terraviz-exhibit-visitors.lsl` | **The visitors script.** Touches and menus, the hold, talks, and who is at the globe. |
 | `terraviz-exhibit-info.lsl` | **The info script.** The floating text, and "About". |
+| `terraviz-exhibit-owner.lsl` | **The owner script.** Your commands on channel 9: it checks each one, has the globe script make the change, and tells you how it went. |
 | `terraviz-exhibit-menu.lsl` | **The menu script.** The dataset menu from the node's catalog, which the visitors script opens. It goes in a small prim of its own, linked to the globe. |
-| `exhibit.test.ts` | Holds the four scripts to each other and to the node: their link messages, the state they share, the commands a visitor may send, the card fields read, and what the node keeps for copies already rezzed. `../second-life-probe/globe.test.ts` holds the globe script's address to the output page. |
+| `terraviz-exhibit-kiosk.lsl` | **The kiosk script**, optional. Shows TerraViz's kiosk page on a flat screen linked to the globe: what the globe shows, its date, abstract, legend and credit, for visitors to read. |
+| `exhibit.test.ts` | Holds the six scripts to each other and to the node: their link messages, the state they share, the commands a visitor may send, the card fields read, and what the node keeps for copies already rezzed. `../second-life-probe/globe.test.ts` holds the globe script's address to the output page. |
 
-A script in Second Life has 64 KB in all, which is why there are four:
+A script in Second Life has 64 KB in all, which is why there are five:
 one script reading what the node says about a dataset while also holding menus,
 notecards and the visitor list would run out. The menu script is the
 fourth because the dataset menu, written into the visitors script first,
 stopped it at once with a Stack-Heap Collision in-world. It is in a prim
 of its own because a web reply reaches every script in the prim that
 asked: in the sphere, the menu's pages stopped the info script the same
-way.
+way. The owner script is the fifth because the globe script had the
+least room of any, 57 KB at rest and up to 60 showing a dataset, with
+the console's controls still to come
+([`docs/SECOND_LIFE_COMPAT.md`](../../docs/SECOND_LIFE_COMPAT.md) §9
+Phase 5): your commands, their help and their wording moved out of it.
+The kiosk script is a sixth, and optional: it goes in the screen it
+shows the page on.
 
 ## Before you start
 
@@ -77,10 +88,11 @@ way.
 ## Setting it up
 
 1. Rez a sphere. A default prim sphere is fine.
-2. In its Content tab, make three **New Script**s and replace their
-   text with the globe, visitors and info scripts
+2. In its Content tab, make four **New Script**s and replace their
+   text with the globe, visitors, info and owner scripts
    (`terraviz-exhibit.lsl`, `terraviz-exhibit-visitors.lsl`,
-   `terraviz-exhibit-info.lsl`), one each, saving each. Set `NODE` in
+   `terraviz-exhibit-info.lsl`, `terraviz-exhibit-owner.lsl`), one
+   each, saving each. Set `NODE` in
    the globe script first if you need to. The order doesn't matter:
    each asks the others for what it missed.
 3. Within a few seconds the sphere stands its poles upright and shows
@@ -110,10 +122,75 @@ way.
       **Edit linked** in the build floater, and choose Build → Select
       Linked Parts → Select Next Part (Ctrl+.) until the cube is
       selected: inside the sphere it can't be clicked.
-5. `/9 memory` should answer from all four scripts, the menu script
+5. `/9 memory` should answer from all five scripts, the menu script
    among them. A visitor's Datasets now opens the node's categories.
 6. Add any of the notecards below, and say `/9 presenters` to check what
    was read.
+7. Optionally, make a kiosk screen beside the globe:
+   1. Rez a cube, and in the Object tab set its size to 2 (X), 0.05 (Y)
+      and 1 (Z): twice as wide as it is high, since the page is drawn
+      2048 by 1024. Place it beside the globe, where visitors can read
+      it. The page goes on face 1, the side facing −Y, so turn the
+      screen until that side faces the visitors.
+   2. Link it to the globe **with the screen as the root**: select the
+      sphere, then Shift-click the screen so it is selected last, and
+      choose Build → Link (Ctrl+L). The screen is outlined in yellow.
+      The globe script turns the prim it is in, so a sphere left as the
+      root would swing the screen round the globe with every tilt and
+      spin (the warning under "Things that will trip you up"). If the
+      globe is already part of a build with a stand or a floor as its
+      root, link the screen into that instead, with the root selected
+      last.
+   3. Say `/9 upright` (`/9 home` for a mesh globe), so the sphere's
+      rest is taken again in its new build.
+   4. Edit the screen (now the root, so its Content tab is the one the
+      build floater shows), make a **New Script** and replace its text
+      with `terraviz-exhibit-kiosk.lsl`, saving it. For the screen's
+      other side, set `FACE = 3` at the top of the script first.
+   5. Within a few seconds the screen shows what the globe shows, and
+      the floating text drops the date and the credit, which the screen
+      shows in full. It keeps the title, for anyone whose viewer shows
+      no media, the telemetry notice while telemetry is on, a talk, and
+      "Right-click, Touch for more".
+   6. If you see nothing, check that shared media is on in your viewer,
+      and read what the script said in chat: it tells you, after ten
+      seconds, if no globe answered, or at once if Second Life refused
+      the face, or that `FACE` isn't one of the prim's faces. Once the
+      page is up it says which face it is on, and what it changed there.
+
+   **A sign you already have** can be the screen in place of step 1's
+   cube; steps 2 to 6 still apply, with the sign's root selected last
+   when you link. Before you save the kiosk script, find the number of
+   the sign's screen face and set `FACE` to it, since the script takes
+   over the face it names when it starts. A box flattened the other way
+   from step 1's shows its front on face 2 or 4, and a mesh sign numbers
+   its faces its own way. To find the number, put this in the prim with
+   the screen face as a script of its own, right-click the screen and
+   choose Touch, then delete the script:
+
+   ```lsl
+   default { touch_start(integer n) { llOwnerSay("face " + (string)llDetectedTouchFace(0)); } }
+   ```
+
+   In a sign of several prims, the kiosk script goes in that prim too:
+   choose Edit linked parts and select it first. If the screen face
+   isn't the root's, step 4's Content tab is the screen prim's.
+
+   The page is drawn with the face's texture settings, as a picture on
+   it would be. So when the kiosk script first shows the page after it
+   starts, it sets the face's repeats, offset, rotation and mapping to a
+   new box's, and tells you in chat what they were, in case you want
+   them back. It keeps the sign's own texture, which a viewer with media
+   off still shows, but once across the face now, like the page. It
+   turns off any list of allowed sites left on the face's media, too.
+   It leaves the face's colour and transparency, which may be meant, and
+   tells you if they would darken or fade the page (set them to white
+   and 0 on the Texture tab), and likewise if the face has a PBR
+   material, which draws the page with its own settings. A mesh sign
+   whose screen face shows only part of its texture will show only part
+   of the page, whatever its settings: use a cube. And if you tried the
+   script on another face first, the page stays on that face until you
+   remove it there, in the Media tab.
 
 The media is deliberately not clickable, for anyone. A visitor who could
 click it could move it to another page, and their viewer would move it
@@ -362,9 +439,10 @@ the owner is told why.
 
 ## The owner's commands
 
-Said in local chat on channel 9, by the object's owner only. The globe
-script takes the smoke test's commands, on 9 rather than 8, so one
-command never reaches both kinds of globe:
+Said in local chat on channel 9, by the object's owner only. The owner
+script hears them, checks each one, has the globe script make the
+change and tells you how it went. They are the smoke test's commands,
+on 9 rather than 8, so one command never reaches both kinds of globe:
 
 `/9 show <name or id>`, `/9 list`, `/9 earth`, `/9 pause`, `/9 play`,
 `/9 jump <s or m:ss>`, `/9 rate <speed>`, `/9 rotation <degrees>`,
@@ -398,7 +476,7 @@ those:
 | `/9 presenters` | What the notecards gave: how many presenters, where the menu comes from, and the settings. |
 | `/9 talk` | Whether a talk is on, and when none is, how many avatars are at the globe. `/9 talk start` and `/9 talk end` start and end one. |
 | `/9 memory` | How much of its 64 KB each script uses. The globe script also says the most it has used showing a dataset, the info script the most reading a card or answering About, and the menu script the most reading the node for a menu. |
-| `/9 help` | The globe script's list. |
+| `/9 help` | The owner script's list. Anything it doesn't know gets the list too. |
 
 ## What leaves the object
 
@@ -429,8 +507,8 @@ You need a second avatar, or a friend, for most of this. Have them
 stand at the globe.
 
 1. **Setup.** `/9 presenters` lists what was read. `/9 memory` should
-   answer from all four scripts. `/9 debug on` should show the readout
-   on the globe.
+   answer from all five scripts; a kiosk script says nothing to it.
+   `/9 debug on` should show the readout on the globe.
 2. **Does a left-click reach the script?** The second avatar left-clicks
    the globe. If a menu opens, a left-click works in their viewer and
    the floating text's "Right-click" is more than they need. If not,
@@ -501,21 +579,73 @@ stand at the globe.
     playing on, and `/9 sound on` bring it back. Say which viewer, if
     one plays it silent. Then `/9 memory`: the globe script's most while
     showing a dataset is the number to report, since sound added to it.
+12. **The kiosk**, if you made one. When it first shows the page, the
+    kiosk script should say in chat which face the page is on. Show
+    Earthquakes 2001-15: within a
+    couple of seconds the screen should show its title, abstract,
+    legend and credit, and a date moving with the globe's, the same date
+    for both avatars. Pause, and the screen's date should stop on the
+    globe's frame; play at another rate (`/9 rate 2`), and it should
+    say so. Show the smoke forecast, `/9 show smoke`, and the legend
+    should be a colour bar with its units, where Earthquakes had an
+    image. Choose Live Earth, and the screen should say what
+    the live Earth is. The floating text should keep only the lines
+    step 7 of the setup names throughout. Turn the globe, tip a pole
+    toward you and stand it Upright again, `/9 spin 10` and
+    `/9 spin 0`: the screen should stay where it is throughout. Take
+    the object into your inventory and rez it again: the screen should
+    face the way it did. Then `/9 memory`: the info script's most is
+    the number to report, since the kiosk added to it. Stop the kiosk
+    script (untick Running in its window) and pause the globe: within
+    about ten seconds the date and the credit should come back to the
+    floating text. Tick Running again and reset the script: they should
+    go again within a few seconds. Unlink the screen: the full floating
+    text should come back at once, and after ten seconds the kiosk
+    script should tell you that no globe answered. Say which viewer
+    showed the screen, and whether text on it is readable from where a
+    visitor stands.
 
 When you report results, say which viewer and version (Help → About)
-each avatar used, and what steps 2, 9 and 11 showed.
+each avatar used, and what steps 2, 9, 11 and 12 showed.
 
 ## Things that will trip you up
 
-- **Put the globe's three scripts in the sphere, and in a build make
+- **Updating a globe set up with four scripts: add the owner script
+  first, then replace the globe script.** Before 28 October 2026 the
+  globe script heard your commands itself; the new one doesn't. In
+  between, the owner script beside the old globe script does each
+  command once, since the old one ignores what the owner script hands
+  it, though the help, `/9 list` and a command either refuses answer
+  twice. The other order leaves a while when only `/9 talk`,
+  `/9 presenters` and `/9 memory` answer, though visitors notice
+  nothing either way.
+- **Put the globe's four scripts in the sphere, and in a build make
   the sphere a child prim.** A tilt turns the prim the scripts are in, so as the root
-  of a build, with a stand linked to it, the whole build would tip. The
+  of a build, with a stand or a kiosk screen linked to it, the whole
+  build would tip, and a spin would swing the screen round the globe. The
   menu script's cube can be linked anywhere in the build, the root
   included; the scripts find each other across the whole object. One
   exhibit to an object, though: two globes linked into one build would
   each open the other's menu.
+- **A kiosk needs the globe script from 28 October 2026 on.** Before it,
+  the globe told only the scripts in the sphere what it shows, so a
+  kiosk beside an older globe script hears nothing, and says so in chat
+  after ten seconds. Update the globe script, and reset the kiosk script.
+- **Update the kiosk and info scripts together.** From 29 October 2026
+  the info script expects the kiosk to answer each change of what the
+  globe shows. A kiosk script from before then answers only once, so
+  beside a newer info script the date and the credit come back to the
+  floating text ten seconds after the globe next changes, and stay.
+  That is safe, just untidy; updating both puts it right.
+- **Unlink a kiosk to retire it, rather than deleting its script.**
+  Unlinked, the floating text gets its date and credit back at once. A
+  kiosk script deleted or stopped in a screen still linked answers
+  nothing, so the floating text takes them back only when the globe
+  next changes what it shows and ten seconds pass with no answer; until
+  then the screen still shows the right page, but nothing will update
+  it.
 - **Keep the menu script out of the sphere.** In the sphere with the
-  other three, its pages of the node's catalog would reach the info
+  other four, its pages of the node's catalog would reach the info
   script too, which has little room to spare while it reads a card. So
   a copy there answers nothing, as one left from the build that had it
   there would be: Datasets gives the five built-in datasets after a few

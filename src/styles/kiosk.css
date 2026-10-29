@@ -1,0 +1,360 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Copyright 2026 The Zyra Project */
+
+/**
+ * The exhibit's kiosk screen (src/ui/kioskUI.ts), in two layouts.
+ *
+ * The stage (`data-layout="stage"`) is one fixed 2048×1024 canvas, the
+ * size of the Second Life media face it is drawn on, laid out in CSS
+ * pixels and scaled by `fit()`. Its sizes are pixels, not rems: they are
+ * read from a few metres away on a screen in a virtual room, so they are
+ * large, and they must not move with a visitor's browser font setting,
+ * since a later step maps touches on the face to places on this stage.
+ * Every block in it has a budget, so nothing is pushed off the face: the
+ * title holds two lines, the date one, the abstract shrinks and then is
+ * cut, and in the side column the thumbnail gives way to the legend,
+ * the credit and the licence, which are clamped.
+ *
+ * The page (`data-layout="page"`) is everything smaller, an ordinary
+ * browser window: rems, one column on a narrow screen, nothing clamped
+ * or cut, and the page scrolls, so browser zoom and a reader's font size
+ * work as they do anywhere.
+ *
+ * The look is STYLE_GUIDE.md's: the app's dark background, its blue for
+ * the one accent line and the labels, uppercase spaced titles, and
+ * tabular figures for the date.
+ */
+
+.kiosk-body-page {
+  margin: 0;
+  overflow: hidden;
+  background: var(--color-bg, #0d0d12);
+  color: var(--color-text, #e8eaf0);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+}
+
+.kiosk-body-page.kiosk-scroll {
+  overflow: auto;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+/* --- the stage ---------------------------------------------------- */
+
+/* A fixed canvas, placed from its top-left corner by `fit()`'s translate
+   and scale, in either reading direction: the layout inside it follows
+   the page's direction, the canvas itself does not move. */
+.kiosk-stage {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg, #0d0d12);
+}
+
+.kiosk-stage[data-layout='stage'] {
+  position: absolute;
+  inset-block-start: 0;
+  left: 0; /* rtl-exempt: a fixed canvas, translated from the window's top-left corner by fit() */
+  inline-size: 2048px;
+  block-size: 1024px;
+  transform-origin: 0 0;
+  padding: 64px 88px 72px;
+}
+
+.kiosk-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-block-end: 20px;
+  margin-block-end: 44px;
+  border-block-end: 3px solid var(--color-accent, #4da6ff);
+}
+
+.kiosk-eyebrow,
+.kiosk-brand {
+  margin: 0;
+  font-weight: 400;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.kiosk-eyebrow {
+  font-size: 34px;
+  color: var(--color-accent, #4da6ff);
+}
+
+.kiosk-brand {
+  font-size: 30px;
+  color: var(--color-text-secondary, #bbbbbb);
+}
+
+.kiosk-body {
+  flex: 1;
+  min-block-size: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 620px;
+  gap: 80px;
+}
+
+.kiosk-main {
+  display: flex;
+  flex-direction: column;
+  min-block-size: 0;
+}
+
+.kiosk-title {
+  margin: 0 0 22px;
+  font-size: 76px;
+  font-weight: 500;
+  line-height: 1.08;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+/* Its height is reserved whether or not there is a date yet, so the
+   abstract, fitted to the space below, never moves when one arrives. */
+.kiosk-when {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 28px;
+  row-gap: 10px;
+  min-block-size: 64px;
+  margin: 0 0 36px;
+}
+
+/* One line on the stage: kioskUI shrinks it to fit rather than let it wrap. */
+.kiosk-date {
+  font-size: 50px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.kiosk-state {
+  padding: 6px 22px;
+  border: 2px solid var(--color-accent, #4da6ff);
+  border-radius: 999px;
+  font-size: 28px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--color-accent, #4da6ff);
+}
+
+/* The font size is set by kioskUI's fit: the largest that holds the
+   abstract, down to a floor below which it is cut with a fade. */
+.kiosk-abstract {
+  flex: 1;
+  min-block-size: 0;
+  overflow: hidden;
+  font-size: 34px;
+  line-height: 1.45;
+  color: var(--color-text-secondary, #bbbbbb);
+}
+
+.kiosk-paragraph {
+  margin: 0 0 0.6em;
+}
+
+.kiosk-abstract-cut {
+  -webkit-mask-image: linear-gradient(to bottom, #000 82%, transparent);
+  mask-image: linear-gradient(to bottom, #000 82%, transparent);
+}
+
+.kiosk-side {
+  display: flex;
+  flex-direction: column;
+  gap: 36px;
+  min-block-size: 0;
+}
+
+/* The one block in the column that gives way: the legend, the credit
+   and the licence keep their room, and the picture takes what is left. */
+.kiosk-thumb {
+  flex: 0 1 auto;
+  min-block-size: 0;
+  inline-size: 100%;
+  max-block-size: 310px;
+  object-fit: contain;
+  object-position: top;
+  border-radius: 12px;
+}
+
+.kiosk-legend {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0;
+}
+
+.kiosk-legend-image {
+  max-inline-size: 100%;
+  max-block-size: 220px;
+  object-fit: contain;
+  align-self: flex-start;
+}
+
+/* The app's colour bar, drawn as it is on the globe's panel, but laid
+   in the column rather than floating over a map. */
+.kiosk-legend .panel-colorbar {
+  position: static;
+  inline-size: 100%;
+  box-sizing: border-box;
+  gap: 12px;
+  /* Room at each end for half a tick label, centred on the bar's ends. */
+  padding: 20px 44px 14px;
+  border-radius: 12px;
+  font-size: 26px;
+  backdrop-filter: none;
+}
+
+.kiosk-legend .panel-colorbar-gradient {
+  block-size: 40px;
+  border-radius: 6px;
+}
+
+.kiosk-legend .panel-colorbar-axis {
+  block-size: 1.3em;
+}
+
+.kiosk-label {
+  display: block;
+  margin-block-end: 6px;
+  font-size: 22px;
+  font-weight: 400;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--color-accent, #4da6ff);
+}
+
+.kiosk-credit,
+.kiosk-license {
+  flex-shrink: 0;
+  margin: 0;
+  font-size: 27px;
+  line-height: 1.35;
+  color: var(--color-text-secondary, #bbbbbb);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  overflow: hidden;
+}
+
+/* Spacing letters apart breaks the joins of a connected script on some
+   engines, so the spaced labels are set solid in those languages. */
+:is(:lang(ar), :lang(fa), :lang(ur)) :is(.kiosk-eyebrow, .kiosk-brand, .kiosk-state, .kiosk-label, .kiosk-date) {
+  letter-spacing: 0;
+}
+
+/* --- the page ----------------------------------------------------- */
+
+.kiosk-stage[data-layout='page'] {
+  max-inline-size: 75rem;
+  margin-inline: auto;
+  padding: 1.5rem 1rem 2.5rem;
+}
+
+[data-layout='page'] .kiosk-head {
+  padding-block-end: 0.5rem;
+  margin-block-end: 1.25rem;
+  border-block-end-width: 2px;
+}
+
+[data-layout='page'] .kiosk-eyebrow {
+  font-size: 1rem;
+}
+
+[data-layout='page'] .kiosk-brand {
+  font-size: 0.875rem;
+}
+
+[data-layout='page'] .kiosk-body {
+  flex: none;
+  grid-template-columns: minmax(0, 1fr) 20rem;
+  gap: 2rem;
+}
+
+@media (max-width: 48rem) {
+  [data-layout='page'] .kiosk-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+[data-layout='page'] .kiosk-title {
+  display: block;
+  margin-block-end: 0.5rem;
+  font-size: 2rem;
+  overflow: visible;
+}
+
+[data-layout='page'] .kiosk-when {
+  min-block-size: 2rem;
+  column-gap: 0.75rem;
+  row-gap: 0.375rem;
+  margin-block-end: 1rem;
+}
+
+[data-layout='page'] .kiosk-date {
+  font-size: 1.375rem;
+  white-space: normal;
+}
+
+[data-layout='page'] .kiosk-state {
+  padding: 0.125rem 0.625rem;
+  border-width: 1px;
+  font-size: 0.8125rem;
+}
+
+[data-layout='page'] .kiosk-abstract {
+  flex: none;
+  overflow: visible;
+  font-size: 1.125rem;
+}
+
+[data-layout='page'] .kiosk-side {
+  gap: 1.25rem;
+}
+
+[data-layout='page'] .kiosk-thumb {
+  max-block-size: 14rem;
+  border-radius: 0.5rem;
+}
+
+[data-layout='page'] .kiosk-legend {
+  gap: 0.5rem;
+}
+
+[data-layout='page'] .kiosk-legend-image {
+  max-block-size: 10rem;
+}
+
+[data-layout='page'] .kiosk-legend .panel-colorbar {
+  padding: 0.625rem 1.375rem 0.5rem;
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+}
+
+[data-layout='page'] .kiosk-legend .panel-colorbar-gradient {
+  block-size: 1.25rem;
+  border-radius: 0.25rem;
+}
+
+[data-layout='page'] .kiosk-label {
+  margin-block-end: 0.125rem;
+  font-size: 0.75rem;
+}
+
+[data-layout='page'] :is(.kiosk-credit, .kiosk-license) {
+  display: block;
+  font-size: 1rem;
+  overflow: visible;
+}
