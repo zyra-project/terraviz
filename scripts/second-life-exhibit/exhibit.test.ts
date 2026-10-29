@@ -355,7 +355,7 @@ describe('second-life exhibit scripts', () => {
     expect(timer).toMatch(/if \(gRetryAt && llGetUnixTime\(\) >= gRetryAt\)\n\s+\{\n\s+gRetryAt = 0;\n\s+fetch\(\);/)
     // The timer runs while a retry waits, a retry is the earliest asked
     // for, and every dataset starts with its tries unspent.
-    expect(body(info, 'pace()')).toContain('if (moving || gRetryAt) llSetTimerEvent(TICK);')
+    expect(body(info, 'pace()')).toContain('if (moving || gRetryAt || gKioskBy) llSetTimerEvent(TICK);')
     expect(body(info, 'later(integer s)')).toMatch(/integer at = llGetUnixTime\(\) \+ s;\n\s+if \(gRetryAt == 0 \|\| at < gRetryAt\) gRetryAt = at;/)
     expect(body(info, 'forget()')).toMatch(/gTries = 0;\n\s+gRetryAt = 0;\n\s+gReq = NULL_KEY;/)
     // A region restart drops a request in flight, which is asked again,
@@ -1580,8 +1580,9 @@ describe("the exhibit's kiosk screen", () => {
     // is told then which face it is, what was changed, and whether the
     // face's colour or a PBR material would spoil the page.
     const show = body(kiosk, 'show()')
-    const live = show.slice(show.indexOf('if (!gLive)'))
-    expect(show.indexOf('if (!gLive)')).toBeGreaterThan(show.indexOf('gShown = url;'))
+    const live = show.slice(show.indexOf('if (!gTold)'))
+    expect(show.indexOf('if (!gTold)')).toBeGreaterThan(show.indexOf('gShown = url;'))
+    expect(all(kiosk, /(gTold = \w+);/g)).toEqual(['gTold = TRUE'])
     expect(kiosk.match(/\bfit\(\);/g)).toHaveLength(1)
     expect(live).toContain('"[exhibit] Kiosk: showing the page on face " + (string)FACE + "." + fit();')
     expect(live).toContain('llGetPrimitiveParams([PRIM_COLOR, FACE, PRIM_RENDER_MATERIAL, FACE])')
@@ -1612,13 +1613,14 @@ describe("the exhibit's kiosk screen", () => {
     expect(kiosk).toMatch(/if \(c & CHANGED_LINK\)\n\s+if \(llGetObjectPrimCount\(llGetKey\(\)\) != gPrims\) llResetScript\(\);/)
     // A burst of changes is one change of media, and a globe that never
     // speaks is reported to the owner.
-    expect(kiosk).toContain('if (gWant != gShown) llSetTimerEvent(0.2);')
+    // The wait is set for every state, so the latest of a burst is answered.
+    expect(kiosk).toMatch(/gWant = a;\n(\s+\/\/[^\n]*\n)*\s+llSetTimerEvent\(0\.2\);\n\s+\}/)
     expect(kiosk).toMatch(/timer\(\)\n\s+\{\n\s+if \(gWant != ""\) \{ show\(\); return; \}\n\s+llSetTimerEvent\(0\.0\);\n\s+llOwnerSay\(/)
     // Only an address the face took counts as shown, so a refused one is
     // tried again with the next state.
     const show = body(kiosk, 'show()')
-    expect(show).toMatch(/\{\n\s+llSetTimerEvent\(0\.0\);\n\s+if \(gWant == gShown\) return;\n\s+string url = gWant;/)
-    expect(show).toMatch(/if \(r != STATUS_OK\)\n\s+\{\n\s+llOwnerSay\([^;]+;\n\s+return;\n\s+\}\n\s+gShown = url;/)
+    expect(show).toMatch(/\{\n\s+llSetTimerEvent\(0\.0\);\n\s+if \(gWant != gShown\)\n\s+\{\n\s+string url = gWant;/)
+    expect(show).toMatch(/if \(r != STATUS_OK\)\n\s+\{\n\s+llOwnerSay\([^;]+;\n\s+gLive = FALSE;\n\s+llMessageLinked\(LINK_SET, MSG_KIOSK, "away", NULL_KEY\);\n\s+return;\n\s+\}\n\s+gShown = url;\n\s+\}\n\s+gLive = TRUE;\n\s+llMessageLinked\(LINK_SET, MSG_KIOSK, "here", NULL_KEY\);/)
     expect(all(kiosk, /(gShown = \w+);/g)).toEqual(['gShown = url'])
   })
 
@@ -1626,14 +1628,36 @@ describe("the exhibit's kiosk screen", () => {
     // The info script asks when it starts and when the prims change, and
     // shows the full text until a kiosk answers. Only "here" says one is.
     expect(info).toMatch(/gPrims = llGetObjectPrimCount\(llGetKey\(\)\);\n\s+llMessageLinked\(LINK_SET, MSG_KIOSK, "\?", NULL_KEY\);/)
-    expect(info).toMatch(/if \(c & CHANGED_LINK\)\n\s+\{\n\s+integer prims = llGetObjectPrimCount\(llGetKey\(\)\);\n\s+if \(prims != gPrims\)\n\s+\{\n\s+gPrims = prims;\n\s+gKiosk = FALSE;\n\s+llMessageLinked\(LINK_SET, MSG_KIOSK, "\?", NULL_KEY\);\n\s+hover\(\);\n\s+pace\(\);/)
-    expect(info).toContain('if (str == "here") { gKiosk = TRUE; hover(); pace(); }')
-    expect(all(info, /gKiosk = (\w+);/g).sort()).toEqual(['FALSE', 'TRUE'])
+    expect(info).toMatch(/if \(c & CHANGED_LINK\)\n\s+\{\n\s+integer prims = llGetObjectPrimCount\(llGetKey\(\)\);\n\s+if \(prims != gPrims\)\n\s+\{\n\s+gPrims = prims;\n\s+gKiosk = FALSE;\n\s+gKioskBy = 0;\n\s+llMessageLinked\(LINK_SET, MSG_KIOSK, "\?", NULL_KEY\);\n\s+hover\(\);\n\s+pace\(\);/)
+    // "here" says a kiosk shows the state, anything else ("away") that it
+    // doesn't; the "?" is the info script's own, sent to the whole object.
+    expect(info).toMatch(/if \(n == MSG_KIOSK\)\n\s+\{\n\s+if \(str == "\?"\) return;\n\s+integer was = gKiosk;\n\s+gKiosk = str == "here";\n\s+gKioskBy = 0;\n\s+if \(gKiosk != was\) hover\(\);\n\s+pace\(\);\n\s+return;/)
+    expect(all(info, /gKiosk = ([^;]+);/g).sort()).toEqual(['FALSE', 'FALSE', 'str == "here"'])
     // The kiosk says it is here only once its face has taken the page,
-    // since until then nothing shows what the floating text leaves out.
+    // since until then nothing shows what the floating text leaves out;
+    // then it answers every state, "away" when its face refused it.
     expect(kiosk).toContain('if (str == "?" && gLive) llMessageLinked(LINK_SET, MSG_KIOSK, "here", NULL_KEY);')
-    expect(body(kiosk, 'show()')).toMatch(/gShown = url;\n\s+if \(!gLive\)\n\s+\{\n\s+gLive = TRUE;\n\s+llMessageLinked\(LINK_SET, MSG_KIOSK, "here", NULL_KEY\);/)
-    expect(all(kiosk, /llMessageLinked\(LINK_SET, MSG_KIOSK, "(\w+)"/g)).toEqual(['here', 'here'])
+    expect(all(kiosk, /llMessageLinked\(LINK_SET, MSG_KIOSK, "(\w+)"/g).sort()).toEqual(['away', 'here', 'here'])
+    expect(all(kiosk, /gLive = (\w+);/g).sort()).toEqual(['FALSE', 'TRUE'])
+    // A state the kiosk doesn't answer in KIOSK_WAIT seconds puts the date
+    // and the credit back. The wait starts at the first state unanswered,
+    // so states that keep coming can't put it off, and the timer runs
+    // while it waits.
+    const state = info.slice(info.indexOf('if (n != MSG_STATE) return;'), info.indexOf('    http_response('))
+    expect(state).toMatch(/if \(gKiosk && !gKioskBy\) gKioskBy = llGetUnixTime\(\) \+ KIOSK_WAIT;\n\s+hover\(\);\n\s+pace\(\);/)
+    const timer = info.slice(info.indexOf('    timer()'), info.indexOf('    listen('))
+    expect(timer).toMatch(/if \(gKioskBy && llGetUnixTime\(\) >= gKioskBy\)\n\s+\{\n\s+gKiosk = FALSE;\n\s+gKioskBy = 0;\n\s+\}\n\s+hover\(\);\n\s+pace\(\);/)
+    expect(Number(constant(info, 'integer', 'KIOSK_WAIT'))).toBe(10)
+    // Longer than the kiosk's slowest answer: the gathering wait, then a
+    // refused address, the clearing and the second try, a second each, and a
+    // state that arrives during the once-a-start fit waits out its four
+    // calls, a fifth of a second each. Whole seconds and a 2 s timer can
+    // make the wait a second short.
+    const gather = Number(/gWant = a;\n(?:\s+\/\/[^\n]*\n)*\s+llSetTimerEvent\(([\d.]+)\);/.exec(kiosk)?.[1])
+    expect(gather).toBeGreaterThan(0)
+    expect(kiosk.match(/llSetPrimMediaParams\(|llClearPrimMedia\(/g)).toHaveLength(3)
+    expect(gather + 3 * 1 + 4 * 0.2).toBeLessThan(Number(constant(info, 'integer', 'KIOSK_WAIT')) - 1)
+    expect(all(info, /(gKioskBy = [^;]+);/g).sort()).toEqual(['gKioskBy = 0', 'gKioskBy = 0', 'gKioskBy = 0', 'gKioskBy = llGetUnixTime() + KIOSK_WAIT'])
     // What goes, before the lines are laid out: the date and the credit.
     // The title stays, for a visitor whose viewer shows no media, and so
     // do the telemetry notice the privacy policy asks for, a talk and how
@@ -1672,6 +1696,38 @@ describe("the exhibit's kiosk screen", () => {
     expect(ds.thumbnail).toMatch(/^https:\/\//)
     expect(ds.credit).toBe(card.credit)
     expect(ds.credit).not.toBe('')
+    expect(ds.license).toBe(card.license)
+    expect(ds.licenseText).toBe(card.licenseText)
+    const read = (over: Partial<ReturnType<typeof fullRow>>) => {
+      const r = { ...row, ...over }
+      const c = buildCard({ row: r, kind: 'video', showable: true, tags: [] } as Parameters<typeof buildCard>[0], { seconds: 96.5, settled: true })
+      const w = serializeDataset(
+        r,
+        { tags: [], categories: [], keywords: [], developers: [], related: [] },
+        { node_id: 'N', display_name: 'N', base_url: 'https://n.example', description: null, contact_email: null, public_key: 'k', created_at: T },
+      )
+      return { card: c, ds: kioskDatasetFrom(json(c), json(w), 'https://n.example/') }
+    }
+    // Whatever the card's own parser makes of a credit, the screen says the
+    // same, so the screen and the in-world text credit one party alike:
+    // an autolink, an entity with no semicolon, words in adjacent tags.
+    for (const attribution_text of ['<https://noaa.gov>', 'NOAA&nbsp GSL', '<cite>NOAA</cite><cite>GSL</cite>', 'A &auml; B']) {
+      const { card: c, ds: d } = read({ attribution_text })
+      expect(d.credit, attribution_text).toBe(c.credit)
+    }
+    // An address the card won't show isn't shown on the screen either.
+    for (const license_url of ['https:\\\\noaa.gov\\lic', 'https:noaa.gov/x']) {
+      const { card: c, ds: d } = read({ license_url })
+      expect(d.licenseText, license_url).toBe(c.licenseText)
+    }
+    // Past the card's 200 and 400 bytes, the screen has the whole of each.
+    const credit = 'NOAA Global Systems Laboratory, '.repeat(10) + 'and partners.'
+    const statement = 'Free to use, with credit, ' + 'and so on, '.repeat(40) + 'the end.'
+    const long = read({ attribution_text: credit, license_statement: statement })
+    expect(long.card.credit.endsWith('...')).toBe(true)
+    expect(long.ds.credit).toBe(credit)
+    expect(long.card.licenseText).toMatch(/\.\.\. https:\/\/creativecommons\.org\/licenses\/by\/4\.0\/$/)
+    expect(long.ds.licenseText).toBe(`${statement} https://creativecommons.org/licenses/by/4.0/`)
     expect(ds.startTime?.toISOString()).toBe('2024-06-01T12:00:00.000Z')
     expect(ds.endTime?.toISOString()).toBe('2024-11-30T12:00:00.000Z')
     // A dataset the card says the globe can't show is refused.

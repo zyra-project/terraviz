@@ -2782,7 +2782,11 @@ Order, each step usable on its own:
    The info script asks whether a kiosk is there when it starts and
    when a prim is linked or unlinked (`MSG_KIOSK`, 271012), the kiosk
    answers only once its face has taken the page, and the date stops
-   being worked out every couple of seconds while one does.
+   being worked out every couple of seconds while one does. The kiosk
+   answers each of the globe's states as well, "here" or "away", and a
+   state unanswered for ten seconds puts the date and the credit back,
+   so a kiosk script that stops can't leave them missing beside a screen
+   that no longer follows the globe (from Copilot's review of #507).
 3. **The console's tap buttons.** No page change.
 4. **Motion.** One page PR (§7 item 10, with its grammar), then the hold
    buttons and the seat, under the sphere and inside it. The Phase 2

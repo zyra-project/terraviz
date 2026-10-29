@@ -595,11 +595,15 @@ stand at the globe.
     `/9 spin 0`: the screen should stay where it is throughout. Take
     the object into your inventory and rez it again: the screen should
     face the way it did. Then `/9 memory`: the info script's most is
-    the number to report, since the kiosk added to it. Unlink the
-    screen: the full floating text should come back at once, and after
-    ten seconds the kiosk script should tell you that no globe answered.
-    Say which viewer showed the screen, and whether text on it is
-    readable from where a visitor stands.
+    the number to report, since the kiosk added to it. Stop the kiosk
+    script (untick Running in its window) and pause the globe: within
+    about ten seconds the date and the credit should come back to the
+    floating text. Tick Running again and reset the script: they should
+    go again within a few seconds. Unlink the screen: the full floating
+    text should come back at once, and after ten seconds the kiosk
+    script should tell you that no globe answered. Say which viewer
+    showed the screen, and whether text on it is readable from where a
+    visitor stands.
 
 When you report results, say which viewer and version (Help → About)
 each avatar used, and what steps 2, 9, 11 and 12 showed.
@@ -627,12 +631,19 @@ each avatar used, and what steps 2, 9, 11 and 12 showed.
   the globe told only the scripts in the sphere what it shows, so a
   kiosk beside an older globe script hears nothing, and says so in chat
   after ten seconds. Update the globe script, and reset the kiosk script.
-- **Unlink a kiosk to retire it, rather than deleting its script.** The
-  info script asks whether a kiosk is there when it starts and when a
-  prim is linked or unlinked, so a kiosk script deleted, stopped or
-  stuck in a screen still linked leaves the floating text short of its
-  date and credit until the info script is reset or a prim is next
-  linked or unlinked.
+- **Update the kiosk and info scripts together.** From 29 October 2026
+  the info script expects the kiosk to answer each change of what the
+  globe shows. A kiosk script from before then answers only once, so
+  beside a newer info script the date and the credit come back to the
+  floating text ten seconds after the globe next changes, and stay.
+  That is safe, just untidy; updating both puts it right.
+- **Unlink a kiosk to retire it, rather than deleting its script.**
+  Unlinked, the floating text gets its date and credit back at once. A
+  kiosk script deleted or stopped in a screen still linked answers
+  nothing, so the floating text takes them back only when the globe
+  next changes what it shows and ten seconds pass with no answer; until
+  then the screen still shows the right page, but nothing will update
+  it.
 - **Keep the menu script out of the sphere.** In the sphere with the
   other four, its pages of the node's catalog would reach the info
   script too, which has little room to spare while it reads a card. So

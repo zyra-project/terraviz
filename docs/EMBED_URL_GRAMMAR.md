@@ -356,10 +356,13 @@ so a composer may hand it the globe's own fragment:
 - **What it reads:** the exhibit card, for the length, whether the
   globe can show it, the credit and the licence, and the record
   (`GET /api/v1/datasets/:id`), for the title, full abstract, thumbnail,
-  legend and colour scale. Any other read that fails is retried after
-  5 s, 30 s and 2 minutes, then every 5 minutes, while the address still
-  asks for that dataset. A read that lands after the address moved on
-  is dropped, a failure included.
+  legend and colour scale, and for the whole of a credit or licence
+  statement the card cut short. Only the node's own 404
+  (`{ "error": "not_found" }`) means it hasn't got the dataset. Any
+  other read that fails, or takes longer than 20 seconds, is retried
+  after 5 s, 30 s and 2 minutes, then every 5 minutes, while the address
+  still asks for that dataset. A read that lands after the address moved
+  on is dropped, a failure included.
 - **The query and the fragment are one parameter set**, as on the
   output page: keep a `#` for the whole session, so a change never
   reloads the page.

@@ -9,10 +9,18 @@
  * Two reads, because each has what the other lacks. The exhibit card
  * (`/api/exhibit/v1/datasets/:id`) has the clip's exact length, which is
  * the period every copy of the globe loops on, whether the globe can show
- * the dataset at all, and the credit and licence the node composes for
- * the in-world scripts. The record (`/api/v1/datasets/:id`) has the full
- * abstract, the thumbnail, the legend and the colour scale, which a 2 KB
- * card cuts or leaves out.
+ * the dataset at all, and the credit and licence as the in-world scripts
+ * show them. The record (`/api/v1/datasets/:id`) has the full abstract,
+ * the thumbnail, the legend and the colour scale, which a 2 KB card cuts
+ * or leaves out, and the full credit and licence where the card cut them.
+ *
+ * The length is the playlists' total, which is what the globe page loops
+ * on wherever it plays a stream through hls.js: every Second Life viewer,
+ * whose browser is Chromium. A browser with no Media Source Extensions
+ * plays HLS natively and loops on the element's own `duration`, which
+ * can differ by a frame; a globe there differs from every other copy of
+ * the globe as much as from the screen, so the screen keeps the period
+ * the others share.
  *
  * The abstract is made plain text here (`plainParagraphs`): the node's
  * SOS abstracts are HTML and the portal's Markdown, and the screen is
@@ -67,7 +75,7 @@ export interface KioskDataset {
   abstract: string[]
   thumbnail: string | null
   legend: KioskLegend | null
-  /** Who to credit, as the node composed it for the exhibit. */
+  /** Who to credit, as the node composed it for the exhibit, in full. */
   credit: string
   /** An SPDX id, or "". */
   license: string
@@ -126,17 +134,21 @@ const BLOCKS = new Set([
 /** A paragraph break in the text an HTML walk builds. */
 const BREAK = '\u0000'
 
-/** The text of an HTML abstract, parsed into an inert document: nothing
- *  in it runs or loads. */
+/** The text of an HTML abstract, parsed into a `<template>`'s inert
+ *  fragment: nothing in it runs or loads. The idiom `sanitizeHtml.ts`
+ *  uses, and for its reason; `DOMParser`'s document was measured fetching
+ *  nothing in Chromium too, but this one is the repo's. */
 function htmlText(source: string): string {
-  const doc = new DOMParser().parseFromString(source, 'text/html')
+  const template = document.createElement('template')
+  template.innerHTML = source
   const out: string[] = []
   const walk = (node: Node): void => {
     for (const child of Array.from(node.childNodes)) {
       if (child.nodeType === 3) out.push((child.textContent ?? '').replace(/\s+/g, ' '))
       else if (child.nodeType === 1) {
         const tag = (child as Element).tagName
-        if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'TEMPLATE') continue
+        // What a document would hold out of its body, or never show.
+        if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'TEMPLATE' || tag === 'TITLE' || tag === 'NOSCRIPT') continue
         const block = BLOCKS.has(tag)
         if (block) out.push(BREAK)
         walk(child)
@@ -144,8 +156,18 @@ function htmlText(source: string): string {
       }
     }
   }
-  walk(doc.body)
+  walk(template.content)
   return out.join('')
+}
+
+/** Whether `raw` reads as HTML: a tag or an entity. */
+function looksLikeHtml(raw: string): boolean {
+  return /<[a-z!/]|&(?:#\d+|#x[\da-f]+|[a-z]+);/i.test(raw) && typeof document !== 'undefined'
+}
+
+/** HTML's words, its paragraphs as one line. */
+function htmlLine(raw: string): string {
+  return htmlText(raw).replace(new RegExp(BREAK, 'g'), ' ').replace(/\s+/g, ' ').trim()
 }
 
 /** What Markdown marks up, taken off, keeping the words: a link's text,
@@ -172,9 +194,8 @@ function markdownText(line: string): string {
 export function plainParagraphs(source: string): string[] {
   const raw = source.trim()
   if (!raw) return []
-  const html = /<[a-z!/]|&(?:#\d+|#x[\da-f]+|[a-z]+);/i.test(raw) && typeof DOMParser !== 'undefined'
   const paragraphs: string[] = []
-  if (html) {
+  if (looksLikeHtml(raw)) {
     for (const part of htmlText(raw).split(BREAK)) {
       const words = part.replace(/\s+/g, ' ').trim()
       if (words) paragraphs.push(words)
@@ -202,15 +223,71 @@ export function plainParagraphs(source: string): string[] {
   return paragraphs
 }
 
+/** A field's words on one line, made plain as the card makes them: HTML
+ *  read for its text, anything else as written, its white space one space. */
+function plainLine(value: unknown): string {
+  const raw = text(value)
+  if (!raw) return ''
+  return looksLikeHtml(raw) ? htmlLine(raw) : raw.replace(/\s+/g, ' ')
+}
+
+/** How the card ends a value it cut (`cutProse` and `exhibitProse` in
+ *  functions/api/v1/_lib/exhibit-text.ts). */
+const CUT = '...'
+
+/**
+ * Who to credit and the licence: the card's, which the node composes for
+ * the in-world scripts (`buildCard` in functions/api/v1/_lib/exhibit-reads.ts),
+ * so the screen, the floating text and the chat credit the same party in
+ * the same words. The card cuts these to 200 and 400 bytes, a budget the
+ * screen doesn't share, so a value the card cut, which ends `...`, is read
+ * in full from the record instead: the credit by the card's order (the
+ * attribution, the rights holder, then the organization, the first with
+ * any words), and the licence's statement with the card's own address
+ * after it. A value read there is made plain by the browser rather than by
+ * the card's parser, which can space a word or decode an entity
+ * differently; the licence's id and address are always the card's, since
+ * the card checks them and never cuts them.
+ */
+function attributionFrom(card: Record<string, unknown>, record: Record<string, unknown>): Pick<KioskDataset, 'credit' | 'license' | 'licenseText'> {
+  let credit = text(card.credit)
+  if (credit.endsWith(CUT)) {
+    for (const field of [record.attributionText, record.rightsHolder, record.organization]) {
+      const words = plainLine(field)
+      if (words) { credit = words; break }
+    }
+  }
+  // The card's licence text is its statement, then its address; a
+  // statement the address left no room for is dropped whole.
+  const licence = text(card.licenseText)
+  const parts = /^(?:(.*) )?(https?:\/\/\S+)$/.exec(licence)
+  let statement = parts ? (parts[1] ?? '') : licence
+  const address = parts ? parts[2] : ''
+  const full = plainLine(record.licenseStatement)
+  if (full && (statement.endsWith(CUT) || (!statement && address))) statement = full
+  return {
+    credit,
+    license: text(card.license),
+    licenseText: [statement, address].filter(Boolean).join(' '),
+  }
+}
+
 /**
  * The kiosk's dataset from the node's card and record.
  *
- * The title, abstract and images come from the record, the credit,
- * licence, times and length from the card, so each field has one source.
- * A record without an id is refused, as the globe page refuses one, and
- * so is a dataset the card says the globe can't show (a tour, or a format
- * the globe page doesn't draw), since the globe then shows the live Earth
- * and the screen says what the globe shows.
+ * The title, abstract and images come from the record, in full, and the
+ * times and length from the card, which reads the length from the stream;
+ * the credit and licence from the card, unless it cut them
+ * (`attributionFrom`). A record without an id is refused, as the globe page
+ * refuses one, and so is a dataset the card says the globe can't show (a
+ * tour, or a format the globe page doesn't draw), since the globe then
+ * shows the live Earth and the screen says what the globe shows.
+ *
+ * What the screen names is what the globe was asked to show. Whether each
+ * visitor's copy of the globe loaded it, nothing in the exhibit can see,
+ * the floating text and the chat included: a copy whose media fails shows
+ * the live Earth and tries again, so a dataset whose media fails for
+ * everyone shows on the globe itself, where its owner sees it.
  */
 export function kioskDatasetFrom(card: Record<string, unknown>, record: Record<string, unknown>, base: string): KioskDataset {
   const id = text(record.id)
@@ -232,9 +309,7 @@ export function kioskDatasetFrom(card: Record<string, unknown>, record: Record<s
     abstract: plainParagraphs(typeof record.abstractTxt === 'string' ? record.abstractTxt : ''),
     thumbnail: imageAddress(record.thumbnailLink, base),
     legend,
-    credit: text(card.credit),
-    license: text(card.license),
-    licenseText: text(card.licenseText),
+    ...attributionFrom(card, record),
     kind: text(card.kind),
     startTime: instant(card.startTime),
     endTime: instant(card.endTime),
@@ -245,38 +320,72 @@ export function kioskDatasetFrom(card: Record<string, unknown>, record: Record<s
   }
 }
 
-async function getJson(fetchFn: FetchFn, url: string, what: string): Promise<Record<string, unknown>> {
+/** How long a read may take, its body included, before it counts as no
+ *  answer and is tried again: a card can wait on the node reading a
+ *  stream's playlists, which takes seconds, never this long. */
+export const KIOSK_READ_TIMEOUT_MS = 20_000
+
+async function readJson(fetchFn: FetchFn, url: string, what: string, signal: AbortSignal): Promise<Record<string, unknown>> {
   let res: Response
   try {
-    res = await fetchFn(url, { headers: { Accept: 'application/json' } })
+    res = await fetchFn(url, { headers: { Accept: 'application/json' }, signal })
   } catch {
     throw new KioskDataError('network', `${what}: no answer`)
   }
-  if (res.status === 404) throw new KioskDataError('not_found', `${what} not found`)
-  if (!res.ok) throw new KioskDataError('http', `${what}: HTTP ${res.status}`)
-  let body: unknown
-  try {
-    body = await res.json()
-  } catch {
-    throw new KioskDataError('bad_response', `${what} was not JSON`)
+  const json = (): Promise<unknown> => res.json().catch(() => undefined)
+  // Only the node's own 404, which says so in its JSON, means there is no
+  // such dataset: anything between here and the node can answer 404, as
+  // the info script knows too. Any other is tried again, and an error's
+  // body is not waited for.
+  if (res.status === 404) {
+    const body = await json()
+    if (isRecord(body) && body.error === 'not_found') throw new KioskDataError('not_found', `${what} not found`)
   }
+  if (!res.ok) throw new KioskDataError('http', `${what}: HTTP ${res.status}`)
+  const body = await json()
+  if (body === undefined) throw new KioskDataError('bad_response', `${what} was not JSON`)
   if (!isRecord(body)) throw new KioskDataError('bad_response', `${what} was not an object`)
   return body
 }
 
-/** Read dataset `id`'s card and record from the node, both at once. */
+/**
+ * Read dataset `id`'s card and record from the node, both at once.
+ *
+ * The two have one deadline, `timeoutMs`, bodies and all: a read not
+ * finished by then is no answer, and the page tries again, rather than
+ * waiting on a stalled connection for good with "Loading…" on the screen.
+ * The deadline is raced as well as passed as the abort signal, so a fetch
+ * that ignores the signal can't hold it, and when either read fails the
+ * other is aborted, since the dataset is read again whole.
+ */
 export async function fetchKioskDataset(
   id: string,
-  opts: { fetchFn?: FetchFn; apiBase?: string; base: string },
+  opts: { fetchFn?: FetchFn; apiBase?: string; base: string; timeoutMs?: number },
 ): Promise<KioskDataset> {
   const fetchFn = opts.fetchFn ?? ((url, init) => fetch(url, init))
   const apiBase = opts.apiBase ?? ''
+  const timeoutMs = opts.timeoutMs ?? KIOSK_READ_TIMEOUT_MS
   const path = encodeURIComponent(id)
-  const [card, record] = await Promise.all([
-    getJson(fetchFn, `${apiBase}/api/exhibit/v1/datasets/${path}`, `card for ${id}`),
-    getJson(fetchFn, `${apiBase}/api/v1/datasets/${path}`, `dataset ${id}`),
-  ])
-  return kioskDatasetFrom(card, record, opts.base)
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new KioskDataError('network', `dataset ${id}: no answer in ${timeoutMs / 1000} s`)), timeoutMs)
+  })
+  try {
+    const [card, record] = await Promise.race([
+      Promise.all([
+        readJson(fetchFn, `${apiBase}/api/exhibit/v1/datasets/${path}`, `card for ${id}`, controller.signal),
+        readJson(fetchFn, `${apiBase}/api/v1/datasets/${path}`, `dataset ${id}`, controller.signal),
+      ]),
+      deadline,
+    ])
+    return kioskDatasetFrom(card, record, opts.base)
+  } catch (err) {
+    controller.abort()
+    throw err
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 /**

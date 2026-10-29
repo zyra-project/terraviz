@@ -9,6 +9,7 @@ import {
   fetchKioskDataset,
   imageAddress,
   KioskDataError,
+  KIOSK_READ_TIMEOUT_MS,
   kioskDate,
   kioskDatasetFrom,
   kioskWhen,
@@ -59,7 +60,7 @@ const clock = (over: Partial<WebClock> = {}): WebClock => ({ positionS: 0, atUni
 const range = (a: string, b: string) => new RegExp(`^${a}\\s?–\\s?${b}$`)
 
 describe('kioskDatasetFrom', () => {
-  it('takes the text and images from the record, and the credit, licence, times and length from the card', () => {
+  it('takes the text and images from the record, and the times and length from the card', () => {
     const ds = kioskDatasetFrom(CARD, RECORD, BASE)
     expect(ds).toMatchObject({
       id: 'DS1',
@@ -78,6 +79,44 @@ describe('kioskDatasetFrom', () => {
     })
     expect(ds.startTime?.toISOString()).toBe('2024-01-01T00:00:00.000Z')
     expect(ds.endTime?.toISOString()).toBe('2024-01-11T00:00:00.000Z')
+  })
+
+  it("credits as the card does, and reads a value the card cut in full from the record", () => {
+    const long = 'Data: ' + 'NOAA Global Systems Laboratory, '.repeat(12) + 'and partners.'
+    const record = {
+      ...RECORD,
+      attributionText: `<p>${long}</p>`,
+      rightsHolder: 'Not this one',
+      licenseSpdx: 'Not the card’s',
+      licenseStatement: 'Free to use,\n  no rights reserved, ' + 'and so on, '.repeat(40) + 'the end.',
+      licenseUrl: 'https:\\\\not.the.card\\l',
+    }
+    // A card that cut nothing is the screen's, word for word, whatever the
+    // record holds: the in-world text and the screen agree.
+    expect(kioskDatasetFrom(CARD, record, BASE)).toMatchObject({
+      credit: 'NOAA',
+      license: 'CC-BY-4.0',
+      licenseText: 'Use freely https://example.org/l',
+    })
+    // A credit the card cut is read in full, by the card's order.
+    const cut = kioskDatasetFrom({ ...CARD, credit: 'Data: NOAA Global Systems Laboratory, NOAA Global...' }, record, BASE)
+    expect(cut.credit).toBe(long)
+    expect(new TextEncoder().encode(cut.credit).length).toBeGreaterThan(200)
+    expect(kioskDatasetFrom({ ...CARD, credit: 'Rights...' }, { ...RECORD, attributionText: '<br>', rightsHolder: 'NASA' }, BASE).credit).toBe('NASA')
+    // A record with nothing better keeps the card's cut.
+    expect(kioskDatasetFrom({ ...CARD, credit: 'Rights...' }, RECORD, BASE).credit).toBe('Rights...')
+    // A statement the card cut is read in full, with the card's own address
+    // after it; the id and the address are always the card's.
+    const licence = kioskDatasetFrom({ ...CARD, licenseText: 'Free to use, no rights... https://example.org/l' }, record, BASE)
+    expect(licence.licenseText).toMatch(/^Free to use, no rights reserved, and so on, .* the end\. https:\/\/example\.org\/l$/)
+    expect(licence.license).toBe('CC-BY-4.0')
+    // ... and a statement the address left no room for, which the card drops whole.
+    expect(kioskDatasetFrom({ ...CARD, licenseText: 'https://example.org/l' }, { ...RECORD, licenseStatement: 'Terms' }, BASE).licenseText)
+      .toBe('Terms https://example.org/l')
+    // A cut statement with no address, and an address with no statement.
+    expect(kioskDatasetFrom({ ...CARD, licenseText: 'Free to use...' }, { ...RECORD, licenseStatement: 'Free to use, always.' }, BASE).licenseText)
+      .toBe('Free to use, always.')
+    expect(kioskDatasetFrom({ ...CARD, licenseText: 'https://example.org/l' }, RECORD, BASE).licenseText).toBe('https://example.org/l')
   })
 
   it('draws a data-encoded dataset its colour bar, in readable units, rather than any image', () => {
@@ -135,6 +174,10 @@ describe('plainParagraphs', () => {
     ])
   })
 
+  it("leaves out what a document would hold out of its body, or never show", () => {
+    expect(plainParagraphs('<title>Page</title><p>Words</p><noscript>Turn on scripts</noscript><style>p{}</style>')).toEqual(['Words'])
+  })
+
   it('runs nothing in the HTML it reads', () => {
     expect(plainParagraphs('<p>Safe</p><script>window.ran = true</script><img src=x onerror="window.ran = true">')).toEqual(['Safe'])
     expect((window as unknown as { ran?: boolean }).ran).toBeUndefined()
@@ -177,6 +220,71 @@ describe('fetchKioskDataset', () => {
     expect(await fail(async () => answer('oops', 500))).toMatchObject({ failure: 'http' })
     expect(await fail(async () => answer('<html>'))).toMatchObject({ failure: 'bad_response' })
     expect(await fail(async () => { throw new TypeError('offline') })).toMatchObject({ failure: 'network' })
+  })
+
+  it("takes only the node's own 404 as no such dataset, and tries any other again", async () => {
+    const fail = (fetchFn: (url: string) => Promise<Response>) => fetchKioskDataset('X', { fetchFn, base: BASE }).catch((e: unknown) => e)
+    // A proxy's page, a route not deployed yet, another error's envelope.
+    expect(await fail(async () => answer('<html>Not Found</html>', 404))).toMatchObject({ failure: 'http' })
+    expect(await fail(async () => answer('', 404))).toMatchObject({ failure: 'http' })
+    expect(await fail(async () => answer({ error: 'no_route' }, 404))).toMatchObject({ failure: 'http' })
+  })
+
+  describe('a read that stalls', () => {
+    afterEach(() => vi.useRealTimers())
+
+    it('is no answer once its deadline passes, and is aborted', async () => {
+      vi.useFakeTimers()
+      const signals: AbortSignal[] = []
+      const fetchFn = vi.fn((_url: string, init?: RequestInit) => {
+        if (init?.signal) signals.push(init.signal)
+        return new Promise<Response>(() => {})
+      })
+      const read = fetchKioskDataset('X', { fetchFn, base: BASE, timeoutMs: 5_000 }).catch((e: unknown) => e)
+      await vi.advanceTimersByTimeAsync(4_999)
+      expect(signals.every((s) => !s.aborted)).toBe(true)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(await read).toMatchObject({ failure: 'network' })
+      expect(signals).toHaveLength(2)
+      expect(signals.every((s) => s.aborted)).toBe(true)
+    })
+
+    it('counts its body, and holds even against a fetch that ignores the signal', async () => {
+      vi.useFakeTimers()
+      // Headers come back; the body never finishes.
+      const stalled = { status: 200, ok: true, json: () => new Promise(() => {}) } as unknown as Response
+      const read = fetchKioskDataset('X', { fetchFn: async () => stalled, base: BASE, timeoutMs: 5_000 }).catch((e: unknown) => e)
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(await read).toMatchObject({ failure: 'network' })
+    })
+
+    it('leaves no timer behind when the reads finish', async () => {
+      vi.useFakeTimers()
+      const fetchFn = async (url: string) => (url.includes('/exhibit/') ? answer(CARD) : answer(RECORD))
+      await fetchKioskDataset('X', { fetchFn, base: BASE, timeoutMs: 5_000 })
+      expect(vi.getTimerCount()).toBe(0)
+    })
+
+    it('aborts the other read when one fails, and waits on no error page', async () => {
+      vi.useFakeTimers()
+      const signals: AbortSignal[] = []
+      const stalled = { status: 503, ok: false, json: () => new Promise(() => {}) } as unknown as Response
+      const fetchFn = (url: string, init?: RequestInit): Promise<Response> => {
+        if (init?.signal) signals.push(init.signal)
+        // The card's route is down, its error page never finishing; the record never answers.
+        return url.includes('/exhibit/') ? Promise.resolve(stalled) : new Promise<Response>(() => {})
+      }
+      const read = fetchKioskDataset('X', { fetchFn, base: BASE, timeoutMs: 5_000 }).catch((e: unknown) => e)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(await read).toMatchObject({ failure: 'http' })
+      expect(signals).toHaveLength(2)
+      expect(signals.every((s) => s.aborted)).toBe(true)
+      expect(vi.getTimerCount()).toBe(0)
+    })
+
+    it('is twenty seconds unless told otherwise', () => {
+      expect(KIOSK_READ_TIMEOUT_MS).toBe(20_000)
+    })
   })
 })
 

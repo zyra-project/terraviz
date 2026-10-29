@@ -33,7 +33,11 @@
 // them in full, and keeps the title for a visitor whose viewer shows no
 // media. It asks whether a kiosk is linked when it starts and when a prim
 // is linked or unlinked, and this script answers once its face has taken
-// the page, and says so then itself.
+// the page, and says so then itself. It answers the globe's states too,
+// the latest of each burst that comes together, "here" once the face
+// shows it, "away" if Second Life refused it, and the info script puts
+// the date and the credit back when a state goes unanswered, so a screen
+// left behind by a stopped or deleted script doesn't take them with it.
 //
 // Link the screen as the root of the build, with the sphere a child: the
 // globe script turns the prim it is in, and as the root it would swing
@@ -63,7 +67,7 @@ integer FACE = 1;
 // holds them to it.
 integer MSG_STATE = 271001;  // globe to all: what the globe shows, as JSON
 integer MSG_HELLO = 271003;  // any to globe: say the state again (a script reset)
-integer MSG_KIOSK = 271012;  // info and kiosk: "?" asks whether a kiosk is linked, "here" says one is
+integer MSG_KIOSK = 271012;  // info and kiosk: "?" asks whether a kiosk is linked, "here" says one shows the state, "away" that it doesn't
 
 // The page draws one fixed layout this size, the largest Second Life
 // gives a face (indra/llprimitive/llmediaentry.h).
@@ -75,7 +79,8 @@ float   WAIT = 10.0;
 
 string  gWant;          // the address the globe's latest state calls for
 string  gShown;         // the address on the face
-integer gLive;          // the face has taken the page, so the floating text can leave it the title's company
+integer gLive;          // the face shows what the latest state answered called for, so the floating text can leave it the title's company
+integer gTold;          // the owner has been told which face, since the script started
 integer gPrims;         // the object's prims, not counting anyone sitting on it
 
 // The globe script's num(), which exhibit.test.ts holds equal to it: a
@@ -177,45 +182,55 @@ string fit()
 // media is cleared, list and all, and set once more. The call sleeps this
 // script for a second, and a clearing for another. Only an address the
 // face took counts as shown, so one refused is tried again with the next
-// state; and the info script is told a kiosk is here only once a face has
-// taken one, since until then nothing shows what it would leave out. The
-// owner is told then which face it is, since a page on a face nobody can
-// see looks like no page at all, what fit() changed, and whether the
-// face's colour or a PBR material, which draws the page with its own
-// settings, would spoil it: those are left as they are, since they may be
-// meant.
+// state.
+//
+// The latest state of each burst is answered, once the face shows it or
+// Second Life refused it: "here" tells the info script it may leave the date and the credit
+// to the screen, "away" that it may not, since the screen still shows the
+// state before. Until a face has taken a page, nothing shows what the
+// floating text would leave out, so nothing says "here". The first time
+// after the script starts, the owner is told which face it is, since a
+// page on a face nobody can see looks like no page at all, what fit()
+// changed, and whether the face's colour or a PBR material, which draws
+// the page with its own settings, would spoil it: those are left as they
+// are, since they may be meant.
 show()
 {
     llSetTimerEvent(0.0);
-    if (gWant == gShown) return;
-    string url = gWant;
-    list p = [PRIM_MEDIA_WHITELIST_ENABLE, FALSE,
-        PRIM_MEDIA_CURRENT_URL, url, PRIM_MEDIA_HOME_URL, url,
-        PRIM_MEDIA_AUTO_PLAY, TRUE,
-        PRIM_MEDIA_AUTO_SCALE, FALSE,
-        PRIM_MEDIA_AUTO_ZOOM, FALSE,
-        PRIM_MEDIA_FIRST_CLICK_INTERACT, FALSE,
-        PRIM_MEDIA_WIDTH_PIXELS, MEDIA_W,
-        PRIM_MEDIA_HEIGHT_PIXELS, MEDIA_H,
-        PRIM_MEDIA_PERMS_INTERACT, PRIM_MEDIA_PERM_NONE,
-        PRIM_MEDIA_PERMS_CONTROL, PRIM_MEDIA_PERM_NONE];
-    integer r = llSetPrimMediaParams(FACE, p);
-    if (r == STATUS_WHITELIST_FAILED)
+    if (gWant != gShown)
     {
-        llClearPrimMedia(FACE);
-        r = llSetPrimMediaParams(FACE, p);
+        string url = gWant;
+        list p = [PRIM_MEDIA_WHITELIST_ENABLE, FALSE,
+            PRIM_MEDIA_CURRENT_URL, url, PRIM_MEDIA_HOME_URL, url,
+            PRIM_MEDIA_AUTO_PLAY, TRUE,
+            PRIM_MEDIA_AUTO_SCALE, FALSE,
+            PRIM_MEDIA_AUTO_ZOOM, FALSE,
+            PRIM_MEDIA_FIRST_CLICK_INTERACT, FALSE,
+            PRIM_MEDIA_WIDTH_PIXELS, MEDIA_W,
+            PRIM_MEDIA_HEIGHT_PIXELS, MEDIA_H,
+            PRIM_MEDIA_PERMS_INTERACT, PRIM_MEDIA_PERM_NONE,
+            PRIM_MEDIA_PERMS_CONTROL, PRIM_MEDIA_PERM_NONE];
+        integer r = llSetPrimMediaParams(FACE, p);
+        if (r == STATUS_WHITELIST_FAILED)
+        {
+            llClearPrimMedia(FACE);
+            r = llSetPrimMediaParams(FACE, p);
+        }
+        if (r != STATUS_OK)
+        {
+            llOwnerSay("[exhibit] Kiosk: Second Life refused the media on face " + (string)FACE + " (status "
+                + (string)r + "). Set FACE, at the top of the kiosk script, to the screen's face.");
+            gLive = FALSE;
+            llMessageLinked(LINK_SET, MSG_KIOSK, "away", NULL_KEY);
+            return;
+        }
+        gShown = url;
     }
-    if (r != STATUS_OK)
+    gLive = TRUE;
+    llMessageLinked(LINK_SET, MSG_KIOSK, "here", NULL_KEY);
+    if (!gTold)
     {
-        llOwnerSay("[exhibit] Kiosk: Second Life refused the media on face " + (string)FACE + " (status "
-            + (string)r + "). Set FACE, at the top of the kiosk script, to the screen's face.");
-        return;
-    }
-    gShown = url;
-    if (!gLive)
-    {
-        gLive = TRUE;
-        llMessageLinked(LINK_SET, MSG_KIOSK, "here", NULL_KEY);
+        gTold = TRUE;
         string say = "[exhibit] Kiosk: showing the page on face " + (string)FACE + "." + fit();
         list c = llGetPrimitiveParams([PRIM_COLOR, FACE, PRIM_RENDER_MATERIAL, FACE]);
         if (llList2Vector(c, 0) != <1.0, 1.0, 1.0> || llList2Float(c, 1) < 1.0)
@@ -272,7 +287,8 @@ default
         gWant = a;
         // A moment's wait gathers changes that come together into one, since
         // each change of the face's media sleeps this script for a second.
-        if (gWant != gShown) llSetTimerEvent(0.2);
+        // A state that changes nothing on the face is answered then too.
+        llSetTimerEvent(0.2);
     }
 
     timer()
