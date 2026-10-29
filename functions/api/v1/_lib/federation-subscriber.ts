@@ -22,10 +22,9 @@
  * `last_sync_error`.
  *
  * **What is mirrored.** Each dataset as the wire carried it, keyed by
- * `(peer, id)`, with the `originNode` the peer claims for it (the
- * peer's own id when it claims none). That claim is the peer's
- * statement and is stored as one, not checked against a third node:
- * the only key this node holds is the peer's.
+ * `(peer, id)`, with `originNode` required to equal the pinned peer's
+ * own id. Missing origins and claims about a third node are refused:
+ * v1 has no relaying, and the only key this node holds is the peer's.
  *
  * **Full sync.** A pull with no stored cursor, or one asked for as
  * full, starts from the beginning of the feed and is authoritative

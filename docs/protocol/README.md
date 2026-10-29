@@ -182,7 +182,14 @@ the contract is here, because a schema cannot carry it.
   limit is a 400. Omit `since` for a full sync: `since=` is invalid.
   New parameters require discovery advertisement before clients send
   them. A reader stores `cursor` and
-  sends it back unchanged; its encoding is not part of the contract.
+  sends it back unchanged; its internal encoding is not part of the
+  contract, but its wire alphabet is: `^[A-Za-z0-9._~-]{1,512}$`.
+  Standard base64 cursors containing `+`, `/` or `=` are not accepted.
+  Node ids (`node_id` and `originNode`), dataset `id` values and
+  tombstone ids must match `^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`
+  (1 to 128 characters, starting with an ASCII letter or digit).
+  A page's datasets plus tombstones must not exceed the requested
+  `limit`; the subscriber refuses the whole page otherwise.
 - **Settled, not live.** A page holds rows changed up to
   `generated_at`, which trails the clock by 30 seconds so a row
   stamped before commit is unlikely to slip behind the cursor. This
@@ -223,7 +230,13 @@ the contract is here, because a schema cannot carry it.
   600 requests per source IP per minute, before D1 work, then returns
   429 `rate_limited` and `Retry-After: 60`. This is not a global quota:
   configure edge/WAF limits for deployment-wide abuse protection. The
-  `(visibility, updated_at, id)` index bounds the scan range.
+  limiter tracks at most 10,000 active addresses per isolate; when
+  full, it refuses new callers until entries expire, so a flood can
+  also lock out real peers for up to a minute. Requests without
+  `CF-Connecting-IP` share one `unknown` bucket (notably off Cloudflare).
+  The 600/minute limit still permits substantial D1 load; operators
+  should set tighter edge limits for their peers' expected pull rate.
+  The `(visibility, updated_at, id)` index bounds the scan range.
 
 ### Signature Bytes And Version Rules
 

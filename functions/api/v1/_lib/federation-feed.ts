@@ -58,7 +58,7 @@ const MAX_POSITION_FIELD = 128
 /** The response body of `GET /api/v1/federation/feed`. Pinned as
  *  `public/schema/v1/feed.schema.json`. */
 export interface FederationFeedBody {
-  schema_version: number
+  schema_version: 1
   /** The signing node's `node_id`; equals the signature's key id. */
   node_id: string
   /** The settle watermark this page was read up to (ISO 8601). */
@@ -68,7 +68,7 @@ export interface FederationFeedBody {
   /** More rows are already waiting below the watermark; pull again now. */
   has_more: boolean
   datasets: WireDataset[]
-  /** Ids of public rows that were hidden or retracted. */
+  /** Ids of public, non-hidden rows that were retracted. */
   tombstones: string[]
 }
 

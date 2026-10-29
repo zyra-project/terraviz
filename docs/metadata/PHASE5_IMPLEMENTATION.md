@@ -166,6 +166,11 @@ mirrored rows (404 `peer_not_found`, audited as
 `federation_peer.remove`). All are admin-only and 404 unless
 federation is enabled.
 
+At 25 entries per request, a full sync of a roughly 600-row peer takes
+about 24 manual requests. Repeat until `complete: true`, then allow
+the deferred sweep window and complete an incremental pull; the
+scheduler is still deferred.
+
 ## Step 6: Conformance
 
 `functions/api/v1/federation/conformance.test.ts` runs the publisher

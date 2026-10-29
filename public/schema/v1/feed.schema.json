@@ -5,7 +5,8 @@
   "type": "object",
   "properties": {
     "schema_version": {
-      "type": "number"
+      "type": "number",
+      "const": 1
     },
     "node_id": {
       "type": "string"
