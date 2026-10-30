@@ -341,8 +341,8 @@ function manifestLink(baseUrl: string, datasetId: string): string {
  * Grouped in a `Map`, never by indexing an object literal: a facet
  * name is publisher text, and on `{}` a name like `toString`,
  * `valueOf` or `__proto__` reads an inherited member rather than
- * `undefined`. The old `out[facet] ?? []` then called `push` on a
- * function and threw, so one author's dataset took down
+ * `undefined`. The old `out[facet] ?? []` then called `push` on what
+ * it found and threw, so one author's dataset took down
  * `/api/v1/catalog` for every visitor. `Object.fromEntries` writes
  * each facet as an own property, `__proto__` included, so every name
  * the validator accepts comes back out unchanged. Shared with the
