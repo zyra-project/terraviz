@@ -249,4 +249,24 @@ describe('GET /api/v1/catalog', () => {
     const parsed = JSON.parse(body) as CatalogBody
     expect(parsed.datasets).toEqual([])
   })
+
+  // Regression: a facet named after an Object.prototype member made
+  // the serializer throw, so one author's dataset turned every visitor's
+  // catalog read into a 500.
+  it('serves a dataset whose category facet is named toString', async () => {
+    const sqlite = seedFixtures({ count: 1 })
+    const { id } = sqlite.prepare(`SELECT id FROM datasets LIMIT 1`).get() as { id: string }
+    sqlite
+      .prepare(`INSERT INTO dataset_categories (dataset_id, facet, value) VALUES (?, ?, ?)`)
+      .run(id, 'toString', 'Oddly named')
+    const env = { CATALOG_DB: asD1(sqlite), CATALOG_KV: makeKV() }
+
+    const res = await onRequestGet(makeCtx({ env }))
+    expect(res.status).toBe(200)
+    const body = await readJson<CatalogBody>(res)
+    expect(body.datasets[0].enriched?.categories).toEqual({
+      Theme: ['Climate'],
+      toString: ['Oddly named'],
+    })
+  })
 })
