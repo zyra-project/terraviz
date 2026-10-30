@@ -599,8 +599,9 @@ describe('runSetup — access step', () => {
       }),
     })
     expect(await runSetup(h.deps)).toBe(0)
-    expect(h.out()).toContain('needs changing by hand')
-    expect(h.out()).toContain('SameSite is unset')
+    expect(h.out()).toContain('application  Terraviz Publisher  adopted')
+    expect(h.out()).toMatch(/SameSite is not reported/)
+    expect(h.out()).toMatch(/HttpOnly is not reported/)
     expect(h.out()).toContain('SELF_HOSTING.md §6.2')
   })
 
@@ -621,8 +622,8 @@ describe('runSetup — access step', () => {
       }),
     })
     expect(await runSetup(h.deps)).toBe(0)
-    expect(h.out()).toContain('adopted')
-    expect(h.out()).not.toContain('needs changing by hand')
+    expect(h.out()).toContain('application  Terraviz Publisher  adopted')
+    expect(h.out()).not.toMatch(/SameSite|HttpOnly/)
   })
 
   it('says nothing about the cookie when it created the application', async () => {
@@ -633,8 +634,38 @@ describe('runSetup — access step', () => {
       fetchImpl: accessFetch(HAPPY),
     })
     expect(await runSetup(h.deps)).toBe(0)
-    expect(h.out()).toContain('created')
-    expect(h.out()).not.toContain('needs changing by hand')
+    expect(h.out()).toContain('application  Terraviz Publisher  created')
+    expect(h.out()).not.toMatch(/SameSite|HttpOnly/)
+  })
+
+  // SELF_HOSTING.md §6.2 tells a node with separate portal and API
+  // applications to name the API one here. Dropping the override
+  // would adopt or create the wrong application, and the bindings
+  // step would then deploy its AUD as ACCESS_AUD.
+  it('manages the application TERRAVIZ_ACCESS_APP_NAME names', async () => {
+    const seen: string[] = []
+    const h = harness({
+      argv: ['--only=access', '--apply'],
+      env: { CLOUDFLARE_API_TOKEN: 'tok', TERRAVIZ_ACCESS_APP_NAME: 'Terraviz API' },
+      files: { '.terraviz-setup.json': state },
+      fetchImpl: accessFetch(
+        {
+          ...HAPPY,
+          'GET /access/apps': [
+            { id: 'portal1', name: 'Terraviz Publisher', aud: 'AUD-PORTAL' },
+            { id: 'api1', name: 'Terraviz API', aud: 'AUD-API' },
+          ],
+          'GET /access/apps/api1/policies': [],
+          'POST /access/apps/api1/policies': { id: 'p', name: 'x', decision: 'allow' },
+        },
+        seen,
+      ),
+    })
+    expect(await runSetup(h.deps)).toBe(0)
+    const saved = JSON.parse(h.writes.get('.terraviz-setup.json')!)
+    expect(saved.accessAud).toBe('AUD-API')
+    expect(saved.accessAppId).toBe('api1')
+    expect(seen).not.toContain('POST /access/apps')
   })
 })
 

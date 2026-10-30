@@ -72,7 +72,11 @@ export interface AccessApp {
   /** The audience tag — `ACCESS_AUD`. Returned on create and list. */
   aud: string
   domain?: string
-  /** Absent when never set, which Cloudflare treats as `none`. */
+  /**
+   * As the API reports them. Whether a list response carries these
+   * fields has not been checked against a live account, so absent
+   * means "not reported", not "off".
+   */
   same_site_cookie_attribute?: string
   http_only_cookie_attribute?: boolean
 }
@@ -274,9 +278,12 @@ export interface AccessAppBody {
   app_launcher_visible: boolean
   /**
    * The `CF_Authorization` cookie is the publisher's credential for
-   * every write under `/api/v1/publish`, and Cloudflare's defaults do
-   * not suit it. SameSite defaults to `none`, which lets a browser send
-   * the cookie on a form POST another website starts; `lax` keeps it to
+   * every write under `/api/v1/publish`, so both attributes are set
+   * here rather than left to Cloudflare. (The project's own node had
+   * SameSite None and HttpOnly off.)
+   *
+   * SameSite defaults to `none`, which lets a browser send the cookie
+   * on a form POST another website starts. `lax` keeps the cookie to
    * requests from this site and to top-level links into it, which is
    * all the portal and its sign-in need. HttpOnly stops scripts on the
    * page from reading the token. Nothing in the app reads it from
@@ -313,7 +320,10 @@ export function buildAppBody(opts: {
 /**
  * Where an existing application's cookie settings fall short of what
  * {@link buildAppBody} sets, one line per gap, empty when there is
- * none. Strict passes: it is stricter than Lax, not wrong.
+ * none. Strict passes: an operator who set it chose something
+ * stricter, though it is untested with Access's sign-in redirect.
+ * A field the API did not report is a gap too, worded as unknown:
+ * a quiet run would read as "checked and fine".
  *
  * Adoption never edits an application. Cloudflare's update replaces
  * the whole configuration, and an application the operator built or
@@ -328,14 +338,14 @@ export function cookieSettingsGaps(app: AccessApp): string[] {
     gaps.push(
       sameSite
         ? `SameSite is ${sameSite}, not Lax`
-        : 'SameSite is unset, which Cloudflare treats as None',
+        : "SameSite is not reported (Cloudflare's default is None)",
     )
   }
   if (app.http_only_cookie_attribute !== true) {
     gaps.push(
       app.http_only_cookie_attribute === false
         ? 'HttpOnly is off'
-        : 'HttpOnly is not reported, so it may be off',
+        : 'HttpOnly is not reported',
     )
   }
   return gaps

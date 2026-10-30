@@ -1013,11 +1013,14 @@ middleware fails closed: without `ACCESS_TEAM_DOMAIN` and
 > discovers your team domain, creates the application with all six
 > destinations and its login cookie set as 6.2 describes, creates both
 > policies, mints the service token, and attaches it. It records the
-> AUD and prints the token pair once. An application that already
-> exists under the same name is adopted as it is, never edited. If its
-> cookie settings fall short, the run says so, and you change them by
-> hand. The click-by-click below is the reference for what it builds,
-> and the path to take if you would rather do it by hand.
+> AUD and prints the token pair once. If an application named
+> `Terraviz Publisher` (or the name in `TERRAVIZ_ACCESS_APP_NAME`)
+> already exists, the run adopts it. It leaves that application's
+> settings alone, adding only a `Staff` or `Automation` policy if one
+> by that name is missing. If its cookie settings fall short, the run
+> says so, and you change them by hand. The click-by-click below is
+> the reference for what it builds, and the path to take if you would
+> rather do it by hand.
 
 ## 6.1 Set up Zero Trust
 
@@ -1032,7 +1035,10 @@ setup; Google/Okta/Entra are better for a real team.
 ## 6.2 Create the publisher application
 
 This is the application whose audience tag becomes `ACCESS_AUD`.
-One application covers both the API and the browser portal.
+This guide uses one application for both the API and the browser
+portal, and that is what `npm run setup` builds. To run two, see
+[Two applications instead of one](#two-applications-instead-of-one)
+below.
 
 Zero Trust → **Access → Applications → Add an application →
 Self-hosted**:
@@ -1059,17 +1065,18 @@ Self-hosted**:
   2. **`Automation`** — Action **Service Auth**, Include →
      **Service Token** → *(the token from 6.3; come back and add it)*.
 
-> ⚠️ Use **"Emails ending in"**, not **"Emails"**. The latter is an
-> exact match against one address and is the single most common
-> Access misconfiguration.
-
-- **Cookie settings** — in the application's advanced settings
-  (on an existing application: **Configure → Advanced settings →
-  Cookie settings**):
+- **Cookie settings** — among the application's advanced settings.
+  On an application that already exists: **Configure → Advanced
+  settings → Cookie settings**.
   - **HTTP Only:** on.
   - **Same Site Attribute:** **Lax**.
   - **Enforce cookie path attribute:** leave off.
-- **App Launcher** — leave **Show application in App Launcher** off.
+- **App Launcher** — make sure **Show application in App Launcher**
+  is off.
+
+> ⚠️ Use **"Emails ending in"**, not **"Emails"**. The latter is an
+> exact match against one address and is the single most common
+> Access misconfiguration.
 
 After saving, open the application's **Overview** tab and copy the
 **Application Audience (AUD) Tag** — a 64-char hex string.
@@ -1087,75 +1094,118 @@ the token. The app never reads it from JavaScript; the server gets it
 from the request. Neither setting affects the `terraviz` CLI or the
 workflows, which authenticate with the service token's headers.
 
-Lax is the value that has been checked: the portal signs in and loads
-its data with it on the project's own node (2026-10-30). Strict is
-stricter, but untested here.
+"Your own site" is wider than one host. A browser counts every host
+under your registered domain as the same site, so a page on another
+host under `your-org.org` still gets the cookie sent. Each
+`pages.dev` project is a site of its own, but a branch preview such as
+`<branch>.<W10>.pages.dev` shares a site with `<W10>.pages.dev`. Lax
+closes the door to other websites, not to your own hosts. The publish
+routes don't yet check where a request came from. Until they do,
+anything served from another host under your domain, or from a branch
+preview, can act for a publisher who is signed in.
+
+Verified on the project's own node (`terraviz.zyra-project.org`) on
+2026-10-30. Both of its applications had SameSite None and HTTP Only
+off. With HTTP Only and Lax, the portal signs in and loads its data.
+The node's other cookie settings are **Enable Binding Cookie** off and
+**Eager redirect cookie** on. Strict is stricter, but untested here.
 
 **Why the App Launcher stays off.** The launcher tile is only a
 shortcut, and nothing here needs one. If you turn it on, choose
 **Default (first domain listed)**, or pick a URL from the list.
-**Use custom domain** with no URL selected refuses to save the
-application, along with any other change made in the same edit, the
-cookie settings included. On an application whose only destinations
-are `/api/v1/publish`, that URL list can be empty.
+**Use custom domain** with no URL selected makes the whole save fail,
+cookie changes in the same edit included. An application that covers
+only `/api/v1/publish` (see the two-application layout below) may
+offer no URL to pick, so choose **Default** there.
 
-### Checking an existing node
+### Checking the cookie
 
 `npm run setup` sets the cookie only on an application it creates.
-An application made before this step existed, by hand or by an older
-run, keeps whatever it was created with. The project's own node had
-SameSite None and HTTP Only off until 2026-10-30.
+An application created by hand, or by an earlier version of
+`npm run setup`, keeps the settings it was created with. Check a new
+node too: the setup script's request has not yet been run against a
+live account.
 
 To check:
 1. Sign in at `https://<W2>/publish` and open the **Datasets** page.
 2. In the browser's developer tools, open **Application → Cookies →
-   `https://<W2>`** and find `CF_Authorization`.
+   `https://<W2>`** (Firefox: **Storage → Cookies**) and find
+   `CF_Authorization`.
 3. **HttpOnly** should be ticked and **SameSite** should read **Lax**.
 
-If either is wrong, change the cookie settings above, sign out and
-back in, and check again. Do the same on the `pages.dev` host if
-publishers use it.
+If either is wrong, change the cookie settings above. Then delete
+`CF_Authorization` in the same developer-tools panel, or open a
+private window, and sign in again before you check. Signing out is not
+enough: it ends the Access session, but the cookie on your host can
+outlive it. Re-running `npm run setup -- --apply --only=access` also
+reports any gap in the application it manages.
 
 ### Two applications instead of one
 
 One application is simpler, and it's what `npm run setup` builds.
-The project's own node runs two instead:
+The project's own node runs two:
 
 | Application | Destinations, on `<W2>` and `<W10>.pages.dev` |
 |---|---|
 | Portal | `/publish`, `/publish/*` |
 | API | `/api/v1/publish` |
 
+It was split when an application was thought to hold only five
+destinations (`functions/api/v1/publish/redirect-back.ts` records
+why). Cloudflare's published limit is now 50 domains per application,
+so a new node has no reason to split.
+
 If you run two, four rules keep them working:
 
 1. **`ACCESS_AUD` (`W13`) is the API application's AUD.** The publish
-   middleware accepts a token from exactly one application. Every
-   request under `/api/v1/publish` carries the token of the
-   application that covers that path.
-2. **Both applications need the same cookie settings.** With
-   **Enforce cookie path attribute** off, both write a cookie named
-   `CF_Authorization` for the whole host. Whichever application signed
-   you in last decides its attributes, so hardening one alone can be
-   undone by the other.
+   middleware accepts a token from exactly one application, and
+   `/api/v1/publish` is the API application's path. On the project's
+   node, `ACCESS_AUD` holds the API application's AUD, and the portal
+   loads its data.
+2. **Every Access application on the host needs the same cookie
+   settings**, 6.4's included. With **Enforce cookie path attribute**
+   off, each one writes a cookie named `CF_Authorization` for the whole
+   host. Whichever application signed you in last decides its
+   attributes, so hardening one alone can be undone by another.
 3. **The Automation policy belongs on the API application.** The CLI,
    the transcode runner and the analytics export use the service token
    only on `/api/v1/publish`. Both applications need the Staff policy.
+   The exception is the live visual report
+   ([Reference B](#reference-b--cicd-workflow-matrix)), which
+   loads portal pages with the same token. If you use it, give the
+   portal application an Automation policy too.
 4. **Tell `npm run setup` which application to manage.** Set
    `TERRAVIZ_ACCESS_APP_NAME` to the API application's exact name
-   before you run the access step. Otherwise the step finds no
-   application named `Terraviz Publisher` and creates a third one whose
-   destinations overlap the other two. The bindings step then deploys
-   that application's AUD as `ACCESS_AUD`. The portal application is
-   yours to maintain by hand.
+   before you run the access step. Otherwise the step looks for an
+   application named `Terraviz Publisher`:
+   - If that is your portal application, the step adopts it and
+     records the portal's AUD. Every request under `/api/v1/publish`
+     then fails with 401.
+   - If neither application has that name, it tries to create a third,
+     with the same six destinations.
+
+   Either way, the next bindings step writes the wrong `ACCESS_AUD` to
+   both environments. Exporting `ACCESS_AUD` yourself does not prevent
+   this, because the access step overwrites it.
+
+   The step also matches policies and the token by name. If your
+   policies are not named `Staff` and `Automation`, it adds new ones,
+   including an Allow policy for everyone at
+   `TERRAVIZ_STAFF_EMAIL_DOMAIN`. If your token is not named
+   `terraviz-cli`, it mints a second one, unless
+   `TERRAVIZ_SERVICE_TOKEN_NAME` names yours. Rename your policies, or
+   leave the access step out on a node you built by hand. The portal
+   application is yours to maintain by hand either way.
 
 The project's node runs with **Enforce cookie path attribute** off.
 After a fresh sign-in, the portal's data pages load without the
-Refresh prompt (checked 2026-10-30). Turning the attribute on would
-give each application a cookie scoped to its own paths. That is
-Cloudflare's design for two applications on one host, but it's
-untested here. If you try it, sign in again and check the portal still
-loads its data. If the portal shows "Your session has expired", the
-two cookies are getting in each other's way.
+"Your session has expired" card. When a data request finds no cookie
+the API application accepts, the portal recovers by navigating once
+through `/api/v1/publish/redirect-back`, which you see as a brief
+reload. Turning the attribute on would give each application a cookie
+scoped to its own paths. That is Cloudflare's design for two
+applications on one host, but it's untested here. If you try it, sign
+in again and check that the portal still loads its data.
 
 ## 6.3 Mint the service token
 
@@ -1184,7 +1234,10 @@ never for user management.
 
 ## 6.4 The other two Access applications (optional)
 
-Independent of the publisher app, and both genuinely optional:
+Independent of the publisher app, and both genuinely optional. Give
+each the cookie settings from 6.2. With the path attribute off, every
+Access application on the host writes the same `CF_Authorization`
+cookie, so one left at Cloudflare's defaults can undo the others.
 
 **Admin dashboard.** One app, name `Terraviz Admin`, destination
 `api/feedback-admin` on both hostnames, one Allow policy on your
@@ -2410,9 +2463,10 @@ live site with the a11y scan on. If `/publish/**` is behind Access,
 the headless capture hits the SSO wall. It already reuses
 `CF_ACCESS_CLIENT_ID`/`CF_ACCESS_CLIENT_SECRET`, so there's nothing
 new to set — as long as that token's Service Auth policy covers the
-publisher app. Headers go only to first-party origins, never to
-tile CDNs. The deploy step is `continue-on-error`, so skipping all
-of it breaks nothing. The regression baseline is a GitHub Actions
+publisher app. On a node with two applications, that means the
+portal application too (6.2, rule 3). Headers go only to first-party
+origins, never to tile CDNs. The deploy step is
+`continue-on-error`, so skipping all of it breaks nothing. The regression baseline is a GitHub Actions
 artifact, not a Cloudflare resource; the first `main` run
 bootstraps it.
 
@@ -2556,7 +2610,8 @@ claim inside it names the application. `ACCESS_AUD` has to be that
 same audience tag.
 Re-copy `W13` from the application's Overview tab. A token minted
 for a *different* application of the same team is rejected by
-design.
+design. On a node with two applications, `W13` is the API
+application's AUD (6.2, rule 1).
 
 ### `/.well-known/terraviz.json` 503s, or publishing fails on `origin_node`
 Remote `node_identity` is empty — Phase 9 wasn't run. The local
@@ -2648,8 +2703,12 @@ Expected before Phase 6.2's application covers `/publish/*`.
 Cloudflare answers unauthenticated requests with a cross-origin 302
 the portal can't follow — it's fetched with `redirect: 'manual'` so
 it can *detect* the redirect, but it can't complete the sign-in.
-The Refresh button is the escape hatch: refreshing triggers Access
-at top-level navigation, you sign in, and the next fetch succeeds.
+The card's **Sign in** button is the escape hatch: it signs you in
+through a top-level navigation, and the next fetch succeeds.
+
+On a node with two applications, also check that the API application
+has the Staff policy (6.2, rule 3), and whether **Enforce cookie path
+attribute** was turned on.
 
 ### Console fills with CORS errors on `/api/tile/`, but the globe still renders
 Your Access application covers the whole hostname instead of the six
@@ -2709,7 +2768,7 @@ it from the Users tab, or by SQL if no admin exists.
 No service token configured. Re-run with
 `TERRAVIZ_ACCESS_CLIENT_ID` / `TERRAVIZ_ACCESS_CLIENT_SECRET`
 (`W14`/`W15`), and confirm the token is attached to a Service Auth
-policy on the publisher app.
+policy on the publisher app (the API application, if you run two).
 
 ### `terraviz import-snapshot` 409s on the second run
 Working as designed — the `legacy_id` idempotency check skips rows

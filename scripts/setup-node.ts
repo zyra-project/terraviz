@@ -806,8 +806,9 @@ export async function runSetup(deps: SetupDeps): Promise<number> {
           deps.stdout.write(
             '  ! its login cookie needs changing by hand (SELF_HOSTING.md §6.2):\n' +
               gaps.map(g => `      ${g}\n`).join('') +
-              '    Access → Applications → this application → Advanced settings →\n' +
-              '    Cookie settings: HTTP Only on, Same Site Attribute Lax.\n',
+              '    Access → Applications → this application → Configure →\n' +
+              '    Advanced settings → Cookie settings: HTTP Only on,\n' +
+              '    Same Site Attribute Lax.\n',
           )
         }
 

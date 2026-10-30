@@ -125,14 +125,14 @@ describe('cookieSettingsGaps', () => {
     ])
   })
 
-  // An application nobody configured carries neither field, and an
-  // unset SameSite is Cloudflare's None. Saying "unknown" here would
-  // read as reassurance.
-  it('reads unset fields as gaps, not as fine', () => {
-    expect(cookieSettingsGaps(app)).toEqual([
-      'SameSite is unset, which Cloudflare treats as None',
-      'HttpOnly is not reported, so it may be off',
-    ])
+  // A field the API did not report is a gap, not a pass: staying
+  // quiet would read as "checked and fine". Whether the list response
+  // carries these fields is unverified, so the line says unknown.
+  it('reads unreported fields as gaps, not as fine', () => {
+    const gaps = cookieSettingsGaps(app)
+    expect(gaps).toHaveLength(2)
+    expect(gaps[0]).toMatch(/SameSite is not reported/)
+    expect(gaps[1]).toMatch(/HttpOnly is not reported/)
   })
 })
 
