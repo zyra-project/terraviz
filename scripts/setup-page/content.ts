@@ -303,7 +303,9 @@ wrangler d1 migrations apply FEEDBACK_DB --remote   # migrations/`,
     ],
     automated: { code: 'npm run setup -- --apply --only=access' },
     automatedNote: [
-      'Discovers your team domain, creates the publisher application with all six destinations, creates both policies, mints the service token and attaches it. It records the AUD and prints the token pair **once** — have somewhere to put it.',
+      'Discovers your team domain, creates the publisher application with all six destinations, creates both policies, mints the service token and attaches it. The application\'s login cookie is set to HTTP Only and SameSite Lax. It records the AUD and prints the token pair **once** — have somewhere to put it.',
+      'If an application named `Terraviz Publisher` (or `TERRAVIZ_ACCESS_APP_NAME`) already exists, the run adopts it and leaves its settings alone. If its cookie settings fall short, the run says so, and you change them in the dashboard.',
+      'Running separate portal and API applications? Set `TERRAVIZ_ACCESS_APP_NAME` to the API application\'s name first, or the run adopts or creates the wrong one.',
     ],
     gate: "The AUD is copied, the token pair is in your password manager, and the token appears in the Automation policy's include list.",
     gateShort: 'Staff sign-in works, and the token pair is saved somewhere safe.',
@@ -676,7 +678,7 @@ export const TROUBLESHOOTING = [
   },
   {
     symptom: 'Portal shows "Your session has expired"',
-    fix: 'Expected before your Access application covers the publish paths. Cloudflare answers with a cross-origin redirect the portal can detect but cannot follow. The Refresh button is the escape hatch — refreshing triggers Access at top-level navigation, you sign in, and the next fetch succeeds.',
+    fix: 'Expected before your Access application covers the publish paths. Cloudflare answers with a cross-origin redirect the portal can detect but cannot follow. The card\'s Sign in button is the escape hatch — it signs you in through a top-level navigation, and the next fetch succeeds.',
   },
   {
     symptom: 'Zip download shows "size unknown"',

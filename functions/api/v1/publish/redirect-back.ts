@@ -8,25 +8,33 @@
  * portal path. Solves the two-Access-app cookie-scope problem that
  * 3pa/C-fix could only diagnose, not fix:
  *
- * Cloudflare Access scopes each application's `CF_Authorization`
- * cookie to the application's URL paths. When the publisher portal
- * and the publisher API are gated by two different Access
- * applications (because the 5-destination-per-app limit forces a
- * split — see `SELF_HOSTING.md` Phase 6.2), a user who has signed into
- * the portal app via SSO holds a cookie scoped to `/publish/` but
- * none scoped to `/api/v1/publish/`. A `fetch()` from the portal
- * to the API path doesn't carry any cookie that satisfies the API
- * app's audience, so Access redirects to its cross-origin login
- * page — which CORS blocks at the fetch boundary regardless of
- * `redirect: 'follow' | 'manual'`.
+ * When the publisher portal and the publisher API are gated by two
+ * different Access applications (`SELF_HOSTING.md` §6.2, "Two
+ * applications instead of one"), a user who has signed into the
+ * portal app via SSO can hold no cookie the API app accepts. With
+ * "Enforce cookie path attribute" on, each app's `CF_Authorization`
+ * is scoped to its own paths. With it off (the default), the apps
+ * share one host-wide cookie and whichever signed the user in last
+ * owns it. Either way a `fetch()` from the portal to the API path
+ * can arrive without a cookie that satisfies the API app's audience,
+ * so Access redirects to its cross-origin login page — which CORS
+ * blocks at the fetch boundary regardless of
+ * `redirect: 'follow' | 'manual'`. (The split was first made to stay
+ * under what was taken for a five-destination limit per application;
+ * Cloudflare's published limit is now 50, and one application is what
+ * `npm run setup` builds.)
  *
  * This endpoint is gated by the same Access middleware as every
  * other `/api/v1/publish/**` route. When the browser navigates to
  * it top-level (not via fetch), Cloudflare Access transparently
  * authenticates via the team-level session, sets the API app's
- * cookie at `Path=/api/v1/publish/`, then forwards the request.
- * The handler then 302s back to the portal path, where the now-
- * present API cookie satisfies subsequent fetches.
+ * cookie, then forwards the request. The handler then 302s back to
+ * the portal path, where the now-present API cookie satisfies
+ * subsequent fetches. With the path attribute off, that holds only if
+ * the portal app also accepts the cookie the API app just wrote;
+ * otherwise the portal signs in again and overwrites it, and
+ * `src/ui/publisher/api.ts`'s once-per-tab warmup flag is what stops
+ * that from looping.
  *
  * Safety: `to` must be a path on this host beginning with
  * `/publish` (the portal mount point). Open redirects to arbitrary
