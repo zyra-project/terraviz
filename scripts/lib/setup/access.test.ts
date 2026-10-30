@@ -6,6 +6,7 @@ import {
   AccessApi,
   AUTOMATION_POLICY_NAME,
   buildAppBody,
+  cookieSettingsGaps,
   buildServicePolicy,
   buildStaffPolicy,
   ensureAccessApplication,
@@ -97,6 +98,41 @@ describe('buildAppBody', () => {
 
   it('refuses to build an app that gates nothing', () => {
     expect(() => buildAppBody({ name: 'App', destinations: [] })).toThrow(/at least one/)
+  })
+
+  // Left to Cloudflare's defaults, the login cookie went out with
+  // SameSite=None and without HttpOnly: a browser sends it on a POST
+  // another site starts, and a script on the page can read it.
+  it('sets the login cookie to HttpOnly and SameSite Lax', () => {
+    const body = buildAppBody({ name: 'App', destinations: ['a.example/publish'] })
+    expect(body.http_only_cookie_attribute).toBe(true)
+    expect(body.same_site_cookie_attribute).toBe('lax')
+  })
+})
+
+describe('cookieSettingsGaps', () => {
+  const app = { id: 'a', name: 'App', aud: 'x' }
+
+  it('finds nothing to say about HttpOnly with Lax, or with Strict', () => {
+    expect(cookieSettingsGaps({ ...app, http_only_cookie_attribute: true, same_site_cookie_attribute: 'lax' })).toEqual([])
+    expect(cookieSettingsGaps({ ...app, http_only_cookie_attribute: true, same_site_cookie_attribute: 'Strict' })).toEqual([])
+  })
+
+  it('names a SameSite of none and HttpOnly off', () => {
+    expect(cookieSettingsGaps({ ...app, http_only_cookie_attribute: false, same_site_cookie_attribute: 'none' })).toEqual([
+      'SameSite is none, not Lax',
+      'HttpOnly is off',
+    ])
+  })
+
+  // An application nobody configured carries neither field, and an
+  // unset SameSite is Cloudflare's None. Saying "unknown" here would
+  // read as reassurance.
+  it('reads unset fields as gaps, not as fine', () => {
+    expect(cookieSettingsGaps(app)).toEqual([
+      'SameSite is unset, which Cloudflare treats as None',
+      'HttpOnly is not reported, so it may be off',
+    ])
   })
 })
 
@@ -215,6 +251,7 @@ describe('ensureAccessApplication', () => {
     expect(res.app.aud).toBe('aud-new')
     const post = calls.find(c => c.method === 'POST')!
     expect((post.body as { destinations: unknown[] }).destinations).toHaveLength(2)
+    expect(post.body).toMatchObject({ http_only_cookie_attribute: true, same_site_cookie_attribute: 'lax' })
   })
 
   it('fails loudly if the create response carries no AUD', async () => {

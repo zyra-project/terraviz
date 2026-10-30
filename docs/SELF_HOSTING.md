@@ -1011,10 +1011,13 @@ middleware fails closed: without `ACCESS_TEAM_DOMAIN` and
 > flow you have to do yourself. Once it is done,
 > `npm run setup -- --apply --only=access` does 6.2 and 6.3. It
 > discovers your team domain, creates the application with all six
-> destinations, creates both policies, mints the service token, and
-> attaches it. It records the AUD and prints the token pair once. The
-> click-by-click below is the reference for what it builds, and the
-> path to take if you would rather do it by hand.
+> destinations and its login cookie set as 6.2 describes, creates both
+> policies, mints the service token, and attaches it. It records the
+> AUD and prints the token pair once. An application that already
+> exists under the same name is adopted as it is, never edited. If its
+> cookie settings fall short, the run says so, and you change them by
+> hand. The click-by-click below is the reference for what it builds,
+> and the path to take if you would rather do it by hand.
 
 ## 6.1 Set up Zero Trust
 
@@ -1060,9 +1063,99 @@ Self-hosted**:
 > exact match against one address and is the single most common
 > Access misconfiguration.
 
+- **Cookie settings** — in the application's advanced settings
+  (on an existing application: **Configure → Advanced settings →
+  Cookie settings**):
+  - **HTTP Only:** on.
+  - **Same Site Attribute:** **Lax**.
+  - **Enforce cookie path attribute:** leave off.
+- **App Launcher** — leave **Show application in App Launcher** off.
+
 After saving, open the application's **Overview** tab and copy the
 **Application Audience (AUD) Tag** — a 64-char hex string.
 **Record it as `W13`.**
+
+**Why the cookie settings.** Access keeps a publisher signed in with
+a `CF_Authorization` cookie, and that cookie is what authorises every
+write under `/api/v1/publish`. Cloudflare's SameSite default is None,
+which lets a browser send the cookie on a form POST that another
+website starts. Lax sends it only on requests from your own site and
+on links into it. That's all the portal needs: the portal and the API
+share a host, and Access's sign-in returns to your site through an
+ordinary redirect. HTTP Only stops scripts on the page from reading
+the token. The app never reads it from JavaScript; the server gets it
+from the request. Neither setting affects the `terraviz` CLI or the
+workflows, which authenticate with the service token's headers.
+
+Lax is the value that has been checked: the portal signs in and loads
+its data with it on the project's own node (2026-10-30). Strict is
+stricter, but untested here.
+
+**Why the App Launcher stays off.** The launcher tile is only a
+shortcut, and nothing here needs one. If you turn it on, choose
+**Default (first domain listed)**, or pick a URL from the list.
+**Use custom domain** with no URL selected refuses to save the
+application, along with any other change made in the same edit, the
+cookie settings included. On an application whose only destinations
+are `/api/v1/publish`, that URL list can be empty.
+
+### Checking an existing node
+
+`npm run setup` sets the cookie only on an application it creates.
+An application made before this step existed, by hand or by an older
+run, keeps whatever it was created with. The project's own node had
+SameSite None and HTTP Only off until 2026-10-30.
+
+To check:
+1. Sign in at `https://<W2>/publish` and open the **Datasets** page.
+2. In the browser's developer tools, open **Application → Cookies →
+   `https://<W2>`** and find `CF_Authorization`.
+3. **HttpOnly** should be ticked and **SameSite** should read **Lax**.
+
+If either is wrong, change the cookie settings above, sign out and
+back in, and check again. Do the same on the `pages.dev` host if
+publishers use it.
+
+### Two applications instead of one
+
+One application is simpler, and it's what `npm run setup` builds.
+The project's own node runs two instead:
+
+| Application | Destinations, on `<W2>` and `<W10>.pages.dev` |
+|---|---|
+| Portal | `/publish`, `/publish/*` |
+| API | `/api/v1/publish` |
+
+If you run two, four rules keep them working:
+
+1. **`ACCESS_AUD` (`W13`) is the API application's AUD.** The publish
+   middleware accepts a token from exactly one application. Every
+   request under `/api/v1/publish` carries the token of the
+   application that covers that path.
+2. **Both applications need the same cookie settings.** With
+   **Enforce cookie path attribute** off, both write a cookie named
+   `CF_Authorization` for the whole host. Whichever application signed
+   you in last decides its attributes, so hardening one alone can be
+   undone by the other.
+3. **The Automation policy belongs on the API application.** The CLI,
+   the transcode runner and the analytics export use the service token
+   only on `/api/v1/publish`. Both applications need the Staff policy.
+4. **Tell `npm run setup` which application to manage.** Set
+   `TERRAVIZ_ACCESS_APP_NAME` to the API application's exact name
+   before you run the access step. Otherwise the step finds no
+   application named `Terraviz Publisher` and creates a third one whose
+   destinations overlap the other two. The bindings step then deploys
+   that application's AUD as `ACCESS_AUD`. The portal application is
+   yours to maintain by hand.
+
+The project's node runs with **Enforce cookie path attribute** off.
+After a fresh sign-in, the portal's data pages load without the
+Refresh prompt (checked 2026-10-30). Turning the attribute on would
+give each application a cookie scoped to its own paths. That is
+Cloudflare's design for two applications on one host, but it's
+untested here. If you try it, sign in again and check the portal still
+loads its data. If the portal shows "Your session has expired", the
+two cookies are getting in each other's way.
 
 ## 6.3 Mint the service token
 

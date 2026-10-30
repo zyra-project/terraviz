@@ -578,6 +578,64 @@ describe('runSetup — access step', () => {
     expect(await runSetup(h.deps)).toBe(2)
     expect(h.errOut()).toContain('Access: Apps and Policies')
   })
+
+  it('plans the cookie settings with the application', async () => {
+    const h = harness({ argv: ['--only=access'], files: { '.terraviz-setup.json': state } })
+    expect(await runSetup(h.deps)).toBe(0)
+    expect(h.out()).toContain('HttpOnly, SameSite=Lax')
+  })
+
+  // Adoption leaves an application as it is, so an existing node's
+  // cookie stays at whatever it was created with. Silence there would
+  // read as "the setup run fixed it".
+  it('says when an adopted application\'s cookie falls short, and how to fix it', async () => {
+    const h = harness({
+      argv: ['--only=access', '--apply'],
+      env: { CLOUDFLARE_API_TOKEN: 'tok' },
+      files: { '.terraviz-setup.json': state },
+      fetchImpl: accessFetch({
+        ...HAPPY,
+        'GET /access/apps': [{ id: 'app1', name: 'Terraviz Publisher', aud: 'AUD123' }],
+      }),
+    })
+    expect(await runSetup(h.deps)).toBe(0)
+    expect(h.out()).toContain('needs changing by hand')
+    expect(h.out()).toContain('SameSite is unset')
+    expect(h.out()).toContain('SELF_HOSTING.md §6.2')
+  })
+
+  it('says nothing about the cookie when the adopted application is already set', async () => {
+    const h = harness({
+      argv: ['--only=access', '--apply'],
+      env: { CLOUDFLARE_API_TOKEN: 'tok' },
+      files: { '.terraviz-setup.json': state },
+      fetchImpl: accessFetch({
+        ...HAPPY,
+        'GET /access/apps': [{
+          id: 'app1',
+          name: 'Terraviz Publisher',
+          aud: 'AUD123',
+          http_only_cookie_attribute: true,
+          same_site_cookie_attribute: 'lax',
+        }],
+      }),
+    })
+    expect(await runSetup(h.deps)).toBe(0)
+    expect(h.out()).toContain('adopted')
+    expect(h.out()).not.toContain('needs changing by hand')
+  })
+
+  it('says nothing about the cookie when it created the application', async () => {
+    const h = harness({
+      argv: ['--only=access', '--apply'],
+      env: { CLOUDFLARE_API_TOKEN: 'tok' },
+      files: { '.terraviz-setup.json': state },
+      fetchImpl: accessFetch(HAPPY),
+    })
+    expect(await runSetup(h.deps)).toBe(0)
+    expect(h.out()).toContain('created')
+    expect(h.out()).not.toContain('needs changing by hand')
+  })
 })
 
 describe('runSetup — secrets step', () => {

@@ -68,6 +68,7 @@ import {
 } from './lib/setup/bindings-plan.ts'
 import {
   AccessApi,
+  cookieSettingsGaps,
   ensureAccessApplication,
   ensurePolicies,
   ensureServiceToken,
@@ -319,7 +320,9 @@ Environment
                                  Without it only *.pages.dev is gated.
   TERRAVIZ_STAFF_EMAIL_DOMAIN    Email domain for the Allow policy, e.g.
                                  your-org.org. Without it no human can sign in.
-  TERRAVIZ_ACCESS_APP_NAME       Defaults to "Terraviz Publisher".
+  TERRAVIZ_ACCESS_APP_NAME       Defaults to "Terraviz Publisher". On a node that
+                                 splits the portal and the API into two
+                                 applications, the API application's name.
   TERRAVIZ_SERVICE_TOKEN_NAME    Defaults to "terraviz-cli".
   ACCESS_TEAM_DOMAIN, ACCESS_AUD, TRUSTED_PUBLISHER_DOMAINS,
   R2_PUBLIC_BASE, GITHUB_OWNER, GITHUB_REPO
@@ -746,6 +749,7 @@ export async function runSetup(deps: SetupDeps): Promise<number> {
     if (!opts.apply) {
       deps.stdout.write(`  would ensure application  ${appName}\n`)
       for (const d of destinations) deps.stdout.write(`    destination  ${d}\n`)
+      deps.stdout.write('    cookie       HttpOnly, SameSite=Lax (if it creates the application)\n')
       deps.stdout.write(
         `  would ensure policy       Staff (Allow, emails ending in ` +
           `${state.staffEmailDomain ?? '<TERRAVIZ_STAFF_EMAIL_DOMAIN unset>'})\n` +
@@ -795,6 +799,17 @@ export async function runSetup(deps: SetupDeps): Promise<number> {
         state.accessAud = app.aud
         persist()
         deps.stdout.write(`  application  ${app.name}  ${verb(created)} (aud ${app.aud})\n`)
+        // A created application carries buildAppBody's cookie settings;
+        // an adopted one is left as it is, so say where it falls short.
+        const gaps = created ? [] : cookieSettingsGaps(app)
+        if (gaps.length > 0) {
+          deps.stdout.write(
+            '  ! its login cookie needs changing by hand (SELF_HOSTING.md §6.2):\n' +
+              gaps.map(g => `      ${g}\n`).join('') +
+              '    Access → Applications → this application → Advanced settings →\n' +
+              '    Cookie settings: HTTP Only on, Same Site Attribute Lax.\n',
+          )
+        }
 
         const tok = await ensureServiceToken(api, tokenName)
         state.serviceTokenId = tok.id
