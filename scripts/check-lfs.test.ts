@@ -59,8 +59,8 @@ describe('parseCheckAttr', () => {
     ])
   })
 
-  // `unset` is what the three negation lines in .gitattributes produce
-  // (`public/*.png -filter`). Treating "has a filter attribute at all"
+  // `unset` is what the `-filter` lines in .gitattributes produce
+  // (`public/*.png -filter`, among others). Treating "has a filter attribute at all"
   // as LFS would re-flag every app icon the negations exist to exempt.
   it('does not treat unset or unspecified as lfs', () => {
     expect(parseCheckAttr(triples([['a.png', 'unset'], ['b.ts', 'unspecified']]))).toEqual([])
@@ -74,13 +74,14 @@ describe('parseCheckAttr', () => {
 
 describe('findPointers', () => {
   // The distinction the whole check turns on: an attribute match is a
-  // candidate, the file's own bytes are the verdict. 12 files in this
-  // repo carry filter=lfs and hold real bytes; flagging them every run
-  // is how a check gets muted.
+  // candidate, the file's own bytes are the verdict. A blob committed
+  // without git-lfs carries filter=lfs and holds real bytes until
+  // .gitattributes pins it, and flagging one every run is how a check
+  // gets muted.
   it('reports pointers and ignores real bytes under the same attribute', () => {
     const heads: Record<string, string> = {
       'public/assets/skybox/nx.jpg': POINTER,
-      'public/luma-check/out/A_today.mp4': JPEG_HEAD,
+      'docs/example/committed-without-lfs.jpg': JPEG_HEAD,
       'initial-interface.jpg': POINTER,
     }
     const found = findPointers(Object.keys(heads), f => heads[f] ?? null)
