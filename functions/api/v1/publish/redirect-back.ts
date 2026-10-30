@@ -30,7 +30,11 @@
  * authenticates via the team-level session, sets the API app's
  * cookie, then forwards the request. The handler then 302s back to
  * the portal path, where the now-present API cookie satisfies
- * subsequent fetches.
+ * subsequent fetches. With the path attribute off, that holds only if
+ * the portal app also accepts the cookie the API app just wrote;
+ * otherwise the portal signs in again and overwrites it, and
+ * `src/ui/publisher/api.ts`'s once-per-tab warmup flag is what stops
+ * that from looping.
  *
  * Safety: `to` must be a path on this host beginning with
  * `/publish` (the portal mount point). Open redirects to arbitrary

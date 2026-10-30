@@ -1095,18 +1095,22 @@ from the request. Neither setting affects the `terraviz` CLI or the
 workflows, which authenticate with the service token's headers.
 
 "Your own site" is wider than one host. A browser counts every host
-under your registered domain as the same site, so a page on another
-host under `your-org.org` still gets the cookie sent. Each
-`pages.dev` project is a site of its own, but a branch preview such as
-`<branch>.<W10>.pages.dev` shares a site with `<W10>.pages.dev`. Lax
-closes the door to other websites, not to your own hosts. The publish
-routes don't yet check where a request came from. Until they do,
-anything served from another host under your domain, or from a branch
-preview, can act for a publisher who is signed in.
+under your registrable domain as the same site, so requests from a
+page on another host under `your-org.org` still carry the cookie. On
+a large organisation's domain, that is every host the organisation
+runs. Each `pages.dev` project is a site of its own, but a branch
+preview such as `<branch>.<W10>.pages.dev` shares a site with
+`<W10>.pages.dev`. Lax closes the door to other websites, not to your
+own hosts. The publish routes don't yet check where a request came
+from. Until they do, a page on another host under your domain, or on
+a branch preview, can send POST requests as a publisher who is signed
+in. A publisher who signs in only at `<W2>` is not exposed to
+`pages.dev` previews, which are a different site.
 
 Verified on the project's own node (`terraviz.zyra-project.org`) on
-2026-10-30. Both of its applications had SameSite None and HTTP Only
-off. With HTTP Only and Lax, the portal signs in and loads its data.
+2026-10-30. Before the change, its cookie went out with SameSite None
+and without HTTP Only. With HTTP Only and Lax on both of its
+applications, the portal signs in and loads its data.
 The node's other cookie settings are **Enable Binding Cookie** off and
 **Eager redirect cookie** on. Strict is stricter, but untested here.
 
@@ -1152,8 +1156,10 @@ The project's own node runs two:
 
 It was split when an application was thought to hold only five
 destinations (`functions/api/v1/publish/redirect-back.ts` records
-why). Cloudflare's published limit is now 50 domains per application,
-so a new node has no reason to split.
+why). Cloudflare's
+[published limit](https://developers.cloudflare.com/cloudflare-one/account-limits/)
+is now 50 domains per application, so a new node has no reason to
+split.
 
 If you run two, four rules keep them working:
 
@@ -1184,17 +1190,19 @@ If you run two, four rules keep them working:
    - If neither application has that name, it tries to create a third,
      with the same six destinations.
 
-   Either way, the next bindings step writes the wrong `ACCESS_AUD` to
-   both environments. Exporting `ACCESS_AUD` yourself does not prevent
-   this, because the access step overwrites it.
+   If the step succeeds, the next bindings step writes the wrong
+   `ACCESS_AUD` to both environments. Exporting `ACCESS_AUD` yourself
+   does not prevent this, because the access step overwrites it.
 
    The step also matches policies and the token by name. If your
-   policies are not named `Staff` and `Automation`, it adds new ones,
-   including an Allow policy for everyone at
-   `TERRAVIZ_STAFF_EMAIL_DOMAIN`. If your token is not named
+   policies are not named `Staff` and `Automation`, it adds new ones:
+   if `TERRAVIZ_STAFF_EMAIL_DOMAIN` is set, that includes an Allow
+   policy for everyone at that domain. If your token is not named
    `terraviz-cli`, it mints a second one, unless
    `TERRAVIZ_SERVICE_TOKEN_NAME` names yours. Rename your policies, or
-   leave the access step out on a node you built by hand. The portal
+   leave the access step out on a node you built by hand. There is no
+   flag to skip a step: list the others with `--only=`, and export
+   `ACCESS_AUD` yourself so the bindings step has it. The portal
    application is yours to maintain by hand either way.
 
 The project's node runs with **Enforce cookie path attribute** off.

@@ -804,7 +804,7 @@ export async function runSetup(deps: SetupDeps): Promise<number> {
         const gaps = created ? [] : cookieSettingsGaps(app)
         if (gaps.length > 0) {
           deps.stdout.write(
-            '  ! its login cookie needs changing by hand (SELF_HOSTING.md §6.2):\n' +
+            '  ! check its login cookie by hand (SELF_HOSTING.md §6.2):\n' +
               gaps.map(g => `      ${g}\n`).join('') +
               '    Access → Applications → this application → Configure →\n' +
               '    Advanced settings → Cookie settings: HTTP Only on,\n' +
