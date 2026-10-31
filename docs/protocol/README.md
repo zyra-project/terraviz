@@ -213,7 +213,8 @@ the contract is here, because a schema cannot carry it.
   pending sweep. Local admin `full: true` explicitly restarts even an
   interrupted full sync; use it to recover `invalid_cursor` failures.
 - **Errors** are `{error, message?}` with `Cache-Control: no-store`:
-  400 `unknown_parameter` / `duplicate_parameter` / `invalid_cursor` /
+  400 `unknown_parameter` / `duplicate_parameter` / `invalid_query`
+  (a query not spelled as plain `name=value` pairs) / `invalid_cursor` /
   `invalid_limit`, 503 `abuse_contact_missing` for a node switched on
   without an abuse contact, and 503 `binding_missing` /
   `identity_missing` / `signing_key_unavailable` for a node not yet

@@ -88,6 +88,9 @@ describe('feed rate keys', () => {
     expect(feedRateKey('::ffff:192.0.2.1')).toBe('192.0.2.1')
     expect(feedRateKey('::ffff:c000:201')).toBe('192.0.2.1')
     expect(feedRateKey('::ffff:198.51.100.7')).toBe('198.51.100.7')
+    // Only the IPv4-mapped prefix: an IPv6 host choosing `ffff` in its
+    // own interface id stays in its /64.
+    expect(feedRateKey('2001:db8::ffff:c000:201')).toBe('2001:db8:0:0::/64')
   })
 })
 
@@ -177,6 +180,10 @@ describe('GET /api/v1/federation/feed — refusals', () => {
     ['?limit=251', 'invalid_limit'],
     ['?limit=01', 'invalid_limit'],
     ['?limit=abc', 'invalid_limit'],
+    // Signed as it arrived, so only the plain spelling is served.
+    ['?limit=5&', 'invalid_query'],
+    ['?l%69mit=5', 'invalid_query'],
+    ['?limit=5' + '&'.repeat(3000), 'invalid_query'],
   ])('is 400 for %s', async (query, code) => {
     const { env } = setup()
     const res = await get(env, query)

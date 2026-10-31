@@ -11,9 +11,11 @@
  *
  * Query: `since` (a cursor from a previous page; absent is a full sync
  * from the start) and `limit` (1–250, default 100). Any other
- * parameter, or either one repeated, is a 400: the request target is
- * part of what is signed, so the feed accepts exactly one spelling of
- * each request rather than signing pages for targets it ignored.
+ * parameter, either one repeated, or a query not spelled plainly
+ * (`name=value` pairs, no empty pairs or percent-escapes) is a 400: the
+ * request target is part of what is signed, so the feed accepts exactly
+ * one spelling of each request rather than signing pages for targets it
+ * ignored.
  *
  * Every 200 is signed (`federation-signature.ts`): the body is the
  * page's canonical JSON, and `Terraviz-Signature` covers it with the
@@ -147,6 +149,13 @@ const serveFeed: PagesFunction<CatalogEnv> = async context => {
     if (seen.has(name)) return errorResponse(400, 'duplicate_parameter')
     seen.add(name)
   }
+  // The target is signed as it arrived, so only its plain spelling is
+  // served: no empty pairs, no percent-escapes, nothing a subscriber
+  // building `?since=…&limit=…` would send. Otherwise `?limit=5&` and
+  // `?l%69mit=5` were signed as distinct targets, and a target too long
+  // to sign reached the 503 wrapper and its log as a publication failure.
+  const plain = [...url.searchParams].map(([name, value]) => `${name}=${value}`).join('&')
+  if (url.search !== (plain ? `?${plain}` : '')) return errorResponse(400, 'invalid_query')
   const since = url.searchParams.get('since')
   let after: FeedPosition | null = null
   if (since !== null) {
