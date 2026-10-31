@@ -19,6 +19,10 @@ major (`/schema/v2/`) and an entry with a migration note.
   UTF-8/float vector. Hidden ids are not emitted. Discovery readiness
   includes usable matching keys. Native STAC links are source-metadata
   `via` links, with the dataset schema profile, not alternates.
+- **Subscriber guidance, no wire change:** README §Showing Mirrored
+  Rows. A peer's `weight` must not rank its rows against another
+  node's. A peer's text is untrusted input, and media is outside the
+  signature. Removing a peer removes its rows.
 - **`dataset.schema.json`, `catalog.schema.json`, `feed.schema.json`:**
   optional `enriched.datasetDevelopers` and `visDevelopers` arrays
   preserve every producer credit. They list producers by name, in

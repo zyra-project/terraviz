@@ -344,6 +344,57 @@ DNS/address validation and connection pinning to prevent private-IP
 resolution and rebinding. Deployment-specific Access cookie/CSRF
 behavior still requires verification before enabling admin federation.
 
+### Showing Mirrored Rows
+
+A verified signature proves which node wrote a page, not that what it
+says is true. A peer's admin account can be compromised like any
+other, so every mirrored row is that peer's claim. A subscriber shows
+it on its own terms.
+
+The reference subscriber keeps mirrored rows apart from its own
+catalog, in `federated_datasets`, and shows none of them to visitors
+yet. A subscriber that does show them follows these rules.
+
+- **A peer's `weight` orders that peer's catalog, not the
+  subscriber's.** A subscriber must not use it to rank a peer's rows
+  against its own rows or another peer's. Rescaling does not make it
+  safe: a compromised peer still chooses which of its rows come
+  first. Show mirrored rows in their own section, or below the
+  subscriber's own. Order them by signals the subscriber controls,
+  such as recency and a per-peer setting the operator chooses. Using
+  `weight` to order a list of one peer's rows is fine.
+- **A peer's text is untrusted input.** Titles, descriptions,
+  keywords and every other string are the peer's words. Render them
+  through the same sanitizer as any other untrusted input, never as
+  raw HTML. Search relevance is computed from that text, so a peer can
+  stuff it with keywords. A peer's match should not rank above a
+  local one for that reason alone. Peer text must never reach a
+  language model as instructions. If it goes to one at all (Orbit,
+  enrichment), it goes as quoted data, per
+  [CONTRIBUTING.md §LLM Integrations](../../CONTRIBUTING.md#llm-integrations),
+  and only for a peer the operator has chosen.
+- **Media is outside the signature.** The signature covers a row's
+  URLs, not the bytes they return. A peer can change what a video or
+  image shows without changing its row, and the subscriber cannot
+  tell. Each visitor's browser also fetches that media from wherever
+  the URLs point, usually the peer's servers, which shows the peer the
+  visitor's IP address. Until a subscriber proxies or caches peer
+  assets (deferred), show a peer's media only for peers the operator
+  has vetted. Say on the page which node it comes from.
+- **Removing a peer removes its rows.**
+  `DELETE /api/v1/publish/federation/peers/:id` drops every row
+  mirrored from that peer in one call. That is the response to a
+  compromised peer: stopping pulls alone leaves its last rows in
+  place. The stored `paused` and `blocked` statuses stop pulls, but no
+  route sets them yet. Once the peer has secured its node, re-add it
+  like a new peer. If its signing key may have leaked, pin only its
+  new key.
+- **Watch for mass edits.** The reference subscriber refuses a sweep
+  that would empty the mirror. It has no equivalent for a pull that
+  rewrites most of the mirror, such as every title or `weight` at
+  once. A subscriber should flag such a pull for an operator to
+  check. This is not implemented yet.
+
 ## Deferred
 
 - **The federation handshake** (peer registration, shared secrets,
