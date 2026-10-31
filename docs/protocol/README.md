@@ -201,7 +201,9 @@ the contract is here, because a schema cannot carry it.
   arrives as its id in `tombstones[]`, and a reader drops its copy.
   Hidden rows never enter the scan, including rows hidden before
   their first publication. A hidden row, hard delete or move away
-  from public visibility leaves no tombstone. Run periodic full syncs
+  from public visibility leaves no tombstone. To withdraw a dataset
+  from subscribers promptly, retract it: a tombstone is the only
+  withdrawal an incremental pull carries. Run periodic full syncs
   by omitting `since`. Do not delete unseen rows immediately: finish
   the full scan, wait the 30 s settle period plus 60 s clock-skew
   allowance (`sweep_after`), then finish an incremental pull

@@ -21,9 +21,17 @@ major (`/schema/v2/`) and an entry with a migration note.
   `via` links, with the dataset schema profile, not alternates.
 - **`dataset.schema.json`, `catalog.schema.json`, `feed.schema.json`:**
   optional `enriched.datasetDevelopers` and `visDevelopers` arrays
-  preserve every producer credit. Singular fields retain their legacy
-  last-credit behavior for existing readers. Older readers ignore the
-  arrays; this is additive, not a new identity or signature version.
+  preserve every producer credit. They list producers in name order:
+  the catalog stores no credit order. Singular fields keep their legacy
+  value, the last producer in that order, for existing readers. Older
+  readers ignore the arrays; this is additive, not a new identity or
+  signature version.
+- **`dataset.schema.json`, `catalog.schema.json`, `feed.schema.json`:**
+  `enriched.probingInfo` is now omitted when it holds a non-finite
+  number or nests deeper than 60 levels. `/api/v1/catalog` used to
+  render a non-finite number as `null` inside an otherwise intact
+  object; the whole field is now left out, on the catalog as on the
+  feed.
   Deploying this serializer does not restamp existing rows: run a
   one-time full resync to receive previously stored producer credits
   without waiting for another dataset edit.
