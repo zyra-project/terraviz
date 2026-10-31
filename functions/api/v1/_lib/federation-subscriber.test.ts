@@ -648,7 +648,7 @@ describe('pullPeer', () => {
       expect(await settledPull(after)).toMatchObject({ error: 'sweep-refused' })
 
       const acceptSweep = { sweepRun: 'run-1', dropped: 10 }
-      const partial = await settledPull(after, { cursor: cursor(3), has_more: true }, { acceptSweep })
+      const partial = await settledPull(after, { cursor: cursor(3), has_more: true }, { acceptSweep, maxPages: 1 })
       expect(partial).toMatchObject({ ok: true, complete: false, reconciled: 0, reconcilePending: true, acceptOutcome: 'not-reached' })
       expect(partial).not.toHaveProperty('sweepAccepted')
       expect(await mirrored()).toHaveLength(12)
@@ -682,6 +682,7 @@ describe('pullPeer', () => {
     it('writes nothing for a page whose lease was lost, held rows and retractions included', async () => {
       await seedMirrored('kept', 'old-run')
       await seedMirrored('retracted', 'old-run')
+      await db.prepare("UPDATE federation_peers SET sweep_run = 'run-x', sweep_after = 5 WHERE id = ?").bind(PEER_ID).run()
       const store = d1FederationMirrorStore(db)
       expect(await store.acquireLease(PEER_ID, 'mine', NOW_MS, NOW_MS + 60_000)).not.toBeNull()
       const applied = await store.applyPage({
@@ -701,8 +702,170 @@ describe('pullPeer', () => {
         { remote_id: 'kept', origin_node: PEER_ID, seen_run: 'old-run' },
         { remote_id: 'retracted', origin_node: PEER_ID, seen_run: 'old-run' },
       ])
+      // The sweep's run matches, so only the lease is wrong; then only the run.
       expect(await store.refuseSweep(PEER_ID, 'run-x', 'not-mine')).toBe(false)
       expect(await store.finishSweep(PEER_ID, 'run-x', 'not-mine')).toBeNull()
+      expect(await store.refuseSweep(PEER_ID, 'run-y', 'mine')).toBe(false)
+      expect(await store.finishSweep(PEER_ID, 'run-y', 'mine')).toBeNull()
+      expect(await peer()).toMatchObject({ sweepRun: 'run-x', sweepAfterMs: 5 })
+      expect(await mirrored()).toHaveLength(2)
+    })
+
+    // The guard used to look only when the sweep came due, and every pull
+    // before then stamps what it delivers with the sweep's run. A peer that
+    // delivered enough rows in between carried the sweep past it.
+    it("refuses a sweep its own full sync's counts fail, however the counts move before it is due", async () => {
+      for (const id of ids(12)) await seedMirrored(id, 'old-run')
+      const after = await fullSync({ datasets: ids(2).map(id => ds(id)) })
+      expect((await peer()).sweepFlagged).toBe(true)
+
+      const fresh = (from: number, n: number) => Array.from({ length: n }, (_, i) => ds(`n${String(from + i).padStart(2, '0')}`))
+      expect(await settledPull(after - 1, { cursor: cursor(3), datasets: fresh(1, 6) })).toMatchObject({ ok: true, reconciled: 0 })
+      expect(await settledPull(after, { cursor: cursor(4), datasets: fresh(7, 4), has_more: true })).toMatchObject({ ok: true, complete: false })
+
+      // 12 kept and 10 dropped would pass on its own; the full sync's 2 and 10 did not.
+      const due = await settledPull(after, { cursor: cursor(5) })
+      expect(due).toMatchObject({ ok: false, error: 'sweep-refused', reconciled: 0, sweepRefused: { sweepRun: 'run-1', kept: 12, dropped: 10 } })
+      expect(await mirrored()).toHaveLength(22)
+    })
+
+    // Every refusal above starts from a full sync that saw 2 of 12 rows,
+    // which the flag alone keeps refused. This one finishes plausible and
+    // is refused only on its due counts, so only the latch holds it.
+    it('keeps a sweep latched on its due counts alone once later rows dilute them', async () => {
+      for (const id of ids(18)) await seedMirrored(id, 'old-run')
+      const after = await fullSync({ datasets: ids(12).map(id => ds(id)) })
+      expect((await peer()).sweepFlagged).toBe(false)
+      expect(await settledPull(after - 1, { cursor: cursor(3), tombstones: ids(8) })).toMatchObject({ ok: true })
+      expect(await settledPull(after, { cursor: cursor(4) })).toMatchObject({ error: 'sweep-refused', sweepRefused: { kept: 4, dropped: 6 } })
+      const fresh = Array.from({ length: 10 }, (_, i) => ds(`n${String(i + 1).padStart(2, '0')}`))
+      expect(await settledPull(after, { cursor: cursor(5), datasets: fresh })).toMatchObject({ error: 'sweep-refused', sweepRefused: { kept: 14, dropped: 6 } })
+      expect(await mirrored()).toHaveLength(20)
+    })
+
+    it('reports a refusal even when recording it then fails', async () => {
+      for (const id of ids(12)) await seedMirrored(id, 'old-run')
+      const after = await fullSync({ datasets: ids(2).map(id => ds(id)) })
+      const real = d1FederationMirrorStore(db)
+      const store = {
+        ...real,
+        async recordSyncResult(): Promise<void> {
+          throw new Error('D1 unavailable')
+        },
+      }
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const { fetchFn } = fakePeer(() => ({ body: page({ cursor: cursor(2) }) }))
+      const result = await pullPeer(await peer(), { ...deps(fetchFn, after), store })
+      errors.mockRestore()
+      expect(result).toMatchObject({ ok: false, error: 'sweep-refused', sweepRefused: { sweepRun: 'run-1', kept: 2, dropped: 10 } })
+      expect(isSweepRefused(await peer())).toBe(true)
+    })
+
+    it('runs a flagged sweep that would delete nothing, and does not flag a plausible one', async () => {
+      for (const id of ids(12)) await seedMirrored(id, 'old-run')
+      const after = await fullSync({ datasets: ids(2).map(id => ds(id)) })
+      expect(await settledPull(after, { held: ids(12).slice(2) })).toMatchObject({ ok: true, reconciled: 0, reconcilePending: false })
+      expect(await peer()).toMatchObject({ sweepRun: null, sweepFlagged: false })
+
+      await fullSync({ datasets: ids(12).map(id => ds(id)) })
+      expect((await peer()).sweepFlagged).toBe(false)
+    })
+
+    it('reports a lease lost while refusing, without claiming a refusal', async () => {
+      for (const id of ids(12)) await seedMirrored(id, 'old-run')
+      const after = await fullSync({ datasets: ids(2).map(id => ds(id)) })
+      const real = d1FederationMirrorStore(db)
+      const store = {
+        ...real,
+        async refuseSweep(peerId: string, sweepRun: string, leaseId: string) {
+          await db.prepare("UPDATE federation_peers SET sync_lease = 'thief' WHERE id = ?").bind(peerId).run()
+          return real.refuseSweep(peerId, sweepRun, leaseId)
+        },
+      }
+      const { fetchFn } = fakePeer(() => ({ body: page({ cursor: cursor(2) }) }))
+      const result = await pullPeer(await peer(), { ...deps(fetchFn, after), store })
+      expect(result).toMatchObject({ ok: false, error: 'lease-lost', reconciled: 0 })
+      expect(result).not.toHaveProperty('sweepRefused')
+      expect((await peer()).sweepAfterMs).toBe(after)
+    })
+
+    it('reports a sweep that ran even when recording the pull then fails', async () => {
+      for (const id of ids(12)) await seedMirrored(id, 'old-run')
+      const after = await fullSync({ datasets: ids(2).map(id => ds(id)) })
+      expect(await settledPull(after)).toMatchObject({ error: 'sweep-refused' })
+      const real = d1FederationMirrorStore(db)
+      const store = {
+        ...real,
+        async recordSyncResult(): Promise<void> {
+          throw new Error('D1 unavailable')
+        },
+      }
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const { fetchFn } = fakePeer(() => ({ body: page({ cursor: cursor(3) }) }))
+      const result = await pullPeer(await peer(), { ...deps(fetchFn, after), store }, { acceptSweep: { sweepRun: 'run-1', dropped: 10 } })
+      errors.mockRestore()
+      expect(result).toMatchObject({ ok: true, reconciled: 10, acceptOutcome: 'ran' })
+      expect(await mirrored()).toHaveLength(2)
+    })
+
+    describe('what became of an accept', () => {
+      async function refused() {
+        for (const id of ids(12)) await seedMirrored(id, 'old-run')
+        const after = await fullSync({ datasets: ids(2).map(id => ds(id)) })
+        expect(await settledPull(after)).toMatchObject({ sweepRefused: { sweepRun: 'run-1', dropped: 10 } })
+        return after
+      }
+
+      it('is not-needed when the sweep it names would delete nothing', async () => {
+        const after = await refused()
+        const result = await settledPull(after, { held: ids(12).slice(2) }, { acceptSweep: { sweepRun: 'run-1', dropped: 10 } })
+        expect(result).toMatchObject({ ok: true, reconciled: 0, acceptOutcome: 'not-needed' })
+        expect(result).not.toHaveProperty('sweepAccepted')
+      })
+
+      it('is not-reached when the pull fails before the sweep', async () => {
+        const after = await refused()
+        const { fetchFn } = fakePeer(() => ({ response: new Response('down', { status: 503 }) }))
+        const result = await pullPeer(await peer(), deps(fetchFn, after), { acceptSweep: { sweepRun: 'run-1', dropped: 10 } })
+        expect(result).toMatchObject({ ok: false, error: 'http-status', acceptOutcome: 'not-reached' })
+        expect(await mirrored()).toHaveLength(12)
+      })
+
+      // A full sync in progress stamps rows with its own run, so the
+      // refused sweep's drop set can grow; the accept must not reach it.
+      // The pull continues the full sync, which never sweeps, so the
+      // outcome is what this pins.
+      it('is stale while a full sync is replacing the sweep', async () => {
+        const after = await refused()
+        const { fetchFn } = fakePeer(() => ({ body: page({ datasets: [ds('r01')], has_more: true, cursor: cursor(3) }) }))
+        await pullPeer(await peer(), deps(fetchFn, after), { full: true, maxPages: 1 })
+        expect(isSweepRefused(await peer())).toBe(false)
+        const result = await settledPull(after, { cursor: cursor(4), datasets: [ds('r03')] }, { acceptSweep: { sweepRun: 'run-1', dropped: 10 } })
+        expect(result).toMatchObject({ full: true, acceptOutcome: 'stale', reconciled: 0 })
+        expect(await mirrored()).toHaveLength(12)
+      })
+
+      it('is stale when the sweep it names is gone, even on a pull that succeeds', async () => {
+        const after = await refused()
+        expect(await settledPull(after, {}, { acceptSweep: { sweepRun: 'run-1', dropped: 10 } })).toMatchObject({ acceptOutcome: 'ran' })
+        const again = await settledPull(after, { cursor: cursor(3) }, { acceptSweep: { sweepRun: 'run-1', dropped: 10 } })
+        expect(again).toMatchObject({ ok: true, acceptOutcome: 'stale' })
+      })
+
+      it('is stale when a replacing sweep runs on its own', async () => {
+        await refused()
+        const next = await fullSync({ datasets: ids(10).map(id => ds(id)) })
+        const result = await settledPull(next, {}, { acceptSweep: { sweepRun: 'run-1', dropped: 10 } })
+        expect(result).toMatchObject({ ok: true, reconciled: 2, acceptOutcome: 'stale' })
+        expect(result).not.toHaveProperty('sweepAccepted')
+      })
+    })
+
+    it('does not record a refusal for a sweep that is pending but not yet due', async () => {
+      for (const id of ids(12)) await seedMirrored(id, 'old-run')
+      const after = await fullSync({ datasets: ids(2).map(id => ds(id)) })
+      expect(await settledPull(after - 1)).toMatchObject({ ok: true, reconcilePending: true })
+      expect((await peer()).lastSyncError).toBeNull()
     })
 
     it('reports a lease lost before the sweep, which then deletes nothing', async () => {

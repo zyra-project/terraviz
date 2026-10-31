@@ -260,6 +260,7 @@ describe('GET /api/v1/publish/federation/peers', () => {
           full_sync_in_progress: false,
           reconcile_pending: false,
           sweep_refused: false,
+          sweep_flagged: false,
           sweep_after: null,
           sync_lease_expires: null,
           mirrored_count: 0,
@@ -277,5 +278,9 @@ describe('GET /api/v1/publish/federation/peers', () => {
     sqlite.prepare('UPDATE federation_peers SET sweep_after = NULL WHERE id = ?').run(PEER_ID)
     const refused = (await (await onRequestGet(ctx({ method: 'GET' }))).json()) as { peers: Array<Record<string, unknown>> }
     expect(refused.peers[0]).toMatchObject({ reconcile_pending: true, sweep_refused: true, sweep_after: null })
+    // A full sync under way will replace it, so it is no longer waiting for an admin.
+    sqlite.prepare("UPDATE federation_peers SET full_sync_run = 'RUN2' WHERE id = ?").run(PEER_ID)
+    const replacing = (await (await onRequestGet(ctx({ method: 'GET' }))).json()) as { peers: Array<Record<string, unknown>> }
+    expect(replacing.peers[0]).toMatchObject({ full_sync_in_progress: true, sweep_refused: false })
   })
 })

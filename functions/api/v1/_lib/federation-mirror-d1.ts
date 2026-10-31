@@ -39,6 +39,7 @@ interface PeerRow {
   full_sync_run: string | null
   sweep_run: string | null
   sweep_after: number | null
+  sweep_flagged: number
   sync_lease_until: number | null
 }
 
@@ -55,13 +56,14 @@ function toPeer(r: PeerRow): FederationPeer {
     fullSyncRun: r.full_sync_run,
     sweepRun: r.sweep_run,
     sweepAfterMs: r.sweep_after,
+    sweepFlagged: r.sweep_flagged === 1,
     syncLeaseExpiresMs: r.sync_lease_until,
   }
 }
 
 const PEER_COLUMNS =
   'id, base_url, display_name, public_key, status, ' +
-  'last_sync_at, last_sync_cursor, last_sync_error, full_sync_run, sweep_run, sweep_after, sync_lease_until'
+  'last_sync_at, last_sync_cursor, last_sync_error, full_sync_run, sweep_run, sweep_after, sweep_flagged, sync_lease_until'
 
 export interface NewPeer {
   id: string
@@ -230,14 +232,14 @@ export function d1FederationMirrorStore(db: D1Database): FederationMirrorStore {
       return (results[results.length - 1].meta?.changes ?? 0) === 1
     },
 
-    async finishFullSync(peerId, runId, leaseId, sweepAfterMs) {
+    async finishFullSync(peerId, runId, leaseId, sweepAfterMs, flagged) {
       const done = await db
         .prepare(
           `UPDATE federation_peers
-           SET full_sync_run = NULL, sweep_run = ?, sweep_after = ?
+           SET full_sync_run = NULL, sweep_run = ?, sweep_after = ?, sweep_flagged = ?
            WHERE id = ? AND sync_lease = ? AND full_sync_run = ?`,
         )
-        .bind(runId, sweepAfterMs, peerId, leaseId, runId)
+        .bind(runId, sweepAfterMs, flagged ? 1 : 0, peerId, leaseId, runId)
         .run()
       return (done.meta?.changes ?? 0) === 1
     },
@@ -279,7 +281,7 @@ export function d1FederationMirrorStore(db: D1Database): FederationMirrorStore {
           .bind(peerId, sweepRun, peerId, leaseId, sweepRun),
         db
           .prepare(
-            `UPDATE federation_peers SET sweep_run = NULL, sweep_after = NULL
+            `UPDATE federation_peers SET sweep_run = NULL, sweep_after = NULL, sweep_flagged = 0
              WHERE id = ? AND sync_lease = ? AND sweep_run = ?`,
           )
           .bind(peerId, leaseId, sweepRun),

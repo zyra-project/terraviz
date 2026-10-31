@@ -298,10 +298,12 @@ describe('POST /api/v1/publish/federation/sync', () => {
     expect(intent).toHaveLength(1)
     expect(intent[0]).toMatchObject({ actor_id: ADMIN.id, subject_id: PEER_ID })
     expect(JSON.parse(intent[0].metadata_json)).toEqual({ sweep_id: 'RUN1', dropped: 2 })
+    const intentId = (sqlite.prepare("SELECT id FROM audit_events WHERE action = 'federation_peer.sweep_accept'").get() as { id: string }).id
     expect(JSON.parse(auditRows()[1].metadata_json)).toMatchObject({
       ok: true,
       reconciled: 2,
       accept_sweep: { sweep_id: 'RUN1', dropped: 2 },
+      accept_audit_id: intentId,
       accept_sweep_result: 'ran',
       sweep_accepted: { sweep_id: 'RUN1', kept: 0, dropped: 2 },
     })
@@ -322,6 +324,45 @@ describe('POST /api/v1/publish/federation/sync', () => {
     const partial = await onRequestPost(ctx({ body: { peer_id: PEER_ID, accept_sweep: { sweep_id: 'RUN1', dropped: 2 } } }))
     expect(partial.status).toBe(200)
     expect(await partial.json()).toMatchObject({ result: { ok: true, complete: false, accept_sweep_result: 'not_reached' } })
+    expect(mirroredIds()).toEqual(['x', 'y'])
+
+    // An accept naming another run can never run a sweep, so it writes no
+    // intent row; the two naming the pending run each wrote one.
+    const intents = sqlite.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE action = 'federation_peer.sweep_accept'").get() as { n: number }
+    expect(intents.n).toBe(2)
+    const outcomes = auditRows().map(row => JSON.parse(row.metadata_json) as Record<string, unknown>)
+    // The audit row keeps the internal kebab-case codes, as its `error` does.
+    expect(outcomes.map(o => o.accept_sweep_result)).toEqual(['stale', 'stale', 'not-reached'])
+    expect(outcomes[0]).not.toHaveProperty('accept_audit_id')
+    expect(outcomes[1]).toHaveProperty('accept_audit_id')
+  })
+
+  it('does not hand the pull an accept with no intent row, as during a full sync', async () => {
+    pendingEmptySweep()
+    sqlite.prepare("UPDATE federation_peers SET sweep_after = NULL, full_sync_run = 'RUN2' WHERE id = ?").run(PEER_ID)
+    serveFeed([], true)
+    const res = await onRequestPost(ctx({ body: { peer_id: PEER_ID, accept_sweep: { sweep_id: 'RUN1', dropped: 2 } } }))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ result: { ok: true, full: true, accept_sweep_result: 'stale' } })
+    const intents = sqlite.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE action = 'federation_peer.sweep_accept'").get() as { n: number }
+    expect(intents.n).toBe(0)
+    expect(JSON.parse(auditRows()[0].metadata_json)).toMatchObject({ accept_sweep_result: 'stale' })
+    expect(JSON.parse(auditRows()[0].metadata_json)).not.toHaveProperty('accept_audit_id')
+    expect(mirroredIds()).toEqual(['x', 'y'])
+  })
+
+  it('records the outcome of an accept whose pull could not start', async () => {
+    pendingEmptySweep()
+    const fn = serveFeed([])
+    await d1FederationMirrorStore(asD1(sqlite)).acquireLease(PEER_ID, 'other', Date.now(), Date.now() + 600_000)
+    const res = await onRequestPost(ctx({ body: { peer_id: PEER_ID, accept_sweep: { sweep_id: 'RUN1', dropped: 2 } } }))
+    expect(res.status).toBe(409)
+    expect(await res.json()).toMatchObject({ error: 'sync_in_progress' })
+    expect(fn).not.toHaveBeenCalled()
+    const intentId = (sqlite.prepare("SELECT id FROM audit_events WHERE action = 'federation_peer.sweep_accept'").get() as { id: string }).id
+    expect(auditRows().map(row => JSON.parse(row.metadata_json))).toEqual([
+      { ok: false, error: 'sync-in-progress', accept_sweep: { sweep_id: 'RUN1', dropped: 2 }, accept_audit_id: intentId },
+    ])
     expect(mirroredIds()).toEqual(['x', 'y'])
   })
 

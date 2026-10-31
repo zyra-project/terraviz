@@ -15,6 +15,10 @@ schema referenced from
 > see [`protocol/README.md`](protocol/README.md) §The federation feed
 > and [`metadata/PHASE5_IMPLEMENTATION.md`](metadata/PHASE5_IMPLEMENTATION.md).
 > Read those designs here as deferred proposals, not the protocol.
+> §Sync protocol and §Failure modes are superseded too: the implemented
+> sync is a full sync with a settle window and a guarded, deferred
+> sweep, a hidden or deleted row leaves no tombstone, and per-peer quotas
+> are deferred. The README is the reference for all three.
 > The feed's v1 key id is the node id; rotation needs a v2 contract.
 > The implementation remains a draft pending the PR's governance and
 > deployment gates, not a claim that federation has been enabled.

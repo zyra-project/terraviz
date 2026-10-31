@@ -112,7 +112,8 @@ link table in [README.md](README.md) (rows "Native record" and
 ## Step 5: Subscriber and mirror
 
 Migration `0058_federation_mirror.sql` adds `federation_peers` and
-`federated_datasets`. `federation-subscriber.ts` holds `pullPeer`, and
+`federated_datasets`, and `0059_federation_sweep_flag.sql` adds
+`federation_peers.sweep_flagged` for the sweep guard below. `federation-subscriber.ts` holds `pullPeer`, and
 `federation-mirror-d1.ts` the D1 stores behind it.
 
 A peer is added by an admin with `{ base_url, node_id, public_key }`
@@ -155,19 +156,26 @@ next full sync.
 **Sweep guard.** A feed that does not send `held` can still serve pages
 with rows missing. Before deleting, the sweep counts what it keeps and
 drops (`sweepIsPlausible`). It is refused when it keeps no row, or
-drops more than half the mirror and more than five rows. A refused
-sweep deletes nothing and is latched: it runs only when an admin accepts
-it, or once it would delete nothing, however its counts move. Every
-complete pull refuses it again, and the sync route answers 409 with its
-`sweep_id` and counts each time. It ends when a new full sync replaces
-it, or when an admin sends the 409's `sweep_refused` back as
-`accept_sweep`. That names the sweep, and runs it if it would drop no
-more than was accepted. The acceptance is audited before the pull runs.
-A peer that really withdrew most of its catalog is applied that way, or
-sooner if the peer retracts the rows: tombstones are not counted.
+drops more than half the mirror and more than five rows. It judges the
+counts the full sync finished with (`sweep_flagged`) as well as those
+when the sweep comes due, since every pull in between stamps what it
+delivers as kept. A refused sweep deletes nothing and is latched: it
+runs only when an admin accepts it, or once it would delete nothing,
+however its counts move. Every complete pull refuses it again, and the
+sync route answers 409 with its `sweep_id` and counts each time. It ends
+when a new full sync completes and replaces it, or when an admin sends
+the 409's `sweep_refused` back as `accept_sweep`. That names the sweep,
+and runs it if it would drop no more than was accepted. An acceptance
+naming the pending sweep is audited before the pull runs; any other
+cannot run one and is not passed to the pull. A peer that really withdrew most of its
+catalog is applied that way. Without one, it finishes on its own once
+every row it would drop has been retracted, held or delivered again,
+since tombstones only remove rows and the rest stamp them as kept.
 
 `last_sync_at` records the last **attempt**, successful or not; read
-it with `last_sync_error`.
+it with `last_sync_error`. Both are written last and best-effort: if
+that write fails, they keep their previous values, and the sync route's
+audit row has the outcome.
 
 Mirrored rows are stored as the wire carried them, with the signature
 header of the page that delivered them as diagnostic metadata. They are never

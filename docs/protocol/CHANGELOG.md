@@ -30,12 +30,14 @@ major (`/schema/v2/`) and an entry with a migration note.
   row's absence from a full sync, mean what they meant, and no
   withdrawn row can be held. Rows a reader once lost silently are now
   named; ignoring `held` gives the old outcome.
-- **Reference subscriber, no wire change:** a refused sweep is latched
-  and runs only when an admin accepts it, by its `sweep_id`, through
-  `POST /api/v1/publish/federation/sync` (§Subscriber Operations), or
-  once it would delete nothing. It no longer clears itself after one
-  409. Peer operators who script that route should stop on
-  `sweep_refused` rather than retry.
+- **Reference subscriber, no wire change:** the sweep guard judges the
+  counts a full sync finished with as well as those when its sweep comes
+  due. A refused sweep is latched until a new full sync completes and
+  replaces it. Until then it runs only when an admin accepts it, by its
+  `sweep_id`, through `POST /api/v1/publish/federation/sync`
+  (§Subscriber Operations), or once it would delete nothing. Peer
+  operators who script that route should stop on `sweep_refused`
+  rather than retry.
 - **Subscriber guidance, no wire change:** README §Showing Mirrored
   Rows. A peer's `weight` must not rank its rows against another
   node's. A peer's text is untrusted input, and media is outside the

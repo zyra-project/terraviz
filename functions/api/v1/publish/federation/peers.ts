@@ -6,6 +6,12 @@
  *      subscribes to, with each one's sync state and mirrored count.
  *      `sweep_refused` is true while a peer's sweep is refused and
  *      waiting for an admin (`sync.ts`); its `sweep_after` is then null.
+ *      Once a full sync starts it reads false, with
+ *      `full_sync_in_progress` true, though the old sweep stays latched
+ *      until that full sync completes and replaces it. `sweep_flagged`
+ *      says the pending sweep's own full sync finished with counts the
+ *      guard fails, which is why a sweep can be refused on counts that
+ *      look ordinary.
  * POST /api/v1/publish/federation/peers — subscribe to a peer.
  *
  * Metadata Phase 5, step 5b. Admin-only, and a 404 unless
@@ -77,6 +83,7 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
       full_sync_in_progress: p.fullSyncRun !== null,
       reconcile_pending: p.sweepRun !== null,
       sweep_refused: isSweepRefused(p),
+      sweep_flagged: p.sweepRun !== null && p.sweepFlagged,
       sweep_after: p.sweepAfterMs,
       sync_lease_expires: p.syncLeaseExpiresMs ?? null,
       mirrored_count: p.mirroredCount,

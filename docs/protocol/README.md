@@ -257,13 +257,27 @@ the contract is here, because a schema cannot carry it.
   drops most of the mirror. The reference subscriber refuses one that
   keeps no row, or drops more than half the mirror and more than five
   rows. So it still lets up to five rows go whatever share they are,
-  which on a small mirror can be most of it. A refused sweep deletes
-  nothing and is latched: it runs only when an operator accepts it, or
-  once it would delete nothing at all, even if later pulls bring its
-  counts under the threshold. Every complete pull refuses it again,
-  until a new full sync replaces it (§Subscriber Operations). That
-  acceptance is how a peer that really withdrew most of its catalog is
-  applied.
+  which on a small mirror can be most of it. A subscriber with a guard
+  should also follow these rules, which close the ways past it:
+  - **Judge the full sync's own counts too.** Count when the full sync
+    finishes as well as when its sweep comes due. Rows delivered in
+    between are kept, so the later counts alone can be carried past the
+    guard. The full sync's counts miss rows the settle window held back,
+    so a sweep they fail must still run once it would drop nothing.
+  - **Latch a refusal.** Once refused, a sweep runs only on an
+    operator's approval, or once it would drop nothing. It never runs
+    because later counts look ordinary.
+  - **Bind an approval to its sweep.** Name the sweep's run and the most
+    rows it may drop, and let the approval lapse once a full sync
+    starts. That is enough because within one run the drop set only
+    shrinks: delivered, held and new rows are stamped with the run, and
+    a retraction only removes rows. A full sync stamps another run, so
+    rows the operator saw as kept could join the drop set.
+
+  The reference subscriber refuses the sweep again on every complete
+  pull, until a new full sync completes and replaces it (§Subscriber
+  Operations). An approval is how a peer that really withdrew most of
+  its catalog is applied.
 - **Anonymous-read bounds.** A best-effort per-isolate limiter allows
   600 requests per source IP per minute, before D1 work, then returns
   429 `rate_limited` and `Retry-After: 60`. This is not a global quota:
@@ -357,8 +371,13 @@ reconciliation. That loop ends at `reconcile_pending: false`, or at a
 Core-library defaults are separately 100 entries times 8 pages; they
 are not Free-plan endpoint bounds.
 
-A top-level `error` means no pull ran, and a `result` means one did and
-may have applied a page. 409 `sync_in_progress` is another pull holding
+A `result` means a pull ran and may have applied a page. A top-level
+`error` means none ran, except 500 `sync_failed`: a store failure can
+raise it after a page was applied, though not after a sweep this node
+saw complete, which is reported even if recording the pull then fails.
+If that last write fails, the peer's `last_sync_at` and
+`last_sync_error` keep their previous values; the audit row has the
+outcome. 409 `sync_in_progress` is another pull holding
 the lease: retry once it expires. 409 `peer_not_active` is a paused or
 blocked peer: stop. A pull that fails answers 503 with `result.error`;
 most codes are the peer's, but `lease_lost` is this node's. Results are
@@ -378,17 +397,37 @@ POST /api/v1/publish/federation/sync
 ```
 
 The sweep runs if it is still that `sweep_id` and would drop at most
-`dropped` rows, and the result carries `sweep_accepted`. An audit row
-naming who accepted which sweep is written first, and nothing runs if it
-cannot be. `result.accept_sweep_result` says what became of it: `ran`,
-`not_needed` (the sweep ran without it), `stale` (another sweep, or more
-rows; the 409 carries the current ones), or `not_reached`. `not_reached`
-means the call did not reach the sweep: the page had more after it, a
-full sync is running, or no sweep is due. Send it again on a call that
-completes. `accept_sweep` cannot be combined with `full`. While a sweep
-is refused the peer list shows `sweep_refused: true` and a null
-`sweep_after`, and every complete pull recounts the peer's mirrored rows;
-a scheduler, when one exists, should back off such a peer. Peer lists expose `sweep_after`
+`dropped` rows. An audit row naming who accepted which sweep is written
+before any pull that could run it, and nothing runs if it cannot be; the
+pull's own audit row carries its id as `accept_audit_id`. An accept that
+does not name the pending sweep cannot run one, gets no such row, and is
+not passed to the pull at all.
+`result.accept_sweep_result` says what became of the accept, and the run
+is compared first. `stale` means it named a sweep that is not the one
+pending, or one a full sync is replacing. That can come with a 200: when
+the sweep it named has gone, or while a full sync is under way, which
+the call then carries on by a page. For the pending sweep it is `ran` (the
+result carries `sweep_accepted`), `not_needed` (the sweep ran without
+it), `stale` (it would drop more rows than accepted; the 409 carries the
+current counts), or `not_reached`. `not_reached` means the call did not
+get to the sweep: the page had more after it, the sweep was not yet due,
+or the pull failed first.
+Send it again on a call that completes; on a peer changing more than a
+page of rows between calls, keep calling until one does. `accept_sweep`
+cannot be combined with `full`.
+
+While a sweep is refused, and no full sync is under way, the peer list
+shows `sweep_refused: true` and a null `sweep_after`. Once a full sync
+starts it shows `sweep_refused: false` and `full_sync_in_progress: true`,
+though the old sweep stays latched until that full sync completes.
+`sweep_flagged: true` says the pending sweep's own full sync failed the
+guard, which is why a sweep can be refused on counts that look ordinary.
+Check the peer, then accept, or run a new full sync once the peer has
+settled. Every complete pull recounts a refused sweep's rows, so a
+scheduler, when one exists, should back off such a peer. A full
+sync replaces a refused sweep only when it completes. Until then the
+refused sweep cannot be accepted, and a full sync cannot be abandoned,
+so start one only for a peer whose feed can be read to its end. Peer lists expose `sweep_after`
 and `sync_lease_expires` as epoch milliseconds. A cancelled invocation
 may leave its lease held for up to five minutes. GET `mirrored_count`
 counts present rows; DELETE `removed_rows` counts rows actually removed.

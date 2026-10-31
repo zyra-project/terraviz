@@ -13,14 +13,18 @@
  * the next call. Admin-only, and a 404 unless `FEDERATION_ENABLED` is
  * `'true'`, by the same gate as `peers.ts`.
  *
- * **Two envelopes.** A top-level `error` means no pull ran; a `result`
- * means one did, and may have applied a page.
+ * **Two envelopes.** A `result` means a pull ran and may have applied a
+ * page. A top-level `error` means none ran, except `sync_failed`, which
+ * a store failure can raise after a page was applied.
  * - 400 `{ errors }` for field errors; 404 `peer_not_found`.
  * - 409 `peer_not_active`, for a paused or blocked peer: stop.
  * - 409 `sync_in_progress`: another pull holds the lease. Retry once it
  *   expires, at most five minutes.
  * - 500 `sync_failed`: this node's store failed, after an audit row
- *   recording `store-error`. 500 `audit_failed`: the audit row an
+ *   recording `store-error`. A page may already have been applied, but
+ *   not a sweep this node saw complete, since one that ran is reported
+ *   even if recording the pull then fails. (A sweep whose commit was
+ *   never acknowledged can have run unseen.) 500 `audit_failed`: the audit row an
  *   `accept_sweep` needs could not be written, so nothing ran.
  * - 200 with `result.ok: true`.
  * - 503 with `result.error`: the pull failed. Most codes are the peer's
@@ -33,20 +37,30 @@
  * **A refused sweep.** A sweep that would drop all of the mirror, or
  * most of it, deletes nothing and answers 409 with
  * `result.sweep_refused: { sweep_id, kept, dropped }`. The page the pull
- * read is still applied. The refusal is latched: the sweep stays pending
- * and runs only once accepted, or once it would delete nothing. So every
- * complete pull answers 409 again until a full sync replaces it.
+ * read is still applied. The guard judges both the counts the full sync
+ * finished with and those when the sweep is due. The refusal is latched:
+ * the sweep stays pending and runs only once accepted, or once it would
+ * delete nothing. So every complete pull answers 409 again until a full
+ * sync replaces it. A full sync that never completes keeps the refused
+ * sweep in place with no way to accept it, and cannot be abandoned.
  *
  * To accept it, after checking the peer, send `sweep_refused` back as
  * `accept_sweep`. The sweep runs if it is still that `sweep_id` and would
  * drop at most `dropped` rows; `kept` is accepted and ignored.
- * `result.accept_sweep_result` says what happened: `ran`; `not_needed`
- * (the sweep ran without it); `stale` (another sweep, or more rows: the
- * 409 carries the current ones); or `not_reached` (this call did not
- * reach the sweep, because the page had more after it, a full sync is
- * running or no sweep is due, so send it again on a call that
- * completes). An audit row naming who accepted which sweep is written
- * before the pull, and the pull does not run if it cannot be.
+ * `result.accept_sweep_result` says what happened. `stale` comes first:
+ * the accept named a sweep that is not the one pending, or one a full
+ * sync is replacing. It can come with a 200: when that sweep is gone,
+ * or while a full sync is under way, which the call then carries on by
+ * a page.
+ * For the pending sweep: `ran` (`sweep_accepted` says what it dropped),
+ * `not_needed` (the sweep ran without it), `stale` (it would drop more
+ * than accepted; the 409 carries the current counts), or `not_reached`
+ * (this call did not get to it: the page had more after it, the sweep is
+ * not yet due, or the pull failed first, so send it again on a call
+ * that completes). An audit
+ * row naming who accepted which sweep is written before a pull that
+ * could run it, and the pull does not run if it cannot be; the outcome
+ * row carries its id as `accept_audit_id`.
  * `accept_sweep` cannot be combined with `full`, which replaces the
  * sweep it would accept.
  */
@@ -128,9 +142,12 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
     })
 
   // An accepted sweep can delete most of a mirror, so who accepted it is
-  // recorded before it can run, and it does not run unrecorded.
-  if (acceptSweep) {
-    const recorded = await writeAuditEvent(db, {
+  // recorded before it can run, and it does not run unrecorded. Only an
+  // accept that names the pending sweep can run one (a full sync never
+  // finishes with an old run's id), so only that one needs the row.
+  let acceptAuditId: string | null = null
+  if (acceptSweep && peer.sweepRun === acceptSweep.sweepRun && peer.fullSyncRun === null) {
+    acceptAuditId = await writeAuditEvent(db, {
       actor_kind: 'publisher',
       actor_id: publisher.id,
       action: 'federation_peer.sweep_accept',
@@ -138,10 +155,13 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
       subject_id: peerId,
       metadata_json: JSON.stringify(acceptJson(acceptSweep)),
     })
-    if (recorded === null) {
+    if (acceptAuditId === null) {
       return jsonError(500, 'audit_failed', 'The acceptance could not be recorded, so the sweep was not run.')
     }
   }
+  const acceptMeta = acceptSweep
+    ? { accept_sweep: acceptJson(acceptSweep), ...(acceptAuditId ? { accept_audit_id: acceptAuditId } : {}) }
+    : {}
 
   let result
   try {
@@ -157,21 +177,26 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
         full: input.full === true,
         maxPages: 1,
         pageLimit: (input.page_size as number | undefined) ?? 25,
-        ...(acceptSweep ? { acceptSweep } : {}),
+        // An accept with no intent row cannot run a sweep (see above), so
+        // it is not handed to the pull at all: that it never runs
+        // unrecorded rests on this line, not on which ids are shown.
+        ...(acceptSweep && acceptAuditId ? { acceptSweep } : {}),
       },
     )
   } catch (err) {
     console.error('[federation/sync] store failure', peerId, err)
-    await audit({ ok: false, error: 'store-error', ...(acceptSweep ? { accept_sweep: acceptJson(acceptSweep) } : {}) }).catch(() => {})
+    await audit({ ok: false, error: 'store-error', ...acceptMeta }).catch(() => {})
     return jsonError(500, 'sync_failed', 'The pull failed on this node; see the logs.')
   }
-  if (result.error === 'sync-in-progress') {
-    return jsonError(409, 'sync_in_progress', 'Another pull of this peer is running.')
-  }
-  if (result.error === 'peer-not-active') {
-    return jsonError(409, 'peer_not_active', 'This peer is no longer active; it is not pulled.')
+  if (result.error === 'sync-in-progress' || result.error === 'peer-not-active') {
+    // Nothing ran. An accept's intent row still gets its outcome.
+    if (acceptAuditId) await audit({ ok: false, error: result.error, ...acceptMeta })
+    return result.error === 'sync-in-progress'
+      ? jsonError(409, 'sync_in_progress', 'Another pull of this peer is running.')
+      : jsonError(409, 'peer_not_active', 'This peer is no longer active; it is not pulled.')
   }
 
+  const acceptOutcome = acceptSweep && !acceptAuditId ? 'stale' : result.acceptOutcome
   await audit({
     ok: result.ok,
     ...(result.error ? { error: result.error } : {}),
@@ -182,8 +207,8 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
     held: result.held,
     reconciled: result.reconciled,
     reconcile_pending: result.reconcilePending,
-    ...(acceptSweep ? { accept_sweep: acceptJson(acceptSweep) } : {}),
-    ...(result.acceptOutcome ? { accept_sweep_result: result.acceptOutcome } : {}),
+    ...acceptMeta,
+    ...(acceptOutcome ? { accept_sweep_result: acceptOutcome } : {}),
     ...(result.sweepRefused ? { sweep_refused: sweepJson(result.sweepRefused) } : {}),
     ...(result.sweepAccepted ? { sweep_accepted: sweepJson(result.sweepAccepted) } : {}),
   })
@@ -202,7 +227,7 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
     ...(result.status !== undefined ? { upstream_status: result.status } : {}),
     ...(result.sweepRefused ? { sweep_refused: sweepJson(result.sweepRefused) } : {}),
     ...(result.sweepAccepted ? { sweep_accepted: sweepJson(result.sweepAccepted) } : {}),
-    ...(result.acceptOutcome ? { accept_sweep_result: result.acceptOutcome.replaceAll('-', '_') } : {}),
+    ...(acceptOutcome ? { accept_sweep_result: acceptOutcome.replaceAll('-', '_') } : {}),
   } })
 }
 

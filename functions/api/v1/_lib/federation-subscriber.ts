@@ -60,7 +60,12 @@
  * usual, that deletes the whole mirror. So before deleting, the sweep
  * counts what it keeps and what it drops, and `sweepIsPlausible`
  * refuses one that keeps nothing, or drops more than half the mirror
- * and more than `SWEEP_GUARD_MIN_ROWS` rows.
+ * and more than `SWEEP_GUARD_MIN_ROWS` rows. It judges two sets of
+ * counts: the ones the full sync finished with (`sweep_flagged`), and
+ * the ones when the sweep comes due. Every incremental pull before then
+ * stamps what it delivers with the sweep's run, so judging only the
+ * later counts let a peer that delivered enough rows in between carry a
+ * sweep past the guard.
  *
  * **A refused sweep is latched.** It deletes nothing and stays pending,
  * marked refused (`refuseSweep`: `sweep_after` cleared, `sweep_run`
@@ -140,16 +145,20 @@ export interface SweepAcceptance {
   dropped: number
 }
 
-/** What became of an `acceptSweep`: `ran` (the approval ran a sweep the
- *  guard holds back), `not-needed` (the sweep ran without it), `stale`
- *  (another run, or more rows; refused), `not-reached` (the pull never
- *  reached a sweep: incomplete, a full sync, none pending or not due). */
+/** What became of an `acceptSweep` on a pull that ran. The run is
+ *  compared first: an accept naming any sweep but the one pending, or
+ *  one a full sync is replacing, is `stale`, even when the pull succeeds.
+ *  For the pending sweep: `ran` (the approval ran a sweep the guard holds
+ *  back), `not-needed` (it ran without it), `stale` (it would drop more
+ *  rows than accepted; refused), or `not-reached` (this pull did not get
+ *  to it: incomplete, not yet due, or a failure before it). */
 export type SweepAcceptOutcome = 'ran' | 'not-needed' | 'stale' | 'not-reached'
 
 /** Whether the peer's pending sweep has been refused and is waiting
- *  for an operator: a run is pending but no longer has a due time. */
-export function isSweepRefused(peer: Pick<FederationPeer, 'sweepRun' | 'sweepAfterMs'>): boolean {
-  return peer.sweepRun !== null && peer.sweepAfterMs === null
+ *  for an operator: a run is pending but no longer has a due time, and
+ *  no full sync is under way to replace it. */
+export function isSweepRefused(peer: Pick<FederationPeer, 'sweepRun' | 'sweepAfterMs' | 'fullSyncRun'>): boolean {
+  return peer.sweepRun !== null && peer.sweepAfterMs === null && peer.fullSyncRun === null
 }
 
 /**
@@ -204,6 +213,8 @@ export interface FederationPeer {
   /** Epoch ms after which an incremental pull may run the sweep; `null`
    *  with a `sweepRun` once the sweep has been refused. */
   sweepAfterMs: number | null
+  /** The counts the full sync finished with failed the guard. */
+  sweepFlagged: boolean
   syncLeaseExpiresMs?: number | null
 }
 
@@ -248,9 +259,16 @@ export interface FederationMirrorStore {
    *  and `full_sync_run` — all or nothing, and only under the lease.
    *  `false` when the lease was lost and nothing was written. */
   applyPage(page: MirrorPage): Promise<boolean>
-  /** Clear `full_sync_run` and record the run as the pending sweep.
-   *  `false` when the lease was lost. */
-  finishFullSync(peerId: string, runId: string, leaseId: string, sweepAfterMs: number): Promise<boolean>
+  /** Clear `full_sync_run` and record the run as the pending sweep,
+   *  `flagged` when its own counts fail the guard. `false` when the lease
+   *  was lost. */
+  finishFullSync(
+    peerId: string,
+    runId: string,
+    leaseId: string,
+    sweepAfterMs: number,
+    flagged: boolean,
+  ): Promise<boolean>
   /** How many of the peer's rows the sweep run delivered, and how many
    *  it did not and would drop. */
   countSweep(peerId: string, sweepRun: string): Promise<SweepCounts>
@@ -311,7 +329,8 @@ export interface PullResult {
   sweepRefused?: SweepReport
   /** A refused sweep this pull ran because the operator accepted it. */
   sweepAccepted?: SweepReport
-  /** Set whenever `acceptSweep` was given: what became of it. */
+  /** What became of `acceptSweep`, set whenever one was given to a pull
+   *  that ran (not on `peer-not-active` or `sync-in-progress`). */
   acceptOutcome?: SweepAcceptOutcome
 }
 
@@ -332,9 +351,9 @@ export interface PullOptions {
   pageLimit?: number
   maxBodyBytes?: number
   timeoutMs?: number
-  /** Run a refused sweep, if it is still this run and would drop no
-   *  more rows than this: what a refusal reported, which the operator
-   *  accepted. */
+  /** Run the pending sweep despite the guard, if it is this run and
+   *  would drop no more rows than this: what a refusal reported, which
+   *  the operator accepted. */
   acceptSweep?: SweepAcceptance
 }
 
@@ -629,7 +648,10 @@ export function describePullFailure(error: PullFailure, status?: number): string
  * Pull one peer's feed, applying each verified page as it arrives.
  * Never throws for anything the peer sends; a store failure does
  * throw, after an attempt to record it, since the mirror's state is
- * then unknown. `peer` names the peer; its state is re-read under the
+ * then unknown. The exception is the last write, which records the
+ * outcome on the peer row: by then the mirror's state is known, so a
+ * failure there is logged and the result returned, and `last_sync_at`
+ * and `last_sync_error` keep their previous values. `peer` names the peer; its state is re-read under the
  * lease, so a caller's stale copy cannot move the cursor back.
  */
 export async function pullPeer(
@@ -719,6 +741,12 @@ async function pullUnderLease(
   const record = (error: string | null) =>
     deps.store.recordSyncResult(peer.id, leaseId, { at: new Date(deps.now()).toISOString(), error })
   const latched = isSweepRefused(peer)
+  // The run is compared first. An accept for any sweep but the one
+  // pending, or for one a full sync is replacing, is stale whatever this
+  // pull does; only an accept for the pending sweep can run it.
+  const accept = opts.acceptSweep
+  const acceptForRun = accept !== null && !full && peer.sweepRun !== null && accept.sweepRun === peer.sweepRun ? accept : null
+  if (accept !== null && acceptForRun === null) result.acceptOutcome = 'stale'
 
   const origin = parsePeerBaseUrl(peer.baseUrl)
   let publicKey: CryptoKey | null = null
@@ -774,7 +802,10 @@ async function pullUnderLease(
     }
     if (result.complete && full) {
       const sweepAfterMs = deps.now() + FEED_SETTLE_SECONDS * 1000 + SWEEP_SKEW_MS
-      if (!(await deps.store.finishFullSync(peer.id, runId, leaseId, sweepAfterMs))) {
+      // What this full sync saw, before later pulls stamp more rows with
+      // its run: the guard judges these counts as well as the later ones.
+      const flagged = !sweepIsPlausible(await deps.store.countSweep(peer.id, runId))
+      if (!(await deps.store.finishFullSync(peer.id, runId, leaseId, sweepAfterMs, flagged))) {
         throw new PullError('lease-lost')
       }
       result.reconcilePending = true
@@ -788,20 +819,21 @@ async function pullUnderLease(
       const sweepRun = peer.sweepRun
       const counts = await deps.store.countSweep(peer.id, sweepRun)
       const report: SweepReport = { sweepRun, ...counts }
-      // Once refused, a sweep needs an operator whatever its counts
-      // become; one that deletes nothing never does.
-      const needsAcceptance = counts.dropped > 0 && (latched || !sweepIsPlausible(counts))
-      const accept = opts.acceptSweep
+      // Once refused, or flagged when its full sync finished, a sweep
+      // needs an operator whatever its counts become; one that deletes
+      // nothing never does.
+      const needsAcceptance =
+        counts.dropped > 0 && (latched || peer.sweepFlagged || !sweepIsPlausible(counts))
       // Within one run the drop set only shrinks (see the module
       // docstring), so this run, dropping no more than was accepted,
       // drops only rows the operator approved.
-      const accepted = accept !== null && accept.sweepRun === sweepRun && counts.dropped <= accept.dropped
+      const accepted = acceptForRun !== null && counts.dropped <= acceptForRun.dropped
       if (needsAcceptance && !accepted) {
         if (!latched && !(await deps.store.refuseSweep(peer.id, sweepRun, leaseId))) {
           throw new PullError('lease-lost')
         }
         result.sweepRefused = report
-        if (accept !== null) result.acceptOutcome = 'stale'
+        if (acceptForRun !== null) result.acceptOutcome = 'stale'
         throw new PullError('sweep-refused')
       }
       const removed = await deps.store.finishSweep(peer.id, sweepRun, leaseId)
@@ -809,14 +841,10 @@ async function pullUnderLease(
       result.reconciled = removed
       result.reconcilePending = false
       if (needsAcceptance) result.sweepAccepted = report
-      if (accept !== null) result.acceptOutcome = needsAcceptance ? 'ran' : 'not-needed'
+      if (acceptForRun !== null) result.acceptOutcome = needsAcceptance ? 'ran' : 'not-needed'
     }
-    if (opts.acceptSweep !== null && result.acceptOutcome === undefined) result.acceptOutcome = 'not-reached'
+    if (acceptForRun !== null && result.acceptOutcome === undefined) result.acceptOutcome = 'not-reached'
     result.ok = true
-    // A refused sweep this pull did not reach is still refused; keep
-    // saying so rather than clearing it on a pull that stopped short.
-    await record(!full && latched && result.reconcilePending ? 'sweep-refused' : null)
-    return result
   } catch (err) {
     if (!(err instanceof PullError)) {
       await record('store-error').catch(() => {})
@@ -824,8 +852,25 @@ async function pullUnderLease(
     }
     result.error = err.code
     if (err.status !== undefined) result.status = err.status
-    if (opts.acceptSweep !== null && result.acceptOutcome === undefined) result.acceptOutcome = 'not-reached'
-    await record(describePullFailure(err.code, err.status))
+    if (acceptForRun !== null && result.acceptOutcome === undefined) result.acceptOutcome = 'not-reached'
+    // As below: the failure is known, and so is the mirror, so a failed
+    // write of it must not turn a refusal into a store error.
+    try {
+      await record(describePullFailure(err.code, err.status))
+    } catch (recordErr) {
+      console.error('[federation] could not record a failed pull', peer.id, recordErr instanceof Error ? recordErr.name : 'UnknownError')
+    }
     return result
   }
+  // The mirror's state is known here, whatever it took to get here, so
+  // failing to record it must not turn a pull that ran (a sweep
+  // included) into a reported store failure. A refused sweep this pull
+  // did not reach is still refused; keep saying so rather than clearing
+  // it on a pull that stopped short.
+  try {
+    await record(!full && latched && result.reconcilePending ? 'sweep-refused' : null)
+  } catch (err) {
+    console.error('[federation] could not record a pull that ran', peer.id, err instanceof Error ? err.name : 'UnknownError')
+  }
+  return result
 }

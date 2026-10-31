@@ -409,7 +409,7 @@ CREATE TABLE federation_peers (
   sync_lease_until      INTEGER,
   created_at            TEXT NOT NULL,
   updated_at            TEXT NOT NULL
-);
+, sweep_flagged INTEGER NOT NULL DEFAULT 0);
 
 CREATE TABLE feed_connectors (
   id TEXT PRIMARY KEY,                -- ULID for operator-added rows; fixed id for seeds
