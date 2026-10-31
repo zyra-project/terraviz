@@ -12,7 +12,7 @@
 import { generateKeyPairSync } from 'node:crypto'
 import type Database from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { onRequest, onRequestGet, resetFeedSigningKeyCache, wellFormed } from './feed'
+import { onRequest, onRequestGet, resetFeedSigningKeyCache, wellFormed, feedRateKey } from './feed'
 import { onRequest as unimplemented } from './[[path]]'
 import { asD1, makeCtx, seedFixtures } from '../_lib/test-helpers'
 import { encodeFeedCursor, type FederationFeedBody } from '../_lib/federation-feed'
@@ -73,6 +73,14 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
+})
+
+describe('feed rate keys', () => {
+  it('groups equivalent IPv6 addresses by /64', () => {
+    expect(feedRateKey('2001:db8::1')).toBe(feedRateKey('2001:0db8:0:0:abcd::1'))
+    expect(feedRateKey('2001:db8:0:1::1')).not.toBe(feedRateKey('2001:db8::1'))
+    expect(feedRateKey('192.0.2.1')).toBe('192.0.2.1')
+  })
 })
 
 describe('GET /api/v1/federation/feed — refusals', () => {
@@ -214,6 +222,15 @@ describe('GET /api/v1/federation/feed — pages', () => {
     expect(body.has_more).toBe(false)
     expect(body.datasets.map(d => d.id)).toEqual([idOf(0), idOf(1), idOf(2)])
     expect(body.datasets[0].originNode).toBe('NODE000')
+    expect(body.tombstones).toEqual([])
+  })
+
+  it('excludes foreign-origin datasets and tombstones', async () => {
+    const { sqlite, env } = setup(3)
+    sqlite.prepare("UPDATE datasets SET origin_node = 'OTHER' WHERE id = ?").run(idOf(0))
+    sqlite.prepare("UPDATE datasets SET origin_node = 'OTHER', retracted_at = '2026-01-20T00:00:00.000Z' WHERE id = ?").run(idOf(1))
+    const body = await verified(await get(env))
+    expect(body.datasets.map(d => d.id)).toEqual([idOf(2)])
     expect(body.tombstones).toEqual([])
   })
 

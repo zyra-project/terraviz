@@ -22,16 +22,16 @@ import {
 } from './catalog-store'
 import type { FederatedRow, FederationFeedStore } from './federation-feed'
 
-/** Rows the feed may mention at all: published, public visibility. */
+/** Rows the feed may mention at all: published, public visibility, non-hidden. */
 const FEED_SCAN_PREDICATE = "visibility = 'public' AND published_at IS NOT NULL AND is_hidden = 0"
 
 export function d1FederationFeedStore(db: D1Database): FederationFeedStore {
   return {
     getNodeIdentity: () => getNodeIdentity(db),
     getDecorations: ids => getDecorations(db, ids),
-    async listFederatedRows({ after, until, limit }): Promise<FederatedRow[]> {
-      const where = [FEED_SCAN_PREDICATE, 'updated_at <= ?']
-      const binds: unknown[] = [until]
+    async listFederatedRows({ nodeId, after, until, limit }): Promise<FederatedRow[]> {
+      const where = [FEED_SCAN_PREDICATE, 'origin_node = ?', 'updated_at <= ?']
+      const binds: unknown[] = [nodeId, until]
       if (after) {
         where.push('(updated_at, id) > (?, ?)')
         binds.push(after.updatedAt, after.id)

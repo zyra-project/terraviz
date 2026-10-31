@@ -203,6 +203,15 @@ describe('sign and verify', () => {
     expect(result).toEqual({ ok: true, body, created: NOW })
   })
 
+  it.each([JSON.stringify(body, null, 2), '\ufeff' + JSON.stringify(body)])('rejects a correctly signed noncanonical body', async text => {
+    const { priv, pub } = await rfcKeys()
+    const digest = Buffer.from(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))).toString('base64url')
+    const input = new TextEncoder().encode(`terraviz-federation-signature-v1\nkeyid=${KEY_ID}\ncreated=${NOW}\ntarget=${TARGET}\ndigest=sha-256:${digest}`)
+    const sig = Buffer.from(await crypto.subtle.sign('Ed25519', priv, input)).toString('base64url')
+    const header = `v=1, keyid=${KEY_ID}, created=${NOW}, sig=${sig}`
+    expect(await verifyFederationBody(text, header, { publicKey: pub, expectedKeyId: KEY_ID, expectedTarget: TARGET, now: NOW })).toEqual({ ok: false, reason: 'malformed-body' })
+  })
+
   it('rejects reformatting of a signed page', async () => {
     const { priv, pub } = await rfcKeys()
     const signed = await signFederationBody(body, priv, PARAMS)

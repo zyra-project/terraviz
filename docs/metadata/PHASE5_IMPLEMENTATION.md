@@ -218,6 +218,10 @@ scoping amendment and governance agreement remain maintainer-owned.
 
 ## Deferred
 
+`federated_datasets.payload_json` is untrusted peer content. Before serving
+it, re-validate the payload, restrict URL schemes, and resolve relative
+`dataLink` values against the peer.
+
 - **Handshake, HMAC and grants.** Only public rows are federated, and
   only by pull. Nothing grants a peer more than the public catalog.
 - **Scheduled sync.** Pulls are manual; a sync-interval setting arrives

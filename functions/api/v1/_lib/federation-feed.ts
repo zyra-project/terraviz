@@ -8,24 +8,13 @@
  * The D1 implementation is `federation-feed-d1.ts`; the route wires the
  * two together and signs the result with `federation-signature.ts`.
  *
- * **What a page is.** Every dataset row that is published with
- * `visibility = 'public'`, in `(updated_at, id)` order, after the
- * cursor's position and no later than a settle watermark. A row that
- * is currently public by `PUBLIC_DATASET_PREDICATE` goes out as a full
- * `WireDataset`; one that is published and public-visibility but hidden
- * or retracted goes out as a **tombstone** — its id alone. Drafts and
- * rows whose visibility is anything but `public` never appear, so the
- * feed carries nothing the public catalog would not, apart from the id
- * of a public row an operator later hid or retracted.
+ * **What a page is.** Published, public-visibility, non-hidden rows
+ * in (updated_at, id) order. Visible rows are full datasets; retracted
+ * rows are tombstones. Hidden rows and their ids never enter the feed.
  *
- * **What a subscriber does with it.** Apply pages in order: upsert
- * each dataset, drop each tombstone. A pull with no cursor is a full
- * sync and is **authoritative** once its last page arrives: the
- * subscriber drops every row from this peer it did not see in it. That
- * is what covers the two changes the feed cannot tombstone — a hard
- * delete (the row is gone) and a visibility change away from `public`
- * (the row leaves the scan) — so a subscriber should run a full sync
- * periodically, not only incremental pulls.
+ * **What a subscriber does with it.** Apply pages in order. A completed
+ * full sync schedules a deferred sweep of rows not seen in the run. This
+ * covers hard deletes, hidden rows and changes away from public visibility.
  *
  * **Why a settle watermark.** `updated_at` is stamped by the writer,
  * not by commit order, so a write that commits after a page was read
@@ -92,10 +81,11 @@ export interface FederatedRow {
  */
 export interface FederationFeedStore {
   getNodeIdentity(): Promise<NodeIdentityRow | null>
-  /** Published, `visibility = 'public'` rows strictly after `after`
+  /** Published, non-hidden, local-origin, `visibility = 'public'` rows strictly after `after`
    *  (or from the start), with `updated_at <= until`, ordered by
    *  `updated_at` then `id`, at most `limit` of them. */
   listFederatedRows(query: {
+    nodeId: string
     after: FeedPosition | null
     until: string
     limit: number
@@ -192,7 +182,7 @@ export async function buildFeedPage(
   opts: BuildFeedPageOptions,
 ): Promise<FederationFeedBody> {
   const until = new Date(opts.nowMs - FEED_SETTLE_SECONDS * 1000).toISOString()
-  const rows = await store.listFederatedRows({ after: opts.after, until, limit: opts.limit + 1 })
+  const rows = await store.listFederatedRows({ nodeId: opts.identity.node_id, after: opts.after, until, limit: opts.limit + 1 })
   const hasMore = rows.length > opts.limit
   const page = rows.slice(0, opts.limit)
 
@@ -206,6 +196,7 @@ export async function buildFeedPage(
       console.error('[federation/feed] skipped unserializable row', row.id)
     }
   }
+  if (visible.length > 0 && datasets.length === 0) throw new Error('all visible feed rows failed serialization')
   const tombstones = page.filter(r => !r.visible).map(r => r.row.id)
 
   const last = page.length > 0 ? page[page.length - 1].row : null

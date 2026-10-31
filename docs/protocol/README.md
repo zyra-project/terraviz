@@ -220,7 +220,7 @@ the contract is here, because a schema cannot carry it.
   methods return JSON 405 with `Allow: GET, HEAD`. Unimplemented paths
   such as `/federation/handshake` return JSON 404, not SPA HTML.
   A single unserializable row is logged locally and skipped, with the
-  cursor advancing past it; 500 `unsignable_row` is a page-level
+  cursor advancing past it. If every visible row on a page fails, the feed returns 503 `feed_unavailable` so subscribers do not reconcile an empty page; 500 `unsignable_row` is a page-level
   canonicalization failure. Lone surrogates become U+FFFD and invalid
   probing metadata is omitted, including nesting beyond 60 levels to
   reserve space for the feed envelope. An unexpected skipped row may
@@ -230,9 +230,10 @@ the contract is here, because a schema cannot carry it.
   600 requests per source IP per minute, before D1 work, then returns
   429 `rate_limited` and `Retry-After: 60`. This is not a global quota:
   configure edge/WAF limits for deployment-wide abuse protection. The
-  limiter tracks at most 10,000 active addresses per isolate; when
-  full, it refuses new callers until entries expire, so a flood can
-  also lock out real peers for up to a minute. Requests without
+  limiter groups IPv6 addresses by /64 and tracks at most 10,000 buckets
+  per isolate, evicting the oldest when full. Cloudflare Worker requests
+  to another zone share a source IP and therefore a bucket; configure a
+  zone rate-limit rule for deployment-wide control. Requests without
   `CF-Connecting-IP` share one `unknown` bucket (notably off Cloudflare).
   The 600/minute limit still permits substantial D1 load; operators
   should set tighter edge limits for their peers' expected pull rate.

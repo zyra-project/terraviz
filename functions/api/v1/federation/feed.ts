@@ -58,15 +58,31 @@ export function resetFeedSigningKeyCache(): void {
   requestRates.clear()
 }
 
+/** Normalize IPv6 to a /64, including compressed and IPv4-mapped forms. */
+export function feedRateKey(address: string): string {
+  if (!address.includes(':')) return address
+  try {
+    const host = new URL(`http://[${address}]/`).hostname.slice(1, -1)
+    const [left, right = ''] = host.split('::')
+    const prefix = left ? left.split(':') : []
+    const suffix = right ? right.split(':') : []
+    const groups = host.includes('::') ? [...prefix, ...Array(8 - prefix.length - suffix.length).fill('0'), ...suffix] : prefix
+    if (groups.length !== 8) return 'unknown'
+    return groups.slice(0, 4).map(group => parseInt(group, 16).toString(16)).join(':') + '::/64'
+  } catch { return 'unknown' }
+}
+
 function rateLimited(request: Request): boolean {
   const now = Date.now()
-  const address = request.headers.get('CF-Connecting-IP') ?? 'unknown'
+  const address = feedRateKey(request.headers.get('CF-Connecting-IP') ?? 'unknown')
   let entry = requestRates.get(address)
   if (!entry || now >= entry.until) {
+    if (entry) requestRates.delete(address)
     for (const [key, value] of requestRates) {
-      if (now >= value.until) requestRates.delete(key)
+      if (now < value.until) break
+      requestRates.delete(key)
     }
-    if (requestRates.size >= 10_000) return true
+    if (requestRates.size >= 10_000) requestRates.delete(requestRates.keys().next().value!)
     entry = { count: 0, until: now + 60_000 }
     requestRates.set(address, entry)
   }

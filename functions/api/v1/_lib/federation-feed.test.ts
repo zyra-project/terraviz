@@ -99,7 +99,7 @@ function row(id: string, updatedAt: string, visible = true): FederatedRow {
 }
 
 function fakeStore(rows: FederatedRow[]) {
-  const calls: Array<{ after: FeedPosition | null; until: string; limit: number }> = []
+  const calls: Array<{ nodeId: string; after: FeedPosition | null; until: string; limit: number }> = []
   const decorated: string[][] = []
   const store: FederationFeedStore = {
     getNodeIdentity: async () => IDENTITY,
@@ -147,10 +147,15 @@ describe('buildFeedPage', () => {
     expect((await page(store, after)).datasets.map(record => record.id)).toEqual(['C'])
   })
 
+  it('fails the page when every visible row fails serialization', async () => {
+    const { store } = fakeStore([row('A', '2026-01-01T00:00:00.000Z')])
+    await expect(buildFeedPage(store, { identity: IDENTITY, after: null, limit: 10, nowMs: NOW_MS, serialize: () => { throw new Error('broken serializer') } })).rejects.toThrow('all visible feed rows failed serialization')
+  })
+
   it('asks for one row past the limit, up to the settle watermark', async () => {
     const { store, calls } = fakeStore([])
     await page(store, null, 7)
-    expect(calls).toEqual([{ after: null, until: UNTIL, limit: 8 }])
+    expect(calls).toEqual([{ nodeId: 'NODE000', after: null, until: UNTIL, limit: 8 }])
   })
 
   it('serialises visible rows, tombstones the rest, and decorates only the visible', async () => {
