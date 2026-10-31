@@ -35,11 +35,16 @@ export async function loadSigningKey(secret: string | undefined, publicKey: stri
   if (!secret) return null
   if (keyCache && keyCache.secret === secret && keyCache.publicKey === publicKey) return keyCache.key
   let key: CryptoKey | null = null
+  // Logged once per key pair per isolate, since the result is cached:
+  // without a line here, a node whose feed and discovery go dark because
+  // the key does not pair says nothing about why.
   try {
     const privateKey = await importNodeSigningKey(secret)
     const advertisedKey = await importNodePublicKey(publicKey)
     key = await signingKeyMatches(privateKey, advertisedKey) ? privateKey : null
-  } catch {
+    if (!key) console.error('[federation] NODE_ID_PRIVATE_KEY_PEM is not the pair of node_identity.public_key')
+  } catch (err) {
+    console.error('[federation] signing key unavailable:', err instanceof Error ? err.message : 'unknown error')
     key = null
   }
   keyCache = { secret, publicKey, key }

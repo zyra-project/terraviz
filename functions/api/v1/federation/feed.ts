@@ -207,8 +207,9 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
   let response: Response
   try {
     response = await serveFeed(context)
-  } catch {
-    console.error('[federation/feed] publication failed')
+  } catch (error) {
+    // The reason goes to the log only; the caller sees the fixed 503.
+    console.error('[federation/feed] publication failed', error instanceof Error ? error.message : 'UnknownError')
     response = errorResponse(503, 'feed_unavailable')
   }
   return context.request.method === 'HEAD'

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Zyra Project
 
-import { describe, expect, it } from 'vitest'
-import { federationState, parseAbuseContact } from './federation-config'
+import { generateKeyPairSync } from 'node:crypto'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { federationState, loadSigningKey, parseAbuseContact, resetFeedSigningKeyCache } from './federation-config'
 
 describe('parseAbuseContact', () => {
   it.each([
@@ -55,5 +56,44 @@ describe('federationState', () => {
   it('is live with the switch and a usable address', () => {
     expect(federationState({ FEDERATION_ENABLED: 'true', FEDERATION_ABUSE_CONTACT: ' abuse@noaa.example ' }))
       .toEqual({ state: 'live', abuseContact: 'abuse@noaa.example' })
+  })
+})
+
+describe('loadSigningKey', () => {
+  function pair() {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519')
+    const spki = publicKey.export({ format: 'der', type: 'spki' }) as Buffer
+    return {
+      secret: (privateKey.export({ format: 'der', type: 'pkcs8' }) as Buffer).toString('base64'),
+      wire: `ed25519:${spki.subarray(spki.length - 32).toString('base64')}`,
+    }
+  }
+  afterEach(() => {
+    resetFeedSigningKeyCache()
+    vi.restoreAllMocks()
+  })
+
+  it('returns the key when the secret pairs with the advertised public key', async () => {
+    const a = pair()
+    expect(await loadSigningKey(a.secret, a.wire)).not.toBeNull()
+  })
+
+  // A key that does not pair turns the feed and discovery off. Without
+  // a log line the operator sees a 503 and nothing that says why.
+  it('says why when the secret does not pair, once per key pair', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const a = pair()
+    const b = pair()
+    expect(await loadSigningKey(a.secret, b.wire)).toBeNull()
+    expect(await loadSigningKey(a.secret, b.wire)).toBeNull()
+    expect(error).toHaveBeenCalledTimes(1)
+    expect(String(error.mock.calls[0][0])).toMatch(/not the pair/)
+  })
+
+  it('says why when the secret cannot be read', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    expect(await loadSigningKey('not base64!', pair().wire)).toBeNull()
+    expect(error).toHaveBeenCalledTimes(1)
+    expect(String(error.mock.calls[0][0])).toMatch(/signing key unavailable/)
   })
 })
