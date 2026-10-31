@@ -4,6 +4,8 @@
 /**
  * GET  /api/v1/publish/federation/peers — list the peers this node
  *      subscribes to, with each one's sync state and mirrored count.
+ *      `sweep_refused` is true while a peer's sweep is refused and
+ *      waiting for an admin (`sync.ts`); its `sweep_after` is then null.
  * POST /api/v1/publish/federation/peers — subscribe to a peer.
  *
  * Metadata Phase 5, step 5b. Admin-only, and a 404 unless
@@ -46,6 +48,7 @@ import {
 import {
   fetchPeerDiscovery,
   isFederationId,
+  isSweepRefused,
   parsePeerBaseUrl,
 } from '../../_lib/federation-subscriber'
 
@@ -73,6 +76,7 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
       last_sync_error: p.lastSyncError,
       full_sync_in_progress: p.fullSyncRun !== null,
       reconcile_pending: p.sweepRun !== null,
+      sweep_refused: isSweepRefused(p),
       sweep_after: p.sweepAfterMs,
       sync_lease_expires: p.syncLeaseExpiresMs ?? null,
       mirrored_count: p.mirroredCount,

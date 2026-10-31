@@ -250,57 +250,133 @@ describe('POST /api/v1/publish/federation/sync', () => {
     for (let attempt = 0; attempt < 2; attempt++) {
       const res = await onRequestPost(ctx({ body: { peer_id: PEER_ID } }))
       expect(res.status).toBe(409)
-      expect(await res.json()).toMatchObject({
-        result: { ok: false, error: 'sweep_refused', reconciled: 0, reconcile_pending: true, sweep_refused: { kept: 0, dropped: 2 } },
+      const body = (await res.json()) as Record<string, unknown>
+      // A pull ran, so the error is in the result, not at the top level.
+      expect(body).not.toHaveProperty('error')
+      expect(body).toMatchObject({
+        result: {
+          ok: false,
+          error: 'sweep_refused',
+          reconciled: 0,
+          reconcile_pending: true,
+          sweep_refused: { sweep_id: 'RUN1', kept: 0, dropped: 2 },
+        },
       })
     }
     expect(mirroredIds()).toEqual(['x', 'y'])
-    expect(sqlite.prepare('SELECT sweep_run FROM federation_peers WHERE id = ?').get(PEER_ID)).toEqual({ sweep_run: 'RUN1' })
-    expect(JSON.parse(auditRows()[1].metadata_json)).toMatchObject({ ok: false, error: 'sweep-refused', sweep_refused: { kept: 0, dropped: 2 } })
+    expect(sqlite.prepare('SELECT sweep_run, sweep_after FROM federation_peers WHERE id = ?').get(PEER_ID)).toEqual({ sweep_run: 'RUN1', sweep_after: null })
+    expect(JSON.parse(auditRows()[1].metadata_json)).toMatchObject({
+      ok: false,
+      error: 'sweep-refused',
+      sweep_refused: { sweep_id: 'RUN1', kept: 0, dropped: 2 },
+    })
   })
 
-  it('runs a refused sweep an admin accepts with its exact counts, and audits who did', async () => {
+  it('runs a refused sweep when its sweep_refused is sent back as accept_sweep, and audits who did first', async () => {
     pendingEmptySweep()
     serveFeed([])
-    const stale = await onRequestPost(ctx({ body: { peer_id: PEER_ID, accept_sweep: { kept: 0, dropped: 1 } } }))
-    expect(stale.status).toBe(409)
-    expect(await stale.json()).toMatchObject({ result: { error: 'sweep_refused', sweep_refused: { kept: 0, dropped: 2 } } })
-    expect(mirroredIds()).toEqual(['x', 'y'])
-
-    const res = await onRequestPost(ctx({ body: { peer_id: PEER_ID, accept_sweep: { kept: 0, dropped: 2 } } }))
+    const refused = (await (await onRequestPost(ctx({ body: { peer_id: PEER_ID } }))).json()) as {
+      result: { sweep_refused: Record<string, unknown> }
+    }
+    // Sent back exactly as it arrived; if sweep_refused gains a field this
+    // route does not accept, this is the test that says so.
+    const res = await onRequestPost(ctx({ body: { peer_id: PEER_ID, accept_sweep: refused.result.sweep_refused } }))
     expect(res.status).toBe(200)
     expect(await res.json()).toMatchObject({
-      result: { ok: true, reconciled: 2, reconcile_pending: false, sweep_accepted: { kept: 0, dropped: 2 } },
+      result: {
+        ok: true,
+        reconciled: 2,
+        reconcile_pending: false,
+        accept_sweep_result: 'ran',
+        sweep_accepted: { sweep_id: 'RUN1', kept: 0, dropped: 2 },
+      },
     })
     expect(mirroredIds()).toEqual([])
-    const audit = auditRows()[1]
-    expect(audit.actor_id).toBe(ADMIN.id)
-    expect(JSON.parse(audit.metadata_json)).toMatchObject({
+    const intent = sqlite
+      .prepare("SELECT actor_id, subject_id, metadata_json FROM audit_events WHERE action = 'federation_peer.sweep_accept'")
+      .all() as Array<{ actor_id: string; subject_id: string; metadata_json: string }>
+    expect(intent).toHaveLength(1)
+    expect(intent[0]).toMatchObject({ actor_id: ADMIN.id, subject_id: PEER_ID })
+    expect(JSON.parse(intent[0].metadata_json)).toEqual({ sweep_id: 'RUN1', dropped: 2 })
+    expect(JSON.parse(auditRows()[1].metadata_json)).toMatchObject({
       ok: true,
       reconciled: 2,
-      accept_sweep: { kept: 0, dropped: 2 },
-      sweep_accepted: { kept: 0, dropped: 2 },
+      accept_sweep: { sweep_id: 'RUN1', dropped: 2 },
+      accept_sweep_result: 'ran',
+      sweep_accepted: { sweep_id: 'RUN1', kept: 0, dropped: 2 },
     })
   })
 
-  it('refuses an accept_sweep that is not two counts, or comes with full', async () => {
+  it('refuses an accept for another sweep or more rows, and says one went unused', async () => {
+    pendingEmptySweep()
+    serveFeed([])
+    for (const accept_sweep of [{ sweep_id: 'RUN0', dropped: 2 }, { sweep_id: 'RUN1', dropped: 1 }]) {
+      const res = await onRequestPost(ctx({ body: { peer_id: PEER_ID, accept_sweep } }))
+      expect(res.status).toBe(409)
+      expect(await res.json()).toMatchObject({ result: { error: 'sweep_refused', accept_sweep_result: 'stale', sweep_refused: { sweep_id: 'RUN1', dropped: 2 } } })
+    }
+    expect(mirroredIds()).toEqual(['x', 'y'])
+
+    // A page with more after it never reaches the sweep: 200, but unused.
+    serveFeed([], true)
+    const partial = await onRequestPost(ctx({ body: { peer_id: PEER_ID, accept_sweep: { sweep_id: 'RUN1', dropped: 2 } } }))
+    expect(partial.status).toBe(200)
+    expect(await partial.json()).toMatchObject({ result: { ok: true, complete: false, accept_sweep_result: 'not_reached' } })
+    expect(mirroredIds()).toEqual(['x', 'y'])
+  })
+
+  it('does not run an accept it cannot record', async () => {
+    pendingEmptySweep()
+    const fn = serveFeed([])
+    sqlite.exec('DROP TABLE audit_events')
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const res = await onRequestPost(ctx({ body: { peer_id: PEER_ID, accept_sweep: { sweep_id: 'RUN1', dropped: 2 } } }))
+    errors.mockRestore()
+    expect(res.status).toBe(500)
+    expect(await res.json()).toMatchObject({ error: 'audit_failed' })
+    expect(fn).not.toHaveBeenCalled()
+    expect(mirroredIds()).toEqual(['x', 'y'])
+  })
+
+  it('stays under 50 D1 statements on a full page of held rows that runs an accepted sweep', async () => {
+    pendingEmptySweep()
+    const held = Array.from({ length: 25 }, (_, index) => `held-${index}`)
+    serveFeed([], false, { held })
+    const prepare = vi.spyOn(sqlite, 'prepare')
+    const res = await onRequestPost(ctx({ body: { peer_id: PEER_ID, accept_sweep: { sweep_id: 'RUN1', dropped: 2 } } }))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ result: { held: 25, reconciled: 2, accept_sweep_result: 'ran' } })
+    expect(prepare.mock.calls.length).toBeLessThan(50)
+    prepare.mockRestore()
+  })
+
+  it('refuses an accept_sweep that is not a sweep_refused, or comes with full', async () => {
     const fn = serveFeed([])
     for (const accept_sweep of [
       null,
       '0,2',
       [0, 2],
-      { kept: 0 },
-      { kept: -1, dropped: 2 },
-      { kept: 1.5, dropped: 2 },
-      { kept: '0', dropped: 2 },
-      { kept: 0, dropped: 2, run: 'RUN1' },
+      { kept: 0, dropped: 2 },
+      { sweep_id: 'RUN1' },
+      { sweep_id: 'a/b', dropped: 2 },
+      { sweep_id: 7, dropped: 2 },
+      { sweep_id: 'RUN1', dropped: -1 },
+      { sweep_id: 'RUN1', dropped: 1.5 },
+      { sweep_id: 'RUN1', dropped: '2' },
+      { sweep_id: 'RUN1', kept: 'x', dropped: 2 },
+      { sweep_id: 'RUN1', dropped: 2, extra: true },
     ]) {
       const res = await onRequestPost(ctx({ body: { peer_id: PEER_ID, accept_sweep } }))
       expect(res.status).toBe(400)
-      expect(((await res.json()) as { errors: Array<{ field: string }> }).errors.map(e => e.field)).toEqual(['accept_sweep'])
+      expect(((await res.json()) as { errors: Array<{ field: string; code: string }> }).errors).toEqual([
+        expect.objectContaining({ field: 'accept_sweep', code: 'invalid' }),
+      ])
     }
-    const res = await onRequestPost(ctx({ body: { peer_id: PEER_ID, full: true, accept_sweep: { kept: 0, dropped: 2 } } }))
+    const res = await onRequestPost(ctx({ body: { peer_id: PEER_ID, full: true, accept_sweep: { sweep_id: 'RUN1', dropped: 2 } } }))
     expect(res.status).toBe(400)
+    expect(((await res.json()) as { errors: Array<{ field: string; code: string }> }).errors).toEqual([
+      expect.objectContaining({ field: 'accept_sweep', code: 'conflicts_with_full' }),
+    ])
     expect(fn).not.toHaveBeenCalled()
   })
 

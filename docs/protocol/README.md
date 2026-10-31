@@ -185,11 +185,11 @@ the contract is here, because a schema cannot carry it.
   sends it back unchanged; its internal encoding is not part of the
   contract, but its wire alphabet is: `^[A-Za-z0-9._~-]{1,512}$`.
   Standard base64 cursors containing `+`, `/` or `=` are not accepted.
-  Node ids (`node_id` and `originNode`), dataset `id` values and
-  tombstone ids must match `^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`
+  Node ids (`node_id` and `originNode`), dataset `id` values, and
+  tombstone and held ids must match `^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`
   (1 to 128 characters, starting with an ASCII letter or digit).
-  A page's datasets plus tombstones must not exceed the requested
-  `limit`; the subscriber refuses the whole page otherwise.
+  A page's datasets, tombstones and held ids together must not exceed
+  the requested `limit`; the subscriber refuses the whole page otherwise.
 - **Settled, not live.** A page holds rows changed up to
   `generated_at`, which trails the clock by 30 seconds so a row
   stamped before commit is unlikely to slip behind the cursor. This
@@ -240,9 +240,15 @@ the contract is here, because a schema cannot carry it.
   against `limit` with the rest, and none may also appear in
   `datasets` or `tombstones`. A subscriber keeps its copy of each held
   row unchanged, and its sweep keeps it too. A held id it has no copy
-  of adds nothing. The copy stays stale until the publisher repairs the
-  row. The publisher logs one line per page that holds rows, with the
-  count and the first ten ids.
+  of adds nothing. The cursor has moved past a held row, so a repair
+  reaches a subscriber only if it moves the row's `updated_at` (an edit
+  through the publisher API), or at the subscriber's next full sync. A
+  serializer fixed by a deploy moves no `updated_at`. After one, touch
+  the held rows, or ask peers for one full sync. Until then a subscriber
+  keeps the copy from before the row broke, so to take content down,
+  retract the row: a retraction needs no serializer and arrives as a
+  tombstone. The publisher logs one line per page that holds rows: the
+  count, the first ten ids, and the first error's name, never its text.
 - **A sweep that would empty the mirror is refused.** A feed that does
   not send `held`, or loses rows some other way, serves pages with rows
   missing. A full sync over them would sweep those rows away. So before
@@ -252,10 +258,12 @@ the contract is here, because a schema cannot carry it.
   keeps no row, or drops more than half the mirror and more than five
   rows. So it still lets up to five rows go whatever share they are,
   which on a small mirror can be most of it. A refused sweep deletes
-  nothing and stays pending. Every complete pull refuses it again,
-  until a new full sync replaces it or an operator accepts its exact
-  counts (§Subscriber Operations). That is how a peer that really
-  withdrew most of its catalog is applied.
+  nothing and is latched: it runs only when an operator accepts it, or
+  once it would delete nothing at all, even if later pulls bring its
+  counts under the threshold. Every complete pull refuses it again,
+  until a new full sync replaces it (§Subscriber Operations). That
+  acceptance is how a peer that really withdrew most of its catalog is
+  applied.
 - **Anonymous-read bounds.** A best-effort per-isolate limiter allows
   600 requests per source IP per minute, before D1 work, then returns
   429 `rate_limited` and `Retry-After: 60`. This is not a global quota:
@@ -338,23 +346,49 @@ at today's clock.
 
 ### Subscriber Operations
 
-The manual admin sync reads one page per invocation, at most 25 entries
-(`page_size`: integer 1-25, default 25). A counted endpoint test includes
-route reads and audit writes and stays below 50 D1 statements. Continue
-invoking without `full` until `complete`, then use incremental pulls
-to finish deferred reconciliation. Core-library defaults are separately
-100 entries times 8 pages; they are not Free-plan endpoint bounds.
+The manual admin sync is `POST /api/v1/publish/federation/sync` with
+`{ peer_id, full?, page_size?, accept_sweep? }`. It reads one page per
+invocation, at most 25 entries (`page_size`: integer 1-25, default 25).
+A counted endpoint test includes route reads and audit writes and stays
+below 50 D1 statements. Continue invoking without `full` until
+`complete`, then use incremental pulls to finish deferred
+reconciliation. That loop ends at `reconcile_pending: false`, or at a
+`sweep_refused`, which needs a person rather than another call.
+Core-library defaults are separately 100 entries times 8 pages; they
+are not Free-plan endpoint bounds.
 
-Failures return non-2xx statuses and snake_case result fields, including
-`upstream_status`, `reconcile_pending` and `held` (rows the page held).
+A top-level `error` means no pull ran, and a `result` means one did and
+may have applied a page. 409 `sync_in_progress` is another pull holding
+the lease: retry once it expires. 409 `peer_not_active` is a paused or
+blocked peer: stop. A pull that fails answers 503 with `result.error`;
+most codes are the peer's, but `lease_lost` is this node's. Results are
+snake_case, with `upstream_status`, `reconcile_pending` and `held` (rows
+the page held). The peer's `last_sync_error` stores the same failure in
+kebab-case, with any status appended (`http-status:503`).
+
 A refused sweep answers 409 with `result.error` `sweep_refused` and
-`result.sweep_refused: {kept, dropped}`; the page the pull read is
-still applied. After checking the peer, an admin accepts the sweep by
-sending `accept_sweep` with those two numbers. It runs only if its
-counts are still exactly those, and the result then carries
-`sweep_accepted`. Counts that have moved are refused again with the new
-ones. `accept_sweep` cannot be combined with `full`, and the audit row
-records the counts accepted and who sent them. Peer lists expose `sweep_after`
+`result.sweep_refused: {sweep_id, kept, dropped}`; the page the pull
+read is still applied. Do not retry it on a loop. Check the peer first:
+compare `kept` with the peer's public catalog, or ask its operator. To
+accept, send `sweep_refused` back unchanged as `accept_sweep`:
+
+```text
+POST /api/v1/publish/federation/sync
+{"peer_id":"<node id>","accept_sweep":{"sweep_id":"<from the 409>","kept":3,"dropped":40}}
+```
+
+The sweep runs if it is still that `sweep_id` and would drop at most
+`dropped` rows, and the result carries `sweep_accepted`. An audit row
+naming who accepted which sweep is written first, and nothing runs if it
+cannot be. `result.accept_sweep_result` says what became of it: `ran`,
+`not_needed` (the sweep ran without it), `stale` (another sweep, or more
+rows; the 409 carries the current ones), or `not_reached`. `not_reached`
+means the call did not reach the sweep: the page had more after it, a
+full sync is running, or no sweep is due. Send it again on a call that
+completes. `accept_sweep` cannot be combined with `full`. While a sweep
+is refused the peer list shows `sweep_refused: true` and a null
+`sweep_after`, and every complete pull recounts the peer's mirrored rows;
+a scheduler, when one exists, should back off such a peer. Peer lists expose `sweep_after`
 and `sync_lease_expires` as epoch milliseconds. A cancelled invocation
 may leave its lease held for up to five minutes. GET `mirrored_count`
 counts present rows; DELETE `removed_rows` counts rows actually removed.
@@ -403,7 +437,10 @@ yet. A subscriber that does show them follows these rules.
   the URLs point, usually the peer's servers, which shows the peer the
   visitor's IP address. Until a subscriber proxies or caches peer
   assets (deferred), show a peer's media only for peers the operator
-  has vetted. Say on the page which node it comes from.
+  has vetted. Say on the page which node it comes from. v1 rows carry
+  no digest of their media; the `content_digest` claim
+  [`CATALOG_FEDERATION_PROTOCOL.md`](../CATALOG_FEDERATION_PROTOCOL.md)
+  describes is not implemented.
 - **Removing a peer removes its rows.**
   `DELETE /api/v1/publish/federation/peers/:id` drops every row
   mirrored from that peer in one call. That is the response to a

@@ -28,7 +28,10 @@
  * whose serialization fails is left out of `datasets` and its id goes
  * in `held`, so a subscriber keeps its last good copy rather than
  * sweeping it as gone. That covers one bad row and a broken serializer
- * alike, which the page cannot tell apart.
+ * alike, which the page cannot tell apart. The cursor still moves past
+ * a held row, so a fix that does not move its `updated_at` (a deploy
+ * that repairs the serializer) reaches subscribers only at their next
+ * full sync.
  *
  * **The cursor is a position, not a credential.** It is opaque only so
  * its encoding can change; anyone may build one, which is why it
@@ -67,8 +70,9 @@ export interface FederationFeedBody {
   tombstones: string[]
   /** Ids of public, non-hidden rows on this page that this node could
    *  not serialize. Present only when there is one. A subscriber keeps
-   *  its copy of each, unchanged and safe from a sweep, until the row
-   *  can be served again. */
+   *  its copy of each, unchanged and safe from a sweep. The cursor moves
+   *  past them, so a repair reaches it only if it moves the row's
+   *  `updated_at`, or at its next full sync. */
   held?: string[]
 }
 

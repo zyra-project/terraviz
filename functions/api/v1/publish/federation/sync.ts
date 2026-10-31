@@ -6,31 +6,47 @@
  *
  * Metadata Phase 5, step 5b. Body
  * `{ peer_id, full?, page_size?, accept_sweep? }`. Reads one page of
- * at most 25 entries and returns snake_case fields, including `held`:
- * how many rows the peer listed as ones it could not serve.
- * There is no scheduler yet, so this is how a mirror is refreshed;
- * a full sync that runs out of pages resumes on the next call.
+ * at most `page_size` entries (1-25, default 25) and returns
+ * snake_case fields, including `held`: how many rows the peer listed as
+ * ones it could not serve. There is no scheduler yet, so this is how a
+ * mirror is refreshed; a full sync that runs out of pages resumes on
+ * the next call. Admin-only, and a 404 unless `FEDERATION_ENABLED` is
+ * `'true'`, by the same gate as `peers.ts`.
  *
- * Admin-only, and a 404 unless `FEDERATION_ENABLED` is `'true'`, by
- * the same gate as `peers.ts`. 404 `peer_not_found` for an unknown
- * peer, 409 `peer_not_active` for one that is paused or blocked, 409
- * `sync_in_progress` while another pull of the same peer holds its
- * lease. A pull that fails because of the peer answers 503 and
- * the result names why (the
- * same code is stored as the peer's `last_sync_error`). A failure of
- * this node's own store answers 500 `sync_failed`, after an audit row
- * recording `store-error`.
+ * **Two envelopes.** A top-level `error` means no pull ran; a `result`
+ * means one did, and may have applied a page.
+ * - 400 `{ errors }` for field errors; 404 `peer_not_found`.
+ * - 409 `peer_not_active`, for a paused or blocked peer: stop.
+ * - 409 `sync_in_progress`: another pull holds the lease. Retry once it
+ *   expires, at most five minutes.
+ * - 500 `sync_failed`: this node's store failed, after an audit row
+ *   recording `store-error`. 500 `audit_failed`: the audit row an
+ *   `accept_sweep` needs could not be written, so nothing ran.
+ * - 200 with `result.ok: true`.
+ * - 503 with `result.error`: the pull failed. Most codes are the peer's
+ *   (`http_status` with `upstream_status`, `bad_signature`, …);
+ *   `lease_lost` is this node's. The peer's `last_sync_error` stores the
+ *   same failure in kebab-case, with any status appended (`http-status:503`).
+ * - 409 with `result.error: 'sweep_refused'`, below. Stop and have a
+ *   person look; never retry it on a loop.
  *
- * **A refused sweep.** A sweep that would drop most of the mirror, or
- * all of it, deletes nothing and answers 409 with
- * `{ result: { ok: false, error: 'sweep_refused', sweep_refused: { kept, dropped }, … } }`.
- * The pages this pull read are still applied. The sweep stays pending,
- * so every complete pull answers the same way until a full sync
- * replaces it, or until an admin who has checked the peer accepts it:
- * `accept_sweep: { kept, dropped }` runs the sweep if its counts are
- * still exactly those, and the result then carries `sweep_accepted`.
- * Counts that have moved are refused again with the new ones. The
- * audit row records the counts accepted and who accepted them.
+ * **A refused sweep.** A sweep that would drop all of the mirror, or
+ * most of it, deletes nothing and answers 409 with
+ * `result.sweep_refused: { sweep_id, kept, dropped }`. The page the pull
+ * read is still applied. The refusal is latched: the sweep stays pending
+ * and runs only once accepted, or once it would delete nothing. So every
+ * complete pull answers 409 again until a full sync replaces it.
+ *
+ * To accept it, after checking the peer, send `sweep_refused` back as
+ * `accept_sweep`. The sweep runs if it is still that `sweep_id` and would
+ * drop at most `dropped` rows; `kept` is accepted and ignored.
+ * `result.accept_sweep_result` says what happened: `ran`; `not_needed`
+ * (the sweep ran without it); `stale` (another sweep, or more rows: the
+ * 409 carries the current ones); or `not_reached` (this call did not
+ * reach the sweep, because the page had more after it, a full sync is
+ * running or no sweep is due, so send it again on a call that
+ * completes). An audit row naming who accepted which sweep is written
+ * before the pull, and the pull does not run if it cannot be.
  * `accept_sweep` cannot be combined with `full`, which replaces the
  * sweep it would accept.
  */
@@ -45,7 +61,12 @@ import {
   federationError as jsonError,
   federationJson as json,
 } from '../../_lib/federation-admin'
-import { isFederationId, pullPeer, type SweepCounts } from '../../_lib/federation-subscriber'
+import {
+  isFederationId,
+  pullPeer,
+  type SweepAcceptance,
+  type SweepReport,
+} from '../../_lib/federation-subscriber'
 
 export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
   const publisher = (context.data as unknown as PublisherData).publisher
@@ -73,17 +94,17 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
   if (input.page_size !== undefined && (!Number.isInteger(input.page_size) || Number(input.page_size) < 1 || Number(input.page_size) > 25)) {
     errors.push({ field: 'page_size', code: 'invalid', message: 'Must be an integer from 1 to 25.' })
   }
-  const acceptSweep = input.accept_sweep === undefined ? undefined : parseSweepCounts(input.accept_sweep)
+  const acceptSweep = input.accept_sweep === undefined ? undefined : parseAcceptSweep(input.accept_sweep)
   if (acceptSweep === null) {
     errors.push({
       field: 'accept_sweep',
       code: 'invalid',
-      message: 'Must be { kept, dropped }, the whole numbers a sweep_refused result reported.',
+      message: 'Must be the sweep_refused object a refusal returned: { sweep_id, kept, dropped }.',
     })
   } else if (acceptSweep && input.full === true) {
     errors.push({
       field: 'accept_sweep',
-      code: 'invalid',
+      code: 'conflicts_with_full',
       message: 'Cannot be combined with full: a full sync replaces the sweep it would accept.',
     })
   }
@@ -106,6 +127,22 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
       metadata_json: JSON.stringify(metadata),
     })
 
+  // An accepted sweep can delete most of a mirror, so who accepted it is
+  // recorded before it can run, and it does not run unrecorded.
+  if (acceptSweep) {
+    const recorded = await writeAuditEvent(db, {
+      actor_kind: 'publisher',
+      actor_id: publisher.id,
+      action: 'federation_peer.sweep_accept',
+      subject_kind: 'peer',
+      subject_id: peerId,
+      metadata_json: JSON.stringify(acceptJson(acceptSweep)),
+    })
+    if (recorded === null) {
+      return jsonError(500, 'audit_failed', 'The acceptance could not be recorded, so the sweep was not run.')
+    }
+  }
+
   let result
   try {
     result = await pullPeer(
@@ -125,7 +162,7 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
     )
   } catch (err) {
     console.error('[federation/sync] store failure', peerId, err)
-    await audit({ ok: false, error: 'store-error', ...(acceptSweep ? { accept_sweep: acceptSweep } : {}) }).catch(() => {})
+    await audit({ ok: false, error: 'store-error', ...(acceptSweep ? { accept_sweep: acceptJson(acceptSweep) } : {}) }).catch(() => {})
     return jsonError(500, 'sync_failed', 'The pull failed on this node; see the logs.')
   }
   if (result.error === 'sync-in-progress') {
@@ -145,9 +182,10 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
     held: result.held,
     reconciled: result.reconciled,
     reconcile_pending: result.reconcilePending,
-    ...(acceptSweep ? { accept_sweep: acceptSweep } : {}),
-    ...(result.sweepRefused ? { sweep_refused: result.sweepRefused } : {}),
-    ...(result.sweepAccepted ? { sweep_accepted: result.sweepAccepted } : {}),
+    ...(acceptSweep ? { accept_sweep: acceptJson(acceptSweep) } : {}),
+    ...(result.acceptOutcome ? { accept_sweep_result: result.acceptOutcome } : {}),
+    ...(result.sweepRefused ? { sweep_refused: sweepJson(result.sweepRefused) } : {}),
+    ...(result.sweepAccepted ? { sweep_accepted: sweepJson(result.sweepAccepted) } : {}),
   })
   const status = result.ok ? 200 : result.error === 'sweep-refused' ? 409 : 503
   return json(status, { result: {
@@ -162,18 +200,32 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
     reconcile_pending: result.reconcilePending,
     ...(result.error ? { error: result.error.replaceAll('-', '_') } : {}),
     ...(result.status !== undefined ? { upstream_status: result.status } : {}),
-    ...(result.sweepRefused ? { sweep_refused: result.sweepRefused } : {}),
-    ...(result.sweepAccepted ? { sweep_accepted: result.sweepAccepted } : {}),
+    ...(result.sweepRefused ? { sweep_refused: sweepJson(result.sweepRefused) } : {}),
+    ...(result.sweepAccepted ? { sweep_accepted: sweepJson(result.sweepAccepted) } : {}),
+    ...(result.acceptOutcome ? { accept_sweep_result: result.acceptOutcome.replaceAll('-', '_') } : {}),
   } })
 }
 
-/** `{ kept, dropped }` as two non-negative whole numbers and nothing
- *  else, or `null`. */
-function parseSweepCounts(value: unknown): SweepCounts | null {
+const sweepJson = (report: SweepReport) => ({
+  sweep_id: report.sweepRun,
+  kept: report.kept,
+  dropped: report.dropped,
+})
+
+const acceptJson = (accept: SweepAcceptance) => ({ sweep_id: accept.sweepRun, dropped: accept.dropped })
+
+/**
+ * `sweep_refused` sent back: `{ sweep_id, dropped }`, and the `kept` it
+ * also carries, or `null`. The two shapes change together: a field
+ * added to `sweep_refused` must be allowed here, or sending it back
+ * fails (the route's round-trip test pins this).
+ */
+function parseAcceptSweep(value: unknown): SweepAcceptance | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
-  const keys = Object.keys(value)
-  if (keys.length !== 2 || !keys.includes('kept') || !keys.includes('dropped')) return null
-  const { kept, dropped } = value as Record<string, unknown>
+  const record = value as Record<string, unknown>
+  if (Object.keys(record).some(key => key !== 'sweep_id' && key !== 'kept' && key !== 'dropped')) return null
   const count = (n: unknown): n is number => Number.isSafeInteger(n) && (n as number) >= 0
-  return count(kept) && count(dropped) ? { kept, dropped } : null
+  if (typeof record.sweep_id !== 'string' || !isFederationId(record.sweep_id)) return null
+  if (!count(record.dropped) || (record.kept !== undefined && !count(record.kept))) return null
+  return { sweepRun: record.sweep_id, dropped: record.dropped }
 }

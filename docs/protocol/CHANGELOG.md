@@ -24,7 +24,18 @@ major (`/schema/v2/`) and an entry with a migration note.
   with none omits it, so its signed bytes are unchanged. A reader that
   ignores it sees those rows as missing, and a full sync's sweep could
   then drop them. The README says how a subscriber keeps held rows and
-  guards its sweep.
+  guards its sweep, and when a repaired row reaches it: only if the
+  repair moves the row's `updated_at`, or at the next full sync. This
+  is additive, not a change to withdrawal semantics: a tombstone, and a
+  row's absence from a full sync, mean what they meant, and no
+  withdrawn row can be held. Rows a reader once lost silently are now
+  named; ignoring `held` gives the old outcome.
+- **Reference subscriber, no wire change:** a refused sweep is latched
+  and runs only when an admin accepts it, by its `sweep_id`, through
+  `POST /api/v1/publish/federation/sync` (§Subscriber Operations), or
+  once it would delete nothing. It no longer clears itself after one
+  409. Peer operators who script that route should stop on
+  `sweep_refused` rather than retry.
 - **Subscriber guidance, no wire change:** README §Showing Mirrored
   Rows. A peer's `weight` must not rank its rows against another
   node's. A peer's text is untrusted input, and media is outside the

@@ -259,11 +259,23 @@ describe('GET /api/v1/publish/federation/peers', () => {
           last_sync_error: null,
           full_sync_in_progress: false,
           reconcile_pending: false,
+          sweep_refused: false,
           sweep_after: null,
           sync_lease_expires: null,
           mirrored_count: 0,
         },
       ],
     })
+  })
+
+  it('marks a peer whose sweep is refused and waiting for an admin', async () => {
+    servePeer(discovery())
+    await onRequestPost(ctx({ method: 'POST', body: input() }))
+    sqlite.prepare("UPDATE federation_peers SET sweep_run = 'RUN1', sweep_after = 5 WHERE id = ?").run(PEER_ID)
+    const due = (await (await onRequestGet(ctx({ method: 'GET' }))).json()) as { peers: Array<Record<string, unknown>> }
+    expect(due.peers[0]).toMatchObject({ reconcile_pending: true, sweep_refused: false, sweep_after: 5 })
+    sqlite.prepare('UPDATE federation_peers SET sweep_after = NULL WHERE id = ?').run(PEER_ID)
+    const refused = (await (await onRequestGet(ctx({ method: 'GET' }))).json()) as { peers: Array<Record<string, unknown>> }
+    expect(refused.peers[0]).toMatchObject({ reconcile_pending: true, sweep_refused: true, sweep_after: null })
   })
 })

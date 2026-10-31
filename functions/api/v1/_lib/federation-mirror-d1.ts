@@ -254,6 +254,17 @@ export function d1FederationMirrorStore(db: D1Database): FederationMirrorStore {
       return { kept: row?.kept ?? 0, dropped: row?.dropped ?? 0 }
     },
 
+    async refuseSweep(peerId, sweepRun, leaseId) {
+      const refused = await db
+        .prepare(
+          `UPDATE federation_peers SET sweep_after = NULL
+           WHERE id = ? AND sync_lease = ? AND sweep_run = ?`,
+        )
+        .bind(peerId, leaseId, sweepRun)
+        .run()
+      return (refused.meta?.changes ?? 0) === 1
+    },
+
     async finishSweep(peerId, sweepRun, leaseId) {
       // Both statements test the same lease and run inside one batch, so
       // when the update matched nothing the delete removed nothing too.

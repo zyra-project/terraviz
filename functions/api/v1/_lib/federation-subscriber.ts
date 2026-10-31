@@ -50,6 +50,8 @@
  * node could not serialize. Each is stamped with the run, as a
  * delivered row would be, but its stored copy is left as it was, so a
  * sweep keeps it. A held id this mirror has no copy of changes nothing.
+ * The feed's cursor moves past a held row, so the copy is refreshed
+ * only when the row's `updated_at` moves again, or by a full sync.
  *
  * **A sweep that would empty the mirror is refused.** A peer that does
  * not send `held` skips any row it cannot serialize, so if its
@@ -60,14 +62,25 @@
  * refuses one that keeps nothing, or drops more than half the mirror
  * and more than `SWEEP_GUARD_MIN_ROWS` rows.
  *
- * A refused sweep deletes nothing and stays pending: every complete
- * pull after it refuses it again, failing as `sweep-refused` with the
- * counts, so the refusal stays visible rather than being reported once.
- * A pull's pages are applied either way. It ends when a new full sync
- * replaces the pending sweep, or when an operator accepts it: a pull
- * given `acceptSweep` runs the sweep if the counts are exactly the ones
- * accepted. Exact, because the operator approved those counts and no
- * others; if a pull changed them, the operator is shown the new ones.
+ * **A refused sweep is latched.** It deletes nothing and stays pending,
+ * marked refused (`refuseSweep`: `sweep_after` cleared, `sweep_run`
+ * kept). From then on it runs only when an operator accepts it, or when
+ * it would delete nothing at all, whatever its counts become. Without
+ * the latch, rows later delivered under the sweep's run move it past
+ * the guard's threshold, and the rows the guard flagged go with nobody
+ * having approved it. Every complete pull reports it again
+ * (`sweep-refused`, with the sweep's run and current counts), and the
+ * pull's pages are applied either way. It ends when a new full sync
+ * replaces it, or when a pull is given `acceptSweep` naming its run and
+ * a `dropped` no smaller than what it would now drop.
+ *
+ * That is enough to name the rows. Within one sweep run the rows it
+ * would drop only shrink: every row an incremental pull delivers or
+ * holds, and every new row, is stamped with the run, and a retraction
+ * only removes rows. A full sync stamps another run, but the sweep
+ * cannot run while one is in progress, and a full sync that finishes
+ * replaces it with a new run. So a `dropped` no larger than the one the
+ * operator was shown, for the same run, can only be rows they approved.
  *
  * **One pull per peer.** A pull takes the peer's lease before reading
  * its state and releases it when done; every write is conditional on
@@ -113,6 +126,30 @@ export const SWEEP_GUARD_MIN_ROWS = 5
 export interface SweepCounts {
   kept: number
   dropped: number
+}
+
+/** A sweep's counts, with the run that names the sweep. */
+export interface SweepReport extends SweepCounts {
+  sweepRun: string
+}
+
+/** An operator's approval of a refused sweep: run it if it is still
+ *  this run and would drop at most `dropped` rows. */
+export interface SweepAcceptance {
+  sweepRun: string
+  dropped: number
+}
+
+/** What became of an `acceptSweep`: `ran` (the approval ran a sweep the
+ *  guard holds back), `not-needed` (the sweep ran without it), `stale`
+ *  (another run, or more rows; refused), `not-reached` (the pull never
+ *  reached a sweep: incomplete, a full sync, none pending or not due). */
+export type SweepAcceptOutcome = 'ran' | 'not-needed' | 'stale' | 'not-reached'
+
+/** Whether the peer's pending sweep has been refused and is waiting
+ *  for an operator: a run is pending but no longer has a due time. */
+export function isSweepRefused(peer: Pick<FederationPeer, 'sweepRun' | 'sweepAfterMs'>): boolean {
+  return peer.sweepRun !== null && peer.sweepAfterMs === null
 }
 
 /**
@@ -164,7 +201,8 @@ export interface FederationPeer {
   fullSyncRun: string | null
   /** A finished full sync whose sweep is still to run. */
   sweepRun: string | null
-  /** Epoch ms after which an incremental pull may run the sweep. */
+  /** Epoch ms after which an incremental pull may run the sweep; `null`
+   *  with a `sweepRun` once the sweep has been refused. */
   sweepAfterMs: number | null
   syncLeaseExpiresMs?: number | null
 }
@@ -216,6 +254,9 @@ export interface FederationMirrorStore {
   /** How many of the peer's rows the sweep run delivered, and how many
    *  it did not and would drop. */
   countSweep(peerId: string, sweepRun: string): Promise<SweepCounts>
+  /** Mark the pending sweep refused: clear `sweep_after`, keep
+   *  `sweep_run`. `false` when the lease was lost or the run replaced. */
+  refuseSweep(peerId: string, sweepRun: string, leaseId: string): Promise<boolean>
   /** Drop the peer's rows the sweep run did not deliver and clear the
    *  pending sweep, together. Returns how many rows went, or `null`
    *  when the lease was lost (or the sweep replaced) and nothing was. */
@@ -265,11 +306,13 @@ export interface PullResult {
   reconciled: number
   /** A finished full sync is waiting for its sweep. */
   reconcilePending: boolean
-  /** For `sweep-refused`: what the refused sweep would have kept and dropped. */
-  sweepRefused?: SweepCounts
-  /** The counts of a sweep the guard refused and the operator accepted,
-   *  set only when this pull ran it. */
-  sweepAccepted?: SweepCounts
+  /** For `sweep-refused`: the refused sweep's run, and what it would
+   *  keep and drop now. */
+  sweepRefused?: SweepReport
+  /** A refused sweep this pull ran because the operator accepted it. */
+  sweepAccepted?: SweepReport
+  /** Set whenever `acceptSweep` was given: what became of it. */
+  acceptOutcome?: SweepAcceptOutcome
 }
 
 export interface PullDeps {
@@ -289,12 +332,13 @@ export interface PullOptions {
   pageLimit?: number
   maxBodyBytes?: number
   timeoutMs?: number
-  /** Run a pending sweep the guard refuses, if its counts are exactly
-   *  these: the ones a refusal reported, which the operator accepted. */
-  acceptSweep?: SweepCounts
+  /** Run a refused sweep, if it is still this run and would drop no
+   *  more rows than this: what a refusal reported, which the operator
+   *  accepted. */
+  acceptSweep?: SweepAcceptance
 }
 
-type ResolvedPullOptions = Required<Omit<PullOptions, 'acceptSweep'>> & { acceptSweep: SweepCounts | null }
+type ResolvedPullOptions = Required<Omit<PullOptions, 'acceptSweep'>> & { acceptSweep: SweepAcceptance | null }
 
 /**
  * The origin of a peer base URL, or `null` for anything that is not a
@@ -674,6 +718,7 @@ async function pullUnderLease(
 
   const record = (error: string | null) =>
     deps.store.recordSyncResult(peer.id, leaseId, { at: new Date(deps.now()).toISOString(), error })
+  const latched = isSweepRefused(peer)
 
   const origin = parsePeerBaseUrl(peer.baseUrl)
   let publicKey: CryptoKey | null = null
@@ -736,35 +781,41 @@ async function pullUnderLease(
     } else if (
       result.complete &&
       peer.sweepRun !== null &&
-      peer.sweepAfterMs !== null &&
-      startMs >= peer.sweepAfterMs
+      (latched || startMs >= peer.sweepAfterMs!)
     ) {
       // This pull began after the settle window closed, so it saw
       // every row the full sync's last page held back.
-      const counts = await deps.store.countSweep(peer.id, peer.sweepRun)
-      const refused = !sweepIsPlausible(counts)
-      if (refused) {
-        // Counts identify the rows. While a sweep is pending, every row
-        // a pull delivers or holds, and every new row, is stamped with
-        // its run, and a retraction only removes rows; only a full sync
-        // stamps another run, and it replaces this sweep when it ends.
-        // So the rows it would drop only ever shrink, and the same count
-        // dropped is the same rows the operator was shown.
-        const accept = opts.acceptSweep
-        if (accept === null || accept.kept !== counts.kept || accept.dropped !== counts.dropped) {
-          // Left pending, so the next complete pull refuses it again.
-          result.sweepRefused = counts
-          throw new PullError('sweep-refused')
+      const sweepRun = peer.sweepRun
+      const counts = await deps.store.countSweep(peer.id, sweepRun)
+      const report: SweepReport = { sweepRun, ...counts }
+      // Once refused, a sweep needs an operator whatever its counts
+      // become; one that deletes nothing never does.
+      const needsAcceptance = counts.dropped > 0 && (latched || !sweepIsPlausible(counts))
+      const accept = opts.acceptSweep
+      // Within one run the drop set only shrinks (see the module
+      // docstring), so this run, dropping no more than was accepted,
+      // drops only rows the operator approved.
+      const accepted = accept !== null && accept.sweepRun === sweepRun && counts.dropped <= accept.dropped
+      if (needsAcceptance && !accepted) {
+        if (!latched && !(await deps.store.refuseSweep(peer.id, sweepRun, leaseId))) {
+          throw new PullError('lease-lost')
         }
+        result.sweepRefused = report
+        if (accept !== null) result.acceptOutcome = 'stale'
+        throw new PullError('sweep-refused')
       }
-      const removed = await deps.store.finishSweep(peer.id, peer.sweepRun, leaseId)
+      const removed = await deps.store.finishSweep(peer.id, sweepRun, leaseId)
       if (removed === null) throw new PullError('lease-lost')
       result.reconciled = removed
       result.reconcilePending = false
-      if (refused) result.sweepAccepted = counts
+      if (needsAcceptance) result.sweepAccepted = report
+      if (accept !== null) result.acceptOutcome = needsAcceptance ? 'ran' : 'not-needed'
     }
+    if (opts.acceptSweep !== null && result.acceptOutcome === undefined) result.acceptOutcome = 'not-reached'
     result.ok = true
-    await record(null)
+    // A refused sweep this pull did not reach is still refused; keep
+    // saying so rather than clearing it on a pull that stopped short.
+    await record(!full && latched && result.reconcilePending ? 'sweep-refused' : null)
     return result
   } catch (err) {
     if (!(err instanceof PullError)) {
@@ -773,6 +824,7 @@ async function pullUnderLease(
     }
     result.error = err.code
     if (err.status !== undefined) result.status = err.status
+    if (opts.acceptSweep !== null && result.acceptOutcome === undefined) result.acceptOutcome = 'not-reached'
     await record(describePullFailure(err.code, err.status))
     return result
   }
