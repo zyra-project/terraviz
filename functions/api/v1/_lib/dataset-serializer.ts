@@ -347,18 +347,27 @@ function manifestLink(baseUrl: string, datasetId: string): string {
 /**
  * Group categories by facet. Frontend expects `categories` keyed
  * by facet name (e.g. "Theme") with arrays of values.
+ *
+ * Grouped in a `Map`, never by indexing an object literal: a facet
+ * name is publisher text, and on `{}` a name like `toString`,
+ * `valueOf` or `__proto__` reads an inherited member rather than
+ * `undefined`. The old `out[facet] ?? []` then called `push` on what
+ * it found and threw, so one author's dataset took down
+ * `/api/v1/catalog` for every visitor. `Object.fromEntries` writes
+ * each facet as an own property, `__proto__` included, so every name
+ * the validator accepts comes back out unchanged. Shared with the
+ * event store, whose category rows have the same shape.
  */
-function groupCategories(
-  rows: Array<{ facet: string; value: string }>,
+export function groupCategories(
+  rows: ReadonlyArray<{ facet: string; value: string }>,
 ): Record<string, string[]> {
-  const out: Record<string, string[]> = {}
+  const out = new Map<string, string[]>()
   for (const r of rows) {
-    if (r.facet === '__proto__' || r.facet === 'constructor') continue
-    const arr = out[r.facet] ?? []
-    arr.push(r.value)
-    out[r.facet] = arr
+    const arr = out.get(r.facet)
+    if (arr) arr.push(r.value)
+    else out.set(r.facet, [r.value])
   }
-  return out
+  return Object.fromEntries(out)
 }
 
 export function serializeDataset(

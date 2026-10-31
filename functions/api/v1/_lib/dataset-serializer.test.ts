@@ -18,6 +18,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
+  groupCategories,
   serializeDataset,
   type DataRefResolver,
 } from './dataset-serializer'
@@ -709,5 +710,40 @@ describe('serializeDataset — what the Second Life globe scripts read', () => {
     expect(cut).toBeGreaterThan(0)
     expect(JSON.parse(`${head.slice(0, cut)}}`)).toEqual({ id: '01KQG611HF8YXJNRBEHT0757KT', slug, title })
     expect(head.slice(cut + ',"format":"'.length)).toMatch(/^tour\/json"/)
+  })
+})
+
+describe('groupCategories', () => {
+  // A facet name is publisher text. On an object literal, each of these
+  // reads an inherited member rather than `undefined`, and grouping by
+  // `out[facet] ?? []` called `push` on it and threw — which took down
+  // /api/v1/catalog for every visitor.
+  const INHERITED = ['toString', 'valueOf', 'hasOwnProperty', 'isPrototypeOf', 'constructor', '__proto__']
+
+  it.each(INHERITED)('keeps a facet named %s as an ordinary own key', facet => {
+    const out = groupCategories([
+      { facet, value: 'a' },
+      { facet: 'Theme', value: 'Climate' },
+      { facet, value: 'b' },
+    ])
+    expect(Object.keys(out)).toEqual([facet, 'Theme'])
+    expect(Object.getOwnPropertyDescriptor(out, facet)?.value).toEqual(['a', 'b'])
+    expect(JSON.parse(JSON.stringify(out))).toEqual(JSON.parse(`{"${facet}":["a","b"],"Theme":["Climate"]}`))
+  })
+
+  // `__proto__` in particular must not have become the object's
+  // prototype on the way through.
+  it('returns a plain object whose prototype is untouched', () => {
+    const out = groupCategories([{ facet: '__proto__', value: 'x' }])
+    expect(Object.getPrototypeOf(out)).toBe(Object.prototype)
+  })
+
+  it('reaches the wire through serializeDataset', () => {
+    const wire = serializeDataset(
+      fakeRow(),
+      { ...emptyDecoration, categories: [{ facet: 'toString', value: 'x' }] },
+      fakeIdentity,
+    )
+    expect(JSON.parse(JSON.stringify(wire.enriched?.categories))).toEqual({ toString: ['x'] })
   })
 })

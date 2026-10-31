@@ -31,6 +31,7 @@ import { newUlid } from './ulid'
 import { isNocookieEmbedUrl } from './youtube-channels'
 import type { PublisherRow } from './publisher-store'
 import { can, canOwnOrAny } from './capabilities'
+import { groupCategories } from './dataset-serializer'
 
 /** KV key the public `GET /api/v1/featured-event` caches under. Shared
  *  with the review route so an approve/reject can bust it for immediate
@@ -693,11 +694,10 @@ export async function getEventDecorations(
     .bind(eventId)
     .all<{ keyword: string }>()
 
-  const categories: Record<string, string[]> = {}
-  for (const { facet, value } of catRes.results ?? []) {
-    ;(categories[facet] ??= []).push(value)
+  return {
+    categories: groupCategories(catRes.results ?? []),
+    keywords: (kwRes.results ?? []).map(r => r.keyword),
   }
-  return { categories, keywords: (kwRes.results ?? []).map(r => r.keyword) }
 }
 
 /**
@@ -935,9 +935,15 @@ export async function getDecorationsForEvents(
       )
       .bind(...chunk)
       .all<{ event_id: string; facet: string; value: string }>()
+    const rowsByEvent = new Map<string, Array<{ facet: string; value: string }>>()
     for (const { event_id, facet, value } of catRes.results ?? []) {
-      const dec = out.get(event_id)
-      if (dec) (dec.categories[facet] ??= []).push(value)
+      const rows = rowsByEvent.get(event_id)
+      if (rows) rows.push({ facet, value })
+      else rowsByEvent.set(event_id, [{ facet, value }])
+    }
+    for (const [eventId, rows] of rowsByEvent) {
+      const dec = out.get(eventId)
+      if (dec) dec.categories = groupCategories(rows)
     }
     const kwRes = await db
       .prepare(
