@@ -597,7 +597,12 @@ function validateRadiusMi(value: unknown, errors: ValidationError[]): void {
 }
 
 /** Loose bound on `weight`, like `radius_mi`'s: SOS rows use 10. */
-const MAX_WEIGHT_MAGNITUDE = 1_000_000
+export const MAX_WEIGHT_MAGNITUDE = 1_000_000
+
+/** Whether `value` is a weight the publish API accepts. */
+export function isValidWeight(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && Math.abs(value) <= MAX_WEIGHT_MAGNITUDE
+}
 
 /**
  * Validate `weight`, the catalog's ordering hint: a whole number in
@@ -610,7 +615,7 @@ const MAX_WEIGHT_MAGNITUDE = 1_000_000
  */
 function validateWeight(value: unknown, errors: ValidationError[]): void {
   if (value === undefined) return
-  if (typeof value !== 'number' || !Number.isSafeInteger(value)) {
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
     errors.push(err('weight', 'invalid_type', 'weight must be a whole number.'))
     return
   }

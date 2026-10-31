@@ -492,9 +492,13 @@ describe('weight', () => {
     }
   })
 
-  it('refuses a weight past the loose bound', () => {
+  it('refuses a weight past the loose bound, either side', () => {
     expect(weightErrors(1_000_001)).toEqual(['invalid_value'])
     expect(weightErrors(1_000_000)).toEqual([])
+    expect(weightErrors(-1_000_001)).toEqual(['invalid_value'])
+    expect(weightErrors(-1_000_000)).toEqual([])
+    // A whole number, so out of range rather than the wrong type.
+    expect(weightErrors(1e20)).toEqual(['invalid_value'])
   })
 
   it('is checked on create as well as update', () => {

@@ -567,6 +567,23 @@ describe('mapSnapshotEntry — Phase 3b auxiliary fields', () => {
     expect(outcome.row.draft.probing_info).toBeUndefined()
   })
 
+  // A bad weight costs the weight, not the dataset; a numeric string,
+  // which a few SOS rows carry, is kept as the number it spells.
+  it.each([
+    [10, 10],
+    ['10', 10],
+    [' -3 ', -3],
+    [10.5, undefined],
+    [JSON.parse('1e999'), undefined],
+    [2_000_000, undefined],
+    ['ten', undefined],
+  ])('maps weight %j to %j and still imports the row', (weight, expected) => {
+    const outcome = mapSnapshotEntry({ ...sample, weight: weight as number }, undefined)
+    expect(outcome.kind).toBe('ok')
+    if (outcome.kind !== 'ok') return
+    expect(outcome.row.draft.weight).toBe(expected)
+  })
+
   it('persists 3d non-Earth metadata (celestialBody / radiusMi / lonOrigin / isFlippedInY)', () => {
     const outcome = mapSnapshotEntry(
       {
