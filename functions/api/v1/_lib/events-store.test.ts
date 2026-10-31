@@ -624,6 +624,27 @@ describe('bulk review-queue reads', () => {
     expect(dec.get(a.id)!.categories).toEqual({ Theme: ['Hazards', 'Storms'], Region: ['Atlantic'] })
     expect(dec.get(b.id)).toEqual({ categories: {}, keywords: [] })
   })
+
+  // A facet is free text on the create body. Named after an
+  // Object.prototype member, it made both reads throw — the single
+  // read inside ingest's matcher pass, and the bulk read behind the
+  // review queue, which then failed for every reviewer.
+  it('reads facets named after Object.prototype members', async () => {
+    const { db } = freshDb()
+    // Parsed rather than written as a literal: `{ __proto__: [...] }`
+    // in source sets the prototype instead of making a key.
+    const categories = JSON.parse('{"toString":["a"],"__proto__":["b"],"Theme":["Storms"]}') as Record<string, string[]>
+    const { id } = await insertCurrentEvent(db, { ...sampleEvent(), categories })
+    const expected = JSON.parse('{"Theme":["Storms"],"__proto__":["b"],"toString":["a"]}')
+
+    const single = await getEventDecorations(db, id)
+    expect(Object.keys(single.categories)).toEqual(['Theme', '__proto__', 'toString'])
+    expect(single.categories).toEqual(expected)
+
+    const bulk = await getDecorationsForEvents(db, [id])
+    expect(Object.keys(bulk.get(id)!.categories)).toEqual(['Theme', '__proto__', 'toString'])
+    expect(bulk.get(id)!.categories).toEqual(expected)
+  })
 })
 
 describe('getFeaturedEvent', () => {

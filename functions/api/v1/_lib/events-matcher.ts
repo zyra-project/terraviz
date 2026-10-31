@@ -428,7 +428,10 @@ export function buildEventTerms(parts: {
     for (const t of tokens) {
       set.add(t)
       if (suppressed.has(t)) continue
-      for (const e of TOPIC_EXPANSIONS[t] ?? []) set.add(e)
+      // Own keys only: `t` is a word from the event, and on a plain
+      // object "constructor" reads the inherited Object function.
+      if (!Object.hasOwn(TOPIC_EXPANSIONS, t)) continue
+      for (const e of TOPIC_EXPANSIONS[t]) set.add(e)
     }
   }
   return set
