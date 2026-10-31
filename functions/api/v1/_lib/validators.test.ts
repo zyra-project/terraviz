@@ -472,6 +472,37 @@ describe('validateDraftCreate', () => {
   })
 })
 
+describe('weight', () => {
+  // `{"weight":1e999}` parses to Infinity, and was stored as is: the
+  // catalog then sorted by a non-number and the signed feed could not
+  // carry the row. `null` hit the NOT NULL column as a 500.
+  const weightErrors = (weight: unknown) =>
+    validateDraftUpdate({ weight } as never).filter(e => e.field === 'weight').map(e => e.code)
+
+  it('accepts whole numbers, including negative ones and the SOS default', () => {
+    expect(weightErrors(10)).toEqual([])
+    expect(weightErrors(0)).toEqual([])
+    expect(weightErrors(-5)).toEqual([])
+    expect(weightErrors(undefined)).toEqual([])
+  })
+
+  it('refuses what is not a whole number', () => {
+    for (const bad of [JSON.parse('1e999'), -Infinity, Number.NaN, 1.5, '10', null]) {
+      expect(weightErrors(bad)).toEqual(['invalid_type'])
+    }
+  })
+
+  it('refuses a weight past the loose bound', () => {
+    expect(weightErrors(1_000_001)).toEqual(['invalid_value'])
+    expect(weightErrors(1_000_000)).toEqual([])
+  })
+
+  it('is checked on create as well as update', () => {
+    const errs = validateDraftCreate({ title: 'Hello world', format: 'video/mp4', weight: JSON.parse('1e999') })
+    expect(errs.some(e => e.field === 'weight' && e.code === 'invalid_type')).toBe(true)
+  })
+})
+
 describe('validateDraftUpdate', () => {
   it('treats every field as optional', () => {
     expect(validateDraftUpdate({})).toEqual([])
