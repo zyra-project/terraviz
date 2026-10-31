@@ -250,10 +250,12 @@ it, re-validate the payload, restrict URL schemes, and resolve relative
 - **Retractions disclose ids.** A retracted public, non-hidden row
   produces a tombstone; hidden ids never enter the feed. Previously
   mirrored hidden rows disappear through full sync plus deferred sweep,
-  and only a full sync that starts after the row was hidden: one
-  already past the row's page keeps it. With no scheduler, that waits
-  on an operator. **To withdraw a dataset from peers, retract it**,
-  which reaches them on their next incremental pull.
+  and only a full sync that has not yet passed the row's page when it
+  was hidden; one already past it keeps the row. With no scheduler,
+  that waits on an operator. **To withdraw a dataset from peers,
+  retract it while it is still public and not hidden.** The tombstone
+  reaches them on the first pull after the 30 s settle window; a row
+  hidden first never sends one.
 - **Readiness is not health.** Discovery checks the signing-key pair
   but may be cached for fifteen minutes, and does not prove D1 health.
 - **Origin is bounded.** Every row must name its serving peer as

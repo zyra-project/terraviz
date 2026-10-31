@@ -5,7 +5,8 @@
 -- (metadata Phase 5, step 5).
 --
 -- Two tables, a reduced form of the ones `docs/CATALOG_DATA_MODEL.md`
--- plans. Columns for later phases (`shared_secret`, `policy`,
+-- plans, and one index on the publisher side, on `datasets`, for the
+-- feed's scan (see its comment at the end). Columns for later phases (`shared_secret`, `policy`,
 -- `asset_proxy_policy`, `include_in_docent`) are left out rather than
 -- stored unused: each is an `ADD COLUMN` when the code that reads it
 -- lands, and a column nothing reads is a setting an operator can
@@ -85,6 +86,7 @@ CREATE TABLE federated_datasets (
 );
 
 -- Every equality column of the feed scan comes before the range, so
--- the scan reads only rows it can return: hidden rows and other
--- nodes' rows are skipped by the index, not read and discarded.
+-- hidden rows and other nodes' rows are skipped by the index rather
+-- than read and discarded. Drafts in the range are still read: the
+-- scan's `published_at IS NOT NULL` is not in the index.
 CREATE INDEX idx_datasets_federation_feed ON datasets (visibility, is_hidden, origin_node, updated_at, id);

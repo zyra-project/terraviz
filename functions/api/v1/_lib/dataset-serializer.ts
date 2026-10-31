@@ -99,6 +99,8 @@ export interface WireDataset {
   /** Probing metadata recovered from the SOS snapshot — pixel
    * coords on the color table image mapped to data values. Wire
    * type is the parsed JSON object (not the raw string D1 stores).
+   * Absent when the row has none, or when what it stores cannot be
+   * signed: a non-finite number, or nesting deeper than 60 levels.
    * Phase 3b. */
   probingInfo?: unknown
   /** Geographic bounding box (NSWE in degrees) for the dataset's
@@ -275,8 +277,10 @@ function resolveAsset(
  * Parse a JSON-stringified text column into its object form for
  * the wire. Empty / null / unparseable values become `undefined`
  * so the field is omitted from the serialized row. Used for
- * Phase 3b's `probing_info` — validated on write, so a parse
- * failure here only happens if the row was edited out-of-band.
+ * Phase 3b's `probing_info`. A value is also omitted when it holds a
+ * non-finite number (`1e999` parses to `Infinity`) or nests deeper
+ * than 60 levels, which the signed feed cannot carry. The write
+ * validator accepts both today, so this is not only out-of-band edits.
  */
 function parseJsonField(v: string | null | undefined): unknown {
   if (v == null || v.length === 0) return undefined

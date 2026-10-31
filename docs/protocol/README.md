@@ -202,8 +202,11 @@ the contract is here, because a schema cannot carry it.
   Hidden rows never enter the scan, including rows hidden before
   their first publication. A hidden row, hard delete or move away
   from public visibility leaves no tombstone. To withdraw a dataset
-  from subscribers promptly, retract it: a tombstone is the only
-  withdrawal an incremental pull carries. Run periodic full syncs
+  from subscribers promptly, retract it while it is still public and
+  not hidden: a tombstone is the only withdrawal an incremental pull
+  carries, and it reaches the first pull made after the 30 s settle
+  window. Hide it, if at all, only after peers have pulled. Run
+  periodic full syncs
   by omitting `since`. Do not delete unseen rows immediately: finish
   the full scan, wait the 30 s settle period plus 60 s clock-skew
   allowance (`sweep_after`), then finish an incremental pull
@@ -219,7 +222,8 @@ the contract is here, because a schema cannot carry it.
   without an abuse contact, and 503 `binding_missing` /
   `identity_missing` / `signing_key_unavailable` for a node not yet
   set up to sign, and 503 `feed_unavailable` for publication/storage
-  failures. GET and HEAD are supported; HEAD has no body. Other
+  failures. On a 503, keep the cursor you sent and retry later; a page
+  is never skipped by a refusal. GET and HEAD are supported; HEAD has no body. Other
   methods return JSON 405 with `Allow: GET, HEAD`. Unimplemented paths
   such as `/federation/handshake` return JSON 404, not SPA HTML.
   A row that cannot be serialized is logged locally and skipped, with
@@ -241,14 +245,16 @@ the contract is here, because a schema cannot carry it.
   600 requests per source IP per minute, before D1 work, then returns
   429 `rate_limited` and `Retry-After: 60`. This is not a global quota:
   configure edge/WAF limits for deployment-wide abuse protection. The
-  limiter groups IPv6 addresses by /64 and tracks at most 10,000 buckets
+  limiter groups IPv6 addresses by /64 (an IPv4-mapped address counts as
+  the IPv4 address it carries) and tracks at most 10,000 buckets
   per isolate, evicting the oldest when full. Cloudflare Worker requests
   to another zone share a source IP and therefore a bucket; configure a
   zone rate-limit rule for deployment-wide control. Requests without
   `CF-Connecting-IP` share one `unknown` bucket (notably off Cloudflare).
   The 600/minute limit still permits substantial D1 load; operators
   should set tighter edge limits for their peers' expected pull rate.
-  The `(visibility, updated_at, id)` index bounds the scan range.
+  The `(visibility, is_hidden, origin_node, updated_at, id)` index
+  bounds the scan range.
 
 ### Signature Bytes And Version Rules
 

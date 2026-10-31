@@ -21,20 +21,28 @@ major (`/schema/v2/`) and an entry with a migration note.
   `via` links, with the dataset schema profile, not alternates.
 - **`dataset.schema.json`, `catalog.schema.json`, `feed.schema.json`:**
   optional `enriched.datasetDevelopers` and `visDevelopers` arrays
-  preserve every producer credit. They list producers in name order:
-  the catalog stores no credit order. Singular fields keep their legacy
-  value, the last producer in that order, for existing readers. Older
-  readers ignore the arrays; this is additive, not a new identity or
-  signature version.
-- **`dataset.schema.json`, `catalog.schema.json`, `feed.schema.json`:**
-  `enriched.probingInfo` is now omitted when it holds a non-finite
-  number or nests deeper than 60 levels. `/api/v1/catalog` used to
-  render a non-finite number as `null` inside an otherwise intact
-  object; the whole field is now left out, on the catalog as on the
-  feed.
-  Deploying this serializer does not restamp existing rows: run a
-  one-time full resync to receive previously stored producer credits
-  without waiting for another dataset edit.
+  preserve every producer credit. They list producers by name, in
+  byte order (case-sensitive, so `Zeta` sorts before `alpha`, and
+  accented names after unaccented ones): the catalog stores no credit
+  order. Singular fields keep their legacy value, the last producer in
+  that order, for existing readers. Older readers ignore the arrays;
+  this is additive, not a new identity or signature version. The order
+  is now set by the query rather than left to the database's plan, so
+  a node whose database returned another order before sees producers,
+  and its catalog ETag, change once.
+- **Behaviour change, not additive:** top-level `probingInfo` is now
+  omitted when it holds a non-finite number or nests deeper than 60
+  levels, on `/api/v1/catalog` and `/api/v1/datasets/:id` as on the
+  feed. Those two used to render a non-finite number as `null` inside
+  an otherwise intact object. The field was already optional, so a
+  reader that handles its absence is unaffected.
+
+  Deploying these serializer changes does not restamp existing rows.
+  A subscriber needs a one-time full resync to receive previously
+  stored producer credits without waiting for another dataset edit.
+  And the no-cursor `/api/v1/catalog` keeps serving its cached KV
+  snapshot (`catalog:snapshot:v1`) until the next publisher write, so
+  either make one or delete that key after deploying.
 
 - **`feed.schema.json`** — `FederationFeedBody`
   (`functions/api/v1/_lib/federation-feed.ts`). One page of
