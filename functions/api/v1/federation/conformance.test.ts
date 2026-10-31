@@ -165,6 +165,37 @@ describe('federation conformance: feed route ↔ subscriber engine', () => {
     expect(mirrored().map(row => row.remote_id)).not.toContain(idOf(1))
   })
 
+  // A publisher whose serializer breaks skips every row, so its feed
+  // serves signed pages with nothing in them and a full sync completes
+  // having seen nothing. The sweep after it is what would empty the
+  // mirror, and the subscriber refuses it.
+  it('a broken serializer on the publisher cannot sweep the mirror empty', async () => {
+    await addPeer()
+    expect((await pull()).ok).toBe(true)
+    const before = mirrored().map(row => row.remote_id)
+    expect(before.length).toBeGreaterThan(1)
+    // A non-finite number, which the feed's canonical JSON refuses, on every row.
+    publisher.prepare('UPDATE datasets SET weight = ?').run(Infinity)
+    expect(await pull({ full: true })).toMatchObject({ ok: true, complete: true, upserted: 0, reconcilePending: true })
+    const pending = subscriber.prepare('SELECT sweep_after FROM federation_peers').get() as { sweep_after: number }
+    vi.setSystemTime(new Date(pending.sweep_after + 1))
+
+    const refused = await pull()
+    expect(refused).toMatchObject({
+      ok: false,
+      error: 'sweep-refused',
+      reconciled: 0,
+      reconcilePending: false,
+      sweepRefused: { kept: 0, dropped: before.length },
+    })
+    expect(mirrored().map(row => row.remote_id)).toEqual(before)
+    const peerRow = subscriber.prepare('SELECT sweep_run, last_sync_error FROM federation_peers').get() as { sweep_run: string | null; last_sync_error: string | null }
+    expect(peerRow).toEqual({ sweep_run: null, last_sync_error: 'sweep-refused' })
+    // The refused sweep is cleared, so the next pull carries on.
+    expect(await pull()).toMatchObject({ ok: true })
+    expect(mirrored().map(row => row.remote_id)).toEqual(before)
+  })
+
   it('a page altered in transit fails verification and changes nothing', async () => {
     await addPeer()
     tamper = text => {

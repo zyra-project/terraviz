@@ -15,7 +15,10 @@
  * `sync_in_progress` while another pull of the same peer holds its
  * lease. A pull that fails because of the peer answers 503 and
  * the result names why (the
- * same code is stored as the peer's `last_sync_error`). A failure of
+ * same code is stored as the peer's `last_sync_error`). A sweep that
+ * would have emptied most of the mirror is refused, deletes nothing,
+ * and answers 409 `sweep_refused` with what it would have kept and
+ * dropped; the pages this pull read are still applied. A failure of
  * this node's own store answers 500 `sync_failed`, after an audit row
  * recording `store-error`.
  */
@@ -110,8 +113,10 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
     tombstoned: result.tombstoned,
     reconciled: result.reconciled,
     reconcile_pending: result.reconcilePending,
+    ...(result.sweepRefused ? { sweep_refused: result.sweepRefused } : {}),
   })
-  return json(result.ok ? 200 : 503, { result: {
+  const status = result.ok ? 200 : result.error === 'sweep-refused' ? 409 : 503
+  return json(status, { result: {
     ok: result.ok,
     full: result.full,
     complete: result.complete,
@@ -122,5 +127,6 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
     reconcile_pending: result.reconcilePending,
     ...(result.error ? { error: result.error.replaceAll('-', '_') } : {}),
     ...(result.status !== undefined ? { upstream_status: result.status } : {}),
+    ...(result.sweepRefused ? { sweep_refused: result.sweepRefused } : {}),
   } })
 }

@@ -208,6 +208,33 @@ describe('POST /api/v1/publish/federation/sync', () => {
     expect(fn).not.toHaveBeenCalled()
   })
 
+  it('answers 409 sweep_refused, keeping the mirror, when a sweep would empty it', async () => {
+    // A finished full sync delivered nothing (run RUN1), its settle window
+    // has passed, and two rows from an earlier run are still mirrored.
+    for (const id of ['x', 'y']) {
+      sqlite
+        .prepare(
+          `INSERT INTO federated_datasets (peer_id, remote_id, origin_node, payload_json, feed_signature, seen_run, fetched_at)
+           VALUES (?, ?, ?, '{}', 'sig', 'RUN0', '2026-01-01T00:00:00.000Z')`,
+        )
+        .run(PEER_ID, id, PEER_ID)
+    }
+    sqlite
+      .prepare('UPDATE federation_peers SET last_sync_cursor = ?, sweep_run = ?, sweep_after = ? WHERE id = ?')
+      .run(encodeFeedCursor({ updatedAt: '2026-01-01T00:00:00.000Z', id: 'a' }), 'RUN1', 0, PEER_ID)
+    serveFeed([])
+    const res = await onRequestPost(ctx({ body: { peer_id: PEER_ID } }))
+    expect(res.status).toBe(409)
+    expect(await res.json()).toMatchObject({
+      result: { ok: false, error: 'sweep_refused', reconciled: 0, sweep_refused: { kept: 0, dropped: 2 } },
+    })
+    expect(sqlite.prepare('SELECT remote_id FROM federated_datasets ORDER BY remote_id').all()).toEqual([
+      { remote_id: 'x' },
+      { remote_id: 'y' },
+    ])
+    expect(JSON.parse(auditRows()[0].metadata_json)).toMatchObject({ ok: false, error: 'sweep-refused', sweep_refused: { kept: 0, dropped: 2 } })
+  })
+
   it('answers 503 with the reason when the peer fails', async () => {
     vi.stubGlobal(
       'fetch',

@@ -221,14 +221,17 @@ the contract is here, because a schema cannot carry it.
   failures. GET and HEAD are supported; HEAD has no body. Other
   methods return JSON 405 with `Allow: GET, HEAD`. Unimplemented paths
   such as `/federation/handshake` return JSON 404, not SPA HTML.
-  A single unserializable row is logged locally and skipped, with the
-  cursor advancing past it. When every visible row on a page fails,
-  the feed reads that as a broken serializer and returns 503
-  `feed_unavailable`, so a full sync never completes on empty pages
-  and sweeps the mirror. It does so when the page has more than one
-  visible row, or is the first page (no `since`); a lone bad row on a
-  later page is skipped. 500 `unsignable_row` is a page-level
-  canonicalization failure. Lone surrogates become U+FFFD and invalid
+  A row that cannot be serialized is logged locally and skipped, with
+  the cursor advancing past it, however many such rows a page holds.
+  So a publisher whose serializer breaks serves signed pages with
+  nothing in them, and a full sync over them completes having seen
+  nothing. **A subscriber must not sweep on that.** Before dropping
+  the rows a full sync did not deliver, count what the sweep keeps and
+  drops, and refuse one that keeps nothing or drops most of the
+  mirror. The reference subscriber refuses a sweep that keeps no row,
+  or drops more than half the mirror and more than five rows; it
+  deletes nothing and reports `sweep-refused`. 500 `unsignable_row`
+  is a page-level canonicalization failure. Lone surrogates become U+FFFD and invalid
   probing metadata is omitted, including nesting beyond 60 levels to
   reserve space for the feed envelope. An unexpected skipped row may
   leave a stale mirror until reconciliation, or be removed by its sweep;

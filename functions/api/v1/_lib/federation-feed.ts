@@ -196,17 +196,16 @@ export async function buildFeedPage(
       console.error('[federation/feed] skipped unserializable row', row.id)
     }
   }
-  // A page whose visible rows all failed is read as a broken serializer,
-  // not a bad row, and refused: served as signed empty pages, a full
-  // sync would complete having seen nothing and sweep every mirrored
-  // row. That needs more than one row to judge by, or the first page,
-  // where every full sync starts. A lone bad row on a later page is
-  // skipped like any other, so it cannot hold incremental pulls at the
-  // tail of the feed until some other row changes.
-  const failedAll = visible.length > 0 && datasets.length === 0
-  if (failedAll && (visible.length > 1 || opts.after === null)) {
-    throw new Error('all visible feed rows failed serialization')
-  }
+  // Every row that cannot be serialized is skipped, however many there
+  // are on the page. Refusing a page instead was tried, and any rule for
+  // when to refuse trades a stall against a sweep: refuse on a lone bad
+  // row and it holds every pull at the feed's tail, refuse only on a
+  // page of them and an author with two bad rows holds the pulls, and
+  // takedowns queued behind them, while tombstone-only pages still let
+  // a broken serializer walk a full sync to an empty finish. The page
+  // cannot tell a bad row from a broken serializer; the subscriber can,
+  // by what a sweep would remove, and refuses one that would empty its
+  // mirror (`federation-subscriber.ts`, `sweepIsPlausible`).
   const tombstones = page.filter(r => !r.visible).map(r => r.row.id)
 
   const last = page.length > 0 ? page[page.length - 1].row : null

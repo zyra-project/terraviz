@@ -19,6 +19,8 @@ import {
   isFederationId,
   parsePeerBaseUrl,
   pullPeer,
+  sweepIsPlausible,
+  SWEEP_GUARD_MIN_ROWS,
   type FederationPeer,
   type PullDeps,
 } from './federation-subscriber'
@@ -161,6 +163,27 @@ describe('parsePeerBaseUrl', () => {
     '',
   ])('refuses %s', raw => {
     expect(parsePeerBaseUrl(raw)).toBeNull()
+  })
+})
+
+describe('sweepIsPlausible', () => {
+  // A sweep drops the rows a full sync did not deliver. A peer whose
+  // feed skips every row delivers none, and sweeping then empties the
+  // mirror, so a sweep that keeps nothing is refused outright.
+  it('refuses a sweep that keeps nothing, however small', () => {
+    expect(sweepIsPlausible({ kept: 0, dropped: 1 })).toBe(false)
+    expect(sweepIsPlausible({ kept: 0, dropped: 0 })).toBe(true)
+  })
+
+  it('lets a few rows go whatever share they are, so a small peer can withdraw', () => {
+    expect(sweepIsPlausible({ kept: 1, dropped: SWEEP_GUARD_MIN_ROWS })).toBe(true)
+    expect(sweepIsPlausible({ kept: 1, dropped: SWEEP_GUARD_MIN_ROWS + 1 })).toBe(false)
+  })
+
+  it('refuses dropping more than half the mirror once past the floor', () => {
+    expect(sweepIsPlausible({ kept: 6, dropped: 6 })).toBe(true)
+    expect(sweepIsPlausible({ kept: 5, dropped: 6 })).toBe(false)
+    expect(sweepIsPlausible({ kept: 100, dropped: 40 })).toBe(true)
   })
 })
 

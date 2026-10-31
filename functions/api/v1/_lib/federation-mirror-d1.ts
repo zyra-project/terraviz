@@ -233,6 +233,28 @@ export function d1FederationMirrorStore(db: D1Database): FederationMirrorStore {
       return (done.meta?.changes ?? 0) === 1
     },
 
+    async countSweep(peerId, sweepRun) {
+      const row = await db
+        .prepare(
+          `SELECT COALESCE(SUM(CASE WHEN seen_run = ? THEN 1 ELSE 0 END), 0) AS kept,
+                  COALESCE(SUM(CASE WHEN seen_run != ? THEN 1 ELSE 0 END), 0) AS dropped
+           FROM federated_datasets WHERE peer_id = ?`,
+        )
+        .bind(sweepRun, sweepRun, peerId)
+        .first<{ kept: number; dropped: number }>()
+      return { kept: row?.kept ?? 0, dropped: row?.dropped ?? 0 }
+    },
+
+    async abandonSweep(peerId, sweepRun, leaseId) {
+      await db
+        .prepare(
+          `UPDATE federation_peers SET sweep_run = NULL, sweep_after = NULL
+           WHERE id = ? AND sync_lease = ? AND sweep_run = ?`,
+        )
+        .bind(peerId, leaseId, sweepRun)
+        .run()
+    },
+
     async finishSweep(peerId, sweepRun, leaseId) {
       const [removed] = await db.batch([
         db

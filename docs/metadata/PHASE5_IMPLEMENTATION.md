@@ -144,6 +144,15 @@ It schedules a sweep, which the next complete incremental pull runs
 once the feed's 30 s settle window plus 60 s clock-skew allowance have closed, so rows held back by
 the watermark on the last page are not dropped.
 
+**Sweep guard.** The feed skips any row it cannot serialize, so a peer
+whose serializer breaks serves empty signed pages and a full sync over
+them sees nothing. Before deleting, the sweep counts what it keeps and
+drops (`sweepIsPlausible`). It is refused when it keeps no row, or
+drops more than half the mirror and more than five rows. A refused
+sweep deletes nothing, clears itself, records `sweep-refused`, and the
+sync route answers 409 with the counts. A peer that really withdrew
+most of its catalog is removed and re-added by an operator.
+
 `last_sync_at` records the last **attempt**, successful or not; read
 it with `last_sync_error`.
 

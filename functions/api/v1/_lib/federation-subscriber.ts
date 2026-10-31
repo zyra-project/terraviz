@@ -46,6 +46,19 @@
  * window is invisible to the feed altogether, and so can be dropped
  * and come back on its next quiet moment.
  *
+ * **A sweep that would empty the mirror is refused.** A peer's feed
+ * skips any row it cannot serialize, so a peer whose serializer breaks
+ * serves signed pages with nothing in them, and a full sync over those
+ * pages completes having seen nothing. Swept as usual, that deletes
+ * the whole mirror. The peer cannot tell a broken serializer from one
+ * bad row; this side can, by what the sweep would remove. So before
+ * deleting, the sweep counts what it keeps and what it drops, and
+ * `sweepIsPlausible` refuses one that keeps nothing, or drops more than
+ * half the mirror and more than `SWEEP_GUARD_MIN_ROWS` rows. A refused
+ * sweep deletes nothing, clears itself, and fails the pull as
+ * `sweep-refused` with the counts. A peer that really did withdraw
+ * most of its catalog is then removed and re-added by an operator.
+ *
  * **One pull per peer.** A pull takes the peer's lease before reading
  * its state and releases it when done; every write is conditional on
  * holding it, so two pulls cannot interleave their pages or move each
@@ -82,6 +95,28 @@ export const PULL_MAX_PAGES = 8
 export const PULL_LEASE_MS = 5 * 60_000
 /** Clock skew allowed between this node and a peer for the sweep. */
 export const SWEEP_SKEW_MS = 60_000
+/** A sweep may drop up to this many rows whatever share of the mirror
+ *  they are, so a small peer's ordinary withdrawals are not refused. */
+export const SWEEP_GUARD_MIN_ROWS = 5
+
+/** What a pending sweep would keep (rows its run delivered) and drop. */
+export interface SweepCounts {
+  kept: number
+  dropped: number
+}
+
+/**
+ * Whether a sweep looks like a peer withdrawing rows rather than a peer
+ * whose feed has stopped carrying them. A sweep that keeps nothing is
+ * refused, since a full sync delivered no rows into a mirror that has
+ * some. So is one that drops more than half the mirror and more than
+ * `SWEEP_GUARD_MIN_ROWS` rows.
+ */
+export function sweepIsPlausible({ kept, dropped }: SweepCounts): boolean {
+  if (dropped === 0) return true
+  if (kept === 0) return false
+  return dropped <= SWEEP_GUARD_MIN_ROWS || dropped * 2 <= kept + dropped
+}
 
 /** A peer's cursor is opaque here: anything URL-safe and bounded. */
 const CURSOR_RE = /^[A-Za-z0-9._~-]{1,512}$/
@@ -165,9 +200,14 @@ export interface FederationMirrorStore {
   /** Clear `full_sync_run` and record the run as the pending sweep.
    *  `false` when the lease was lost. */
   finishFullSync(peerId: string, runId: string, leaseId: string, sweepAfterMs: number): Promise<boolean>
+  /** How many of the peer's rows the sweep run delivered, and how many
+   *  it did not and would drop. */
+  countSweep(peerId: string, sweepRun: string): Promise<SweepCounts>
   /** Drop the peer's rows the sweep run did not deliver and clear the
    *  pending sweep, together. Returns how many rows went. */
   finishSweep(peerId: string, sweepRun: string, leaseId: string): Promise<number>
+  /** Clear the pending sweep without dropping anything, under the lease. */
+  abandonSweep(peerId: string, sweepRun: string, leaseId: string): Promise<void>
   /** Stamp `last_sync_at` and set or clear `last_sync_error`. */
   recordSyncResult(
     peerId: string,
@@ -191,6 +231,7 @@ export type PullFailure =
   | 'invalid-body'
   | 'node-mismatch'
   | 'unsupported-version'
+  | 'sweep-refused'
   | SignatureFailure
 
 export interface PullResult {
@@ -210,6 +251,8 @@ export interface PullResult {
   reconciled: number
   /** A finished full sync is waiting for its sweep. */
   reconcilePending: boolean
+  /** For `sweep-refused`: what the refused sweep would have kept and dropped. */
+  sweepRefused?: SweepCounts
 }
 
 export interface PullDeps {
@@ -654,6 +697,13 @@ async function pullUnderLease(
     ) {
       // This pull began after the settle window closed, so it saw
       // every row the full sync's last page held back.
+      const counts = await deps.store.countSweep(peer.id, peer.sweepRun)
+      if (!sweepIsPlausible(counts)) {
+        await deps.store.abandonSweep(peer.id, peer.sweepRun, leaseId)
+        result.reconcilePending = false
+        result.sweepRefused = counts
+        throw new PullError('sweep-refused')
+      }
       result.reconciled = await deps.store.finishSweep(peer.id, peer.sweepRun, leaseId)
       result.reconcilePending = false
     }
