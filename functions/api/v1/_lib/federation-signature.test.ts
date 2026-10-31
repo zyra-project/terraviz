@@ -121,6 +121,20 @@ describe('keys', () => {
     expect(Buffer.from(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))).toString('base64url')).toBe('qBJOVgfc8lKGhbuCyVFWyrYLjjwohaDJWbIT31jfOpM')
   })
 
+  // The other half of the vector: a reader that verifies the published
+  // bytes and header, not ones this signer produced, accepts them.
+  it('verifies the published UTF-8 feed vector as received', async () => {
+    const text = '{"cursor":"opaque","datasets":[{"colorScale":{"units":"kg m-3","vmax":2e-7,"vmin":0},"id":"sample","originNode":"NODE000","probingInfo":{"nested":[true,null,{"label":"Océan"}]},"title":"Aérosol"}],"generated_at":"2026-09-22T14:13:20.000Z","has_more":false,"node_id":"NODE000","schema_version":1}'
+    const header = 'v=1, keyid=NODE000, created=1790086400, sig=FcqWiT3nDEmUhyHN0p2w_kvsWa8uuX9Wtuw5rbC6P_WxSqkjV8hckjOv4YtV1SIQJ7bxNeyp9je96oWMlaDbAQ'
+    const result = await verifyFederationBody(text, header, {
+      publicKey: (await rfcKeys()).pub,
+      expectedKeyId: 'NODE000',
+      expectedTarget: '/api/v1/federation/feed?limit=25',
+      now: 1790086400,
+    })
+    expect(result).toEqual({ ok: true, body: JSON.parse(text), created: 1790086400 })
+  })
+
   it('refuses every small-order Ed25519 public key', async () => {
     for (const point of ED25519_TORSION_SUBGROUP) {
       await expect(importNodePublicKey(`ed25519:${hex(point).toString('base64')}`)).rejects.toThrow()

@@ -220,7 +220,12 @@ the contract is here, because a schema cannot carry it.
   methods return JSON 405 with `Allow: GET, HEAD`. Unimplemented paths
   such as `/federation/handshake` return JSON 404, not SPA HTML.
   A single unserializable row is logged locally and skipped, with the
-  cursor advancing past it. If every visible row on a page fails, the feed returns 503 `feed_unavailable` so subscribers do not reconcile an empty page; 500 `unsignable_row` is a page-level
+  cursor advancing past it. When every visible row on a page fails,
+  the feed reads that as a broken serializer and returns 503
+  `feed_unavailable`, so a full sync never completes on empty pages
+  and sweeps the mirror. It does so when the page has more than one
+  visible row, or is the first page (no `since`); a lone bad row on a
+  later page is skipped. 500 `unsignable_row` is a page-level
   canonicalization failure. Lone surrogates become U+FFFD and invalid
   probing metadata is omitted, including nesting beyond 60 levels to
   reserve space for the feed envelope. An unexpected skipped row may

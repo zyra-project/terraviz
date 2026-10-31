@@ -81,6 +81,14 @@ describe('feed rate keys', () => {
     expect(feedRateKey('2001:db8:0:1::1')).not.toBe(feedRateKey('2001:db8::1'))
     expect(feedRateKey('192.0.2.1')).toBe('192.0.2.1')
   })
+
+  // Every IPv4-mapped address shares the /64 `0:0:0:0`, so bucketing
+  // them by prefix would put every such client in one bucket.
+  it('keys an IPv4-mapped address as the IPv4 address it carries', () => {
+    expect(feedRateKey('::ffff:192.0.2.1')).toBe('192.0.2.1')
+    expect(feedRateKey('::ffff:c000:201')).toBe('192.0.2.1')
+    expect(feedRateKey('::ffff:198.51.100.7')).toBe('198.51.100.7')
+  })
 })
 
 describe('GET /api/v1/federation/feed — refusals', () => {

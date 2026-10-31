@@ -58,7 +58,9 @@ export function resetFeedSigningKeyCache(): void {
   requestRates.clear()
 }
 
-/** Normalize IPv6 to a /64, including compressed and IPv4-mapped forms. */
+/** The rate-limit key for a caller: an IPv6 address by its /64 (any
+ *  spelling of it), an IPv4-mapped one as its IPv4 address, and an IPv4
+ *  address as it is. */
 export function feedRateKey(address: string): string {
   if (!address.includes(':')) return address
   try {
@@ -68,7 +70,13 @@ export function feedRateKey(address: string): string {
     const suffix = right ? right.split(':') : []
     const groups = host.includes('::') ? [...prefix, ...Array(8 - prefix.length - suffix.length).fill('0'), ...suffix] : prefix
     if (groups.length !== 8) return 'unknown'
-    return groups.slice(0, 4).map(group => parseInt(group, 16).toString(16)).join(':') + '::/64'
+    const words = groups.map(group => parseInt(group, 16))
+    // An IPv4-mapped address (`::ffff:a.b.c.d`) is one IPv4 client, and
+    // its /64 is the same for every one of them, so key it as IPv4.
+    if (words.slice(0, 5).every(word => word === 0) && words[5] === 0xffff) {
+      return [words[6] >> 8, words[6] & 0xff, words[7] >> 8, words[7] & 0xff].join('.')
+    }
+    return words.slice(0, 4).map(word => word.toString(16)).join(':') + '::/64'
   } catch { return 'unknown' }
 }
 

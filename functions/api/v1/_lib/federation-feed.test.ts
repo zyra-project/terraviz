@@ -152,6 +152,27 @@ describe('buildFeedPage', () => {
     await expect(buildFeedPage(store, { identity: IDENTITY, after: null, limit: 10, nowMs: NOW_MS, serialize: () => { throw new Error('broken serializer') } })).rejects.toThrow('all visible feed rows failed serialization')
   })
 
+  const broken = () => { throw new Error('broken serializer') }
+  const before = { updatedAt: '2025-12-31T00:00:00.000Z', id: 'Z' }
+
+  // Past the first page, a page of failures is still a broken serializer
+  // when there is more than one row to judge by.
+  it('fails a later page when more than one visible row fails', async () => {
+    const { store } = fakeStore(['A', 'B'].map(id => row(id, '2026-01-01T00:00:00.000Z')))
+    await expect(buildFeedPage(store, { identity: IDENTITY, after: before, limit: 10, nowMs: NOW_MS, serialize: broken }))
+      .rejects.toThrow('all visible feed rows failed serialization')
+  })
+
+  // The tail of the feed is usually one row. Refusing a lone bad row
+  // there held every incremental pull until some other row changed.
+  it('skips a lone bad row on a later page, and moves the cursor past it', async () => {
+    const { store } = fakeStore([row('A', '2026-01-01T00:00:00.000Z')])
+    const body = await buildFeedPage(store, { identity: IDENTITY, after: before, limit: 10, nowMs: NOW_MS, serialize: broken })
+    expect(body.datasets).toEqual([])
+    expect(body.has_more).toBe(false)
+    expect(decodeFeedCursor(body.cursor)!.updatedAt > '2026-01-01T00:00:00.000Z').toBe(true)
+  })
+
   it('asks for one row past the limit, up to the settle watermark', async () => {
     const { store, calls } = fakeStore([])
     await page(store, null, 7)
