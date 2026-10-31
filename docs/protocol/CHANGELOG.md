@@ -11,7 +11,7 @@ Additive changes (new optional field, new enum value) stay under the
 current major and get an entry here. Breaking changes mint a new
 major (`/schema/v2/`) and an entry with a migration note.
 
-## v1 (additive) — 2026-10-27
+## v1 (additive, plus one behaviour change) — 2026-10-27
 
 - **Review corrections:** signed feeds authenticate received bytes
   before parsing and require canonical-byte equality; the README pins
@@ -19,6 +19,12 @@ major (`/schema/v2/`) and an entry with a migration note.
   UTF-8/float vector. Hidden ids are not emitted. Discovery readiness
   includes usable matching keys. Native STAC links are source-metadata
   `via` links, with the dataset schema profile, not alternates.
+- **`feed.schema.json`** gains optional `held`: the ids of public,
+  non-hidden rows on a page that the node could not serialize. A page
+  with none omits it, so its signed bytes are unchanged. A reader that
+  ignores it sees those rows as missing, and a full sync's sweep could
+  then drop them. The README says how a subscriber keeps held rows and
+  guards its sweep.
 - **Subscriber guidance, no wire change:** README §Showing Mirrored
   Rows. A peer's `weight` must not rank its rows against another
   node's. A peer's text is untrusted input, and media is outside the
@@ -38,15 +44,16 @@ major (`/schema/v2/`) and an entry with a migration note.
   omitted when it holds a non-finite number or nests deeper than 60
   levels, on `/api/v1/catalog` and `/api/v1/datasets/:id` as on the
   feed. Those two used to render a non-finite number as `null` inside
-  an otherwise intact object. The field was already optional, so a
-  reader that handles its absence is unaffected.
-
-  Deploying these serializer changes does not restamp existing rows.
-  A subscriber needs a one-time full resync to receive previously
-  stored producer credits without waiting for another dataset edit.
-  And the no-cursor `/api/v1/catalog` keeps serving its cached KV
-  snapshot (`catalog:snapshot:v1`) until the next publisher write, so
-  either make one or delete that key after deploying.
+  an otherwise intact object, and to serve deep nesting as stored. The
+  field was already optional, so a reader that handles its absence is
+  unaffected.
+- **After deploying the serializer changes above:** they do not
+  restamp existing rows. A subscriber needs a one-time full resync to
+  receive previously stored producer credits and the new `probingInfo`
+  rule without waiting for another dataset edit. And the no-cursor
+  `/api/v1/catalog` keeps serving its cached KV snapshot
+  (`catalog:snapshot:v1`) until the next publisher write, so either
+  make one or delete that key after deploying.
 
 - **`feed.schema.json`** — `FederationFeedBody`
   (`functions/api/v1/_lib/federation-feed.ts`). One page of

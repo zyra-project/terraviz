@@ -144,14 +144,23 @@ It schedules a sweep, which the next complete incremental pull runs
 once the feed's 30 s settle window plus 60 s clock-skew allowance have closed, so rows held back by
 the watermark on the last page are not dropped.
 
-**Sweep guard.** The feed skips any row it cannot serialize, so a peer
-whose serializer breaks serves empty signed pages and a full sync over
-them sees nothing. Before deleting, the sweep counts what it keeps and
+**Held rows.** The feed lists in `held` the ids of public rows it
+cannot serialize, and the cursor moves past them. The subscriber stamps
+each held row as seen without changing its stored copy, so a sweep keeps
+it. A peer whose serializer breaks therefore holds every row, and the
+mirror keeps them all, stale, until the peer repairs them.
+
+**Sweep guard.** A feed that does not send `held` can still serve pages
+with rows missing. Before deleting, the sweep counts what it keeps and
 drops (`sweepIsPlausible`). It is refused when it keeps no row, or
 drops more than half the mirror and more than five rows. A refused
-sweep deletes nothing, clears itself, records `sweep-refused`, and the
-sync route answers 409 with the counts. A peer that really withdrew
-most of its catalog is removed and re-added by an operator.
+sweep deletes nothing, stays pending and records `sweep-refused`. Every
+complete pull refuses it again, and the sync route answers 409 with the
+counts each time. It ends when a new full sync replaces it, or when an
+admin sends `accept_sweep` with the exact counts, which runs it and is
+audited. A peer that really withdrew most of its catalog is applied that
+way, or sooner if the peer retracts the rows: tombstones are not
+counted.
 
 `last_sync_at` records the last **attempt**, successful or not; read
 it with `last_sync_error`.

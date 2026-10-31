@@ -205,7 +205,9 @@ the contract is here, because a schema cannot carry it.
   from subscribers promptly, retract it while it is still public and
   not hidden: a tombstone is the only withdrawal an incremental pull
   carries, and it reaches the first pull made after the 30 s settle
-  window. Hide it, if at all, only after peers have pulled. Run
+  window. Hide it, if at all, only after peers have pulled. To withdraw
+  many datasets at once, retract them too: a sweep that drops most of a
+  mirror is refused (below), and tombstones are not counted in it. Run
   periodic full syncs
   by omitting `since`. Do not delete unseen rows immediately: finish
   the full scan, wait the 30 s settle period plus 60 s clock-skew
@@ -226,21 +228,34 @@ the contract is here, because a schema cannot carry it.
   is never skipped by a refusal. GET and HEAD are supported; HEAD has no body. Other
   methods return JSON 405 with `Allow: GET, HEAD`. Unimplemented paths
   such as `/federation/handshake` return JSON 404, not SPA HTML.
-  A row that cannot be serialized is logged locally and skipped, with
-  the cursor advancing past it, however many such rows a page holds.
-  So a publisher whose serializer breaks serves signed pages with
-  nothing in them, and a full sync over them completes having seen
-  nothing. **A subscriber must not sweep on that.** Before dropping
-  the rows a full sync did not deliver, count what the sweep keeps and
-  drops, and refuse one that keeps nothing or drops most of the
-  mirror. The reference subscriber refuses a sweep that keeps no row,
-  or drops more than half the mirror and more than five rows; it
-  deletes nothing and reports `sweep-refused`. 500 `unsignable_row`
-  is a page-level canonicalization failure. Lone surrogates become U+FFFD and invalid
-  probing metadata is omitted, including nesting beyond 60 levels to
-  reserve space for the feed envelope. An unexpected skipped row may
-  leave a stale mirror until reconciliation, or be removed by its sweep;
-  the operator must repair that logged row. No CORS access is promised.
+  500 `unsignable_row` is a page-level canonicalization failure. Lone
+  surrogates become U+FFFD and invalid probing metadata is omitted,
+  including nesting beyond 60 levels to reserve space for the feed
+  envelope. No CORS access is promised.
+- **A row that cannot be served is held.** A public, non-hidden row
+  the node cannot serialize is left out of `datasets`, and its id goes
+  in `held`. The cursor advances past it, however many such rows a
+  page has. `held` is optional and appears only on a page that holds a
+  row, so other pages are signed exactly as before. Held ids count
+  against `limit` with the rest, and none may also appear in
+  `datasets` or `tombstones`. A subscriber keeps its copy of each held
+  row unchanged, and its sweep keeps it too. A held id it has no copy
+  of adds nothing. The copy stays stale until the publisher repairs the
+  row. The publisher logs one line per page that holds rows, with the
+  count and the first ten ids.
+- **A sweep that would empty the mirror is refused.** A feed that does
+  not send `held`, or loses rows some other way, serves pages with rows
+  missing. A full sync over them would sweep those rows away. So before
+  dropping the rows a full sync did not deliver, a subscriber counts
+  what the sweep keeps and drops. It refuses one that keeps nothing or
+  drops most of the mirror. The reference subscriber refuses one that
+  keeps no row, or drops more than half the mirror and more than five
+  rows. So it still lets up to five rows go whatever share they are,
+  which on a small mirror can be most of it. A refused sweep deletes
+  nothing and stays pending. Every complete pull refuses it again,
+  until a new full sync replaces it or an operator accepts its exact
+  counts (§Subscriber Operations). That is how a peer that really
+  withdrew most of its catalog is applied.
 - **Anonymous-read bounds.** A best-effort per-isolate limiter allows
   600 requests per source IP per minute, before D1 work, then returns
   429 `rate_limited` and `Retry-After: 60`. This is not a global quota:
@@ -331,7 +346,15 @@ to finish deferred reconciliation. Core-library defaults are separately
 100 entries times 8 pages; they are not Free-plan endpoint bounds.
 
 Failures return non-2xx statuses and snake_case result fields, including
-`upstream_status` and `reconcile_pending`. Peer lists expose `sweep_after`
+`upstream_status`, `reconcile_pending` and `held` (rows the page held).
+A refused sweep answers 409 with `result.error` `sweep_refused` and
+`result.sweep_refused: {kept, dropped}`; the page the pull read is
+still applied. After checking the peer, an admin accepts the sweep by
+sending `accept_sweep` with those two numbers. It runs only if its
+counts are still exactly those, and the result then carries
+`sweep_accepted`. Counts that have moved are refused again with the new
+ones. `accept_sweep` cannot be combined with `full`, and the audit row
+records the counts accepted and who sent them. Peer lists expose `sweep_after`
 and `sync_lease_expires` as epoch milliseconds. A cancelled invocation
 may leave its lease held for up to five minutes. GET `mirrored_count`
 counts present rows; DELETE `removed_rows` counts rows actually removed.

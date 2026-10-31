@@ -376,6 +376,12 @@
       "items": {
         "type": "string"
       }
+    },
+    "held": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     }
   },
   "required": [

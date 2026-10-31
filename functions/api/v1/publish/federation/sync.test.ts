@@ -6,7 +6,8 @@
  *
  * Coverage: the gate, field errors, an unknown or paused peer, a
  * successful pull against a signed feed (mirror rows and audit row),
- * and a failed pull that answers 503 with its reason.
+ * held rows, a refused sweep and its acceptance, and a failed pull
+ * that answers 503 with its reason.
  */
 
 import { generateKeyPairSync } from 'node:crypto'
@@ -84,7 +85,7 @@ function ctx(opts: { publisher?: PublisherRow; body?: unknown; rawBody?: string;
 }
 
 /** Stub the global fetch with a peer serving one signed feed page. */
-function serveFeed(datasets: unknown[], hasMore = false) {
+function serveFeed(datasets: unknown[], hasMore = false, extra: Record<string, unknown> = {}) {
   const fn = vi.fn(async (req: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(req))
     expect(url.origin).toBe(BASE)
@@ -97,6 +98,7 @@ function serveFeed(datasets: unknown[], hasMore = false) {
       has_more: hasMore,
       datasets,
       tombstones: [],
+      ...extra,
     }
     const signed = await signFederationBody(body, await importNodeSigningKey(PRIVATE_B64), {
       keyId: PEER_ID,
@@ -111,6 +113,29 @@ function serveFeed(datasets: unknown[], hasMore = false) {
   vi.stubGlobal('fetch', fn)
   return fn
 }
+
+function seedMirrored(ids: string[], run: string) {
+  for (const id of ids) {
+    sqlite
+      .prepare(
+        `INSERT INTO federated_datasets (peer_id, remote_id, origin_node, payload_json, feed_signature, seen_run, fetched_at)
+         VALUES (?, ?, ?, '{}', 'sig', ?, '2026-01-01T00:00:00.000Z')`,
+      )
+      .run(PEER_ID, id, PEER_ID, run)
+  }
+}
+
+/** A finished full sync that delivered nothing (run RUN1), its settle
+ *  window passed, over two rows from an earlier run. */
+function pendingEmptySweep() {
+  seedMirrored(['x', 'y'], 'RUN0')
+  sqlite
+    .prepare('UPDATE federation_peers SET last_sync_cursor = ?, sweep_run = ?, sweep_after = ? WHERE id = ?')
+    .run(encodeFeedCursor({ updatedAt: '2026-01-01T00:00:00.000Z', id: 'a' }), 'RUN1', 0, PEER_ID)
+}
+
+const mirroredIds = () =>
+  (sqlite.prepare('SELECT remote_id FROM federated_datasets ORDER BY remote_id').all() as Array<{ remote_id: string }>).map(r => r.remote_id)
 
 const auditRows = () =>
   sqlite
@@ -194,9 +219,20 @@ describe('POST /api/v1/publish/federation/sync', () => {
       complete: true,
       upserted: 2,
       tombstoned: 0,
+      held: 0,
       reconciled: 0,
       reconcile_pending: true,
     })
+  })
+
+  it('reports held rows and keeps their copies', async () => {
+    seedMirrored(['x'], 'RUN0')
+    serveFeed([{ id: 'a', originNode: PEER_ID }], false, { held: ['x'] })
+    const res = await onRequestPost(ctx({ body: { peer_id: PEER_ID } }))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ result: { ok: true, upserted: 1, held: 1 } })
+    expect(sqlite.prepare("SELECT payload_json FROM federated_datasets WHERE remote_id = 'x'").get()).toEqual({ payload_json: '{}' })
+    expect(JSON.parse(auditRows()[0].metadata_json)).toMatchObject({ held: 1 })
   })
 
   it('answers 409 while another pull holds the lease', async () => {
@@ -208,31 +244,64 @@ describe('POST /api/v1/publish/federation/sync', () => {
     expect(fn).not.toHaveBeenCalled()
   })
 
-  it('answers 409 sweep_refused, keeping the mirror, when a sweep would empty it', async () => {
-    // A finished full sync delivered nothing (run RUN1), its settle window
-    // has passed, and two rows from an earlier run are still mirrored.
-    for (const id of ['x', 'y']) {
-      sqlite
-        .prepare(
-          `INSERT INTO federated_datasets (peer_id, remote_id, origin_node, payload_json, feed_signature, seen_run, fetched_at)
-           VALUES (?, ?, ?, '{}', 'sig', 'RUN0', '2026-01-01T00:00:00.000Z')`,
-        )
-        .run(PEER_ID, id, PEER_ID)
-    }
-    sqlite
-      .prepare('UPDATE federation_peers SET last_sync_cursor = ?, sweep_run = ?, sweep_after = ? WHERE id = ?')
-      .run(encodeFeedCursor({ updatedAt: '2026-01-01T00:00:00.000Z', id: 'a' }), 'RUN1', 0, PEER_ID)
+  it('answers 409 sweep_refused on every pull, keeping the mirror, while a sweep would empty it', async () => {
+    pendingEmptySweep()
     serveFeed([])
-    const res = await onRequestPost(ctx({ body: { peer_id: PEER_ID } }))
-    expect(res.status).toBe(409)
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const res = await onRequestPost(ctx({ body: { peer_id: PEER_ID } }))
+      expect(res.status).toBe(409)
+      expect(await res.json()).toMatchObject({
+        result: { ok: false, error: 'sweep_refused', reconciled: 0, reconcile_pending: true, sweep_refused: { kept: 0, dropped: 2 } },
+      })
+    }
+    expect(mirroredIds()).toEqual(['x', 'y'])
+    expect(sqlite.prepare('SELECT sweep_run FROM federation_peers WHERE id = ?').get(PEER_ID)).toEqual({ sweep_run: 'RUN1' })
+    expect(JSON.parse(auditRows()[1].metadata_json)).toMatchObject({ ok: false, error: 'sweep-refused', sweep_refused: { kept: 0, dropped: 2 } })
+  })
+
+  it('runs a refused sweep an admin accepts with its exact counts, and audits who did', async () => {
+    pendingEmptySweep()
+    serveFeed([])
+    const stale = await onRequestPost(ctx({ body: { peer_id: PEER_ID, accept_sweep: { kept: 0, dropped: 1 } } }))
+    expect(stale.status).toBe(409)
+    expect(await stale.json()).toMatchObject({ result: { error: 'sweep_refused', sweep_refused: { kept: 0, dropped: 2 } } })
+    expect(mirroredIds()).toEqual(['x', 'y'])
+
+    const res = await onRequestPost(ctx({ body: { peer_id: PEER_ID, accept_sweep: { kept: 0, dropped: 2 } } }))
+    expect(res.status).toBe(200)
     expect(await res.json()).toMatchObject({
-      result: { ok: false, error: 'sweep_refused', reconciled: 0, sweep_refused: { kept: 0, dropped: 2 } },
+      result: { ok: true, reconciled: 2, reconcile_pending: false, sweep_accepted: { kept: 0, dropped: 2 } },
     })
-    expect(sqlite.prepare('SELECT remote_id FROM federated_datasets ORDER BY remote_id').all()).toEqual([
-      { remote_id: 'x' },
-      { remote_id: 'y' },
-    ])
-    expect(JSON.parse(auditRows()[0].metadata_json)).toMatchObject({ ok: false, error: 'sweep-refused', sweep_refused: { kept: 0, dropped: 2 } })
+    expect(mirroredIds()).toEqual([])
+    const audit = auditRows()[1]
+    expect(audit.actor_id).toBe(ADMIN.id)
+    expect(JSON.parse(audit.metadata_json)).toMatchObject({
+      ok: true,
+      reconciled: 2,
+      accept_sweep: { kept: 0, dropped: 2 },
+      sweep_accepted: { kept: 0, dropped: 2 },
+    })
+  })
+
+  it('refuses an accept_sweep that is not two counts, or comes with full', async () => {
+    const fn = serveFeed([])
+    for (const accept_sweep of [
+      null,
+      '0,2',
+      [0, 2],
+      { kept: 0 },
+      { kept: -1, dropped: 2 },
+      { kept: 1.5, dropped: 2 },
+      { kept: '0', dropped: 2 },
+      { kept: 0, dropped: 2, run: 'RUN1' },
+    ]) {
+      const res = await onRequestPost(ctx({ body: { peer_id: PEER_ID, accept_sweep } }))
+      expect(res.status).toBe(400)
+      expect(((await res.json()) as { errors: Array<{ field: string }> }).errors.map(e => e.field)).toEqual(['accept_sweep'])
+    }
+    const res = await onRequestPost(ctx({ body: { peer_id: PEER_ID, full: true, accept_sweep: { kept: 0, dropped: 2 } } }))
+    expect(res.status).toBe(400)
+    expect(fn).not.toHaveBeenCalled()
   })
 
   it('answers 503 with the reason when the peer fails', async () => {

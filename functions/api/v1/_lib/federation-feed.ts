@@ -24,6 +24,12 @@
  * cursor sits at that watermark: anything stamped later is still ahead
  * of the cursor on the next pull.
  *
+ * **A row that cannot be served is held, not dropped.** A visible row
+ * whose serialization fails is left out of `datasets` and its id goes
+ * in `held`, so a subscriber keeps its last good copy rather than
+ * sweeping it as gone. That covers one bad row and a broken serializer
+ * alike, which the page cannot tell apart.
+ *
  * **The cursor is a position, not a credential.** It is opaque only so
  * its encoding can change; anyone may build one, which is why it
  * carries no mode a client could flip to see more than the feed
@@ -59,6 +65,11 @@ export interface FederationFeedBody {
   datasets: WireDataset[]
   /** Ids of public, non-hidden rows that were retracted. */
   tombstones: string[]
+  /** Ids of public, non-hidden rows on this page that this node could
+   *  not serialize. Present only when there is one. A subscriber keeps
+   *  its copy of each, unchanged and safe from a sweep, until the row
+   *  can be served again. */
+  held?: string[]
 }
 
 /** A point in the feed's `(updated_at, id)` order. */
@@ -189,23 +200,36 @@ export async function buildFeedPage(
   const visible = page.filter(r => r.visible).map(r => r.row)
   const decorations = await store.getDecorations(visible.map(r => r.id))
   const datasets: WireDataset[] = []
+  const held: string[] = []
+  let failure = ''
   for (const row of visible) {
     try {
       datasets.push(opts.serialize(row, decorations.get(row.id)!, opts.identity))
-    } catch {
-      console.error('[federation/feed] skipped unserializable row', row.id)
+    } catch (error) {
+      held.push(row.id)
+      // The error's name, not its message: a parse error's message can
+      // quote the stored value it failed on.
+      failure ||= error instanceof Error ? error.name : 'UnknownError'
     }
   }
-  // Every row that cannot be serialized is skipped, however many there
-  // are on the page. Refusing a page instead was tried, and any rule for
-  // when to refuse trades a stall against a sweep: refuse on a lone bad
-  // row and it holds every pull at the feed's tail, refuse only on a
-  // page of them and an author with two bad rows holds the pulls, and
-  // takedowns queued behind them, while tombstone-only pages still let
-  // a broken serializer walk a full sync to an empty finish. The page
-  // cannot tell a bad row from a broken serializer; the subscriber can,
-  // by what a sweep would remove, and refuses one that would empty its
-  // mirror (`federation-subscriber.ts`, `sweepIsPlausible`).
+  // Every row that cannot be serialized is held, however many there are
+  // on the page, and the page still advances past them. Refusing a page
+  // instead was tried, and any rule for when to refuse trades a stall
+  // against a sweep: refuse on a lone bad row and it holds every pull at
+  // the feed's tail, refuse only on a page of them and an author with
+  // two bad rows holds the pulls, and takedowns queued behind them. So
+  // the page says which rows it could not serve, and the subscriber
+  // keeps its copies. A peer that does not send `held` serves pages
+  // without those rows; the subscriber's sweep guard covers that case
+  // (`federation-subscriber.ts`, `sweepIsPlausible`).
+  if (held.length > 0) {
+    console.error(
+      '[federation/feed] held unserializable rows',
+      held.length,
+      held.slice(0, 10).join(','),
+      failure,
+    )
+  }
   const tombstones = page.filter(r => !r.visible).map(r => r.row.id)
 
   const last = page.length > 0 ? page[page.length - 1].row : null
@@ -228,5 +252,6 @@ export async function buildFeedPage(
     has_more: hasMore,
     datasets,
     tombstones,
+    ...(held.length > 0 ? { held } : {}),
   }
 }

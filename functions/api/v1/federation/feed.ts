@@ -13,9 +13,10 @@
  * from the start) and `limit` (1–250, default 100). Any other
  * parameter, either one repeated, or a query not spelled plainly
  * (`name=value` pairs, no empty pairs or percent-escapes) is a 400: the
- * request target is part of what is signed, so the feed accepts exactly
- * one spelling of each request rather than signing pages for targets it
- * ignored.
+ * request target is part of what is signed, so the feed serves only
+ * plain spellings rather than signing pages for targets it ignored. The
+ * order of `since` and `limit` is still the caller's, so a request has
+ * at most two spellings.
  *
  * Every 200 is signed (`federation-signature.ts`): the body is the
  * page's canonical JSON, and `Terraviz-Signature` covers it with the

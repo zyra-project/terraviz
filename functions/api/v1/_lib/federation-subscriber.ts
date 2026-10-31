@@ -46,18 +46,28 @@
  * window is invisible to the feed altogether, and so can be dropped
  * and come back on its next quiet moment.
  *
- * **A sweep that would empty the mirror is refused.** A peer's feed
- * skips any row it cannot serialize, so a peer whose serializer breaks
- * serves signed pages with nothing in them, and a full sync over those
- * pages completes having seen nothing. Swept as usual, that deletes
- * the whole mirror. The peer cannot tell a broken serializer from one
- * bad row; this side can, by what the sweep would remove. So before
- * deleting, the sweep counts what it keeps and what it drops, and
- * `sweepIsPlausible` refuses one that keeps nothing, or drops more than
- * half the mirror and more than `SWEEP_GUARD_MIN_ROWS` rows. A refused
- * sweep deletes nothing, clears itself, and fails the pull as
- * `sweep-refused` with the counts. A peer that really did withdraw
- * most of its catalog is then removed and re-added by an operator.
+ * **Held rows are kept.** A page lists in `held` the visible rows its
+ * node could not serialize. Each is stamped with the run, as a
+ * delivered row would be, but its stored copy is left as it was, so a
+ * sweep keeps it. A held id this mirror has no copy of changes nothing.
+ *
+ * **A sweep that would empty the mirror is refused.** A peer that does
+ * not send `held` skips any row it cannot serialize, so if its
+ * serializer breaks it serves signed pages with nothing in them, and a
+ * full sync over those pages completes having seen nothing. Swept as
+ * usual, that deletes the whole mirror. So before deleting, the sweep
+ * counts what it keeps and what it drops, and `sweepIsPlausible`
+ * refuses one that keeps nothing, or drops more than half the mirror
+ * and more than `SWEEP_GUARD_MIN_ROWS` rows.
+ *
+ * A refused sweep deletes nothing and stays pending: every complete
+ * pull after it refuses it again, failing as `sweep-refused` with the
+ * counts, so the refusal stays visible rather than being reported once.
+ * A pull's pages are applied either way. It ends when a new full sync
+ * replaces the pending sweep, or when an operator accepts it: a pull
+ * given `acceptSweep` runs the sweep if the counts are exactly the ones
+ * accepted. Exact, because the operator approved those counts and no
+ * others; if a pull changed them, the operator is shown the new ones.
  *
  * **One pull per peer.** A pull takes the peer's lease before reading
  * its state and releases it when done; every write is conditional on
@@ -178,6 +188,8 @@ export interface MirrorPage {
   cursor: string
   datasets: MirroredDataset[]
   tombstones: string[]
+  /** Rows the peer could not serve: stamped with `runId`, payload kept. */
+  held: string[]
   /** The page's signature header, kept on each row it delivered. */
   signature: string
   fetchedAt: string
@@ -193,7 +205,8 @@ export interface FederationMirrorStore {
     untilMs: number,
   ): Promise<FederationPeer | null>
   releaseLease(peerId: string, leaseId: string): Promise<void>
-  /** Upsert the datasets, delete the tombstones, and save the cursor
+  /** Upsert the datasets, delete the tombstones, stamp the held rows'
+   *  `seen_run` without touching their payloads, and save the cursor
    *  and `full_sync_run` — all or nothing, and only under the lease.
    *  `false` when the lease was lost and nothing was written. */
   applyPage(page: MirrorPage): Promise<boolean>
@@ -204,10 +217,9 @@ export interface FederationMirrorStore {
    *  it did not and would drop. */
   countSweep(peerId: string, sweepRun: string): Promise<SweepCounts>
   /** Drop the peer's rows the sweep run did not deliver and clear the
-   *  pending sweep, together. Returns how many rows went. */
-  finishSweep(peerId: string, sweepRun: string, leaseId: string): Promise<number>
-  /** Clear the pending sweep without dropping anything, under the lease. */
-  abandonSweep(peerId: string, sweepRun: string, leaseId: string): Promise<void>
+   *  pending sweep, together. Returns how many rows went, or `null`
+   *  when the lease was lost (or the sweep replaced) and nothing was. */
+  finishSweep(peerId: string, sweepRun: string, leaseId: string): Promise<number | null>
   /** Stamp `last_sync_at` and set or clear `last_sync_error`. */
   recordSyncResult(
     peerId: string,
@@ -247,12 +259,17 @@ export interface PullResult {
   pages: number
   upserted: number
   tombstoned: number
+  /** Ids the peer listed as held: rows it could not serve this time. */
+  held: number
   /** Rows dropped by a sweep this pull ran. */
   reconciled: number
   /** A finished full sync is waiting for its sweep. */
   reconcilePending: boolean
   /** For `sweep-refused`: what the refused sweep would have kept and dropped. */
   sweepRefused?: SweepCounts
+  /** The counts of a sweep the guard refused and the operator accepted,
+   *  set only when this pull ran it. */
+  sweepAccepted?: SweepCounts
 }
 
 export interface PullDeps {
@@ -272,7 +289,12 @@ export interface PullOptions {
   pageLimit?: number
   maxBodyBytes?: number
   timeoutMs?: number
+  /** Run a pending sweep the guard refuses, if its counts are exactly
+   *  these: the ones a refusal reported, which the operator accepted. */
+  acceptSweep?: SweepCounts
 }
+
+type ResolvedPullOptions = Required<Omit<PullOptions, 'acceptSweep'>> & { acceptSweep: SweepCounts | null }
 
 /**
  * The origin of a peer base URL, or `null` for anything that is not a
@@ -372,6 +394,7 @@ interface ValidPage {
   hasMore: boolean
   datasets: MirroredDataset[]
   tombstones: string[]
+  held: string[]
 }
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -392,11 +415,19 @@ function validateFeedPage(body: unknown, peerId: string, pageLimit: number): Val
   if (typeof cursor !== 'string' || !CURSOR_RE.test(cursor)) {
     throw new PullError('invalid-body')
   }
-  if (typeof hasMore !== 'boolean' || !Array.isArray(datasets) || !Array.isArray(tombstones)) {
+  // `held` is optional on the wire: absent means nothing was held.
+  const held = body.held === undefined ? [] : body.held
+  if (
+    typeof hasMore !== 'boolean' ||
+    !Array.isArray(datasets) ||
+    !Array.isArray(tombstones) ||
+    !Array.isArray(held)
+  ) {
     throw new PullError('invalid-body')
   }
-  // More entries than asked for would blow the statement budget.
-  if (datasets.length + tombstones.length > pageLimit) throw new PullError('invalid-body')
+  // More entries than asked for would blow the statement budget. A held
+  // row is one of the page's rows, so it counts against the limit too.
+  if (datasets.length + tombstones.length + held.length > pageLimit) throw new PullError('invalid-body')
 
   const seen = new Set<string>()
   const rows: MirroredDataset[] = []
@@ -422,7 +453,15 @@ function validateFeedPage(body: unknown, peerId: string, pageLimit: number): Val
     seen.add(t)
     dropped.push(t)
   }
-  return { cursor, hasMore, datasets: rows, tombstones: dropped }
+  const kept: string[] = []
+  for (const h of held) {
+    // Held means not served this time, so an id the page also delivers
+    // or retracts contradicts itself.
+    if (typeof h !== 'string' || !ID_RE.test(h) || seen.has(h)) throw new PullError('invalid-body')
+    seen.add(h)
+    kept.push(h)
+  }
+  return { cursor, hasMore, datasets: rows, tombstones: dropped, held: kept }
 }
 
 async function fetchPage(
@@ -565,6 +604,7 @@ export async function pullPeer(
     pages: 0,
     upserted: 0,
     tombstoned: 0,
+    held: 0,
     reconciled: 0,
     reconcilePending: false,
   }
@@ -582,6 +622,7 @@ export async function pullPeer(
       maxBodyBytes,
       timeoutMs,
       full: opts.full === true,
+      acceptSweep: opts.acceptSweep ?? null,
     })
   } finally {
     await deps.store.releaseLease(peer.id, leaseId).catch(() => {})
@@ -593,7 +634,7 @@ async function pullUnderLease(
   leaseId: string,
   startMs: number,
   deps: PullDeps,
-  opts: Required<PullOptions>,
+  opts: ResolvedPullOptions,
 ): Promise<PullResult> {
   let runId: string
   let cursor: string | null
@@ -625,6 +666,7 @@ async function pullUnderLease(
     pages: 0,
     upserted: 0,
     tombstoned: 0,
+    held: 0,
     reconciled: 0,
     reconcilePending: !full && peer.sweepRun !== null,
   }
@@ -670,6 +712,7 @@ async function pullUnderLease(
         cursor: page.cursor,
         datasets: page.datasets,
         tombstones: page.tombstones,
+        held: page.held,
         signature: signature!,
         fetchedAt: new Date(deps.now()).toISOString(),
       })
@@ -677,6 +720,7 @@ async function pullUnderLease(
       result.pages++
       result.upserted += page.datasets.length
       result.tombstoned += page.tombstones.length
+      result.held += page.held.length
       cursor = page.cursor
       if (!page.hasMore) {
         result.complete = true
@@ -698,14 +742,26 @@ async function pullUnderLease(
       // This pull began after the settle window closed, so it saw
       // every row the full sync's last page held back.
       const counts = await deps.store.countSweep(peer.id, peer.sweepRun)
-      if (!sweepIsPlausible(counts)) {
-        await deps.store.abandonSweep(peer.id, peer.sweepRun, leaseId)
-        result.reconcilePending = false
-        result.sweepRefused = counts
-        throw new PullError('sweep-refused')
+      const refused = !sweepIsPlausible(counts)
+      if (refused) {
+        // Counts identify the rows. While a sweep is pending, every row
+        // a pull delivers or holds, and every new row, is stamped with
+        // its run, and a retraction only removes rows; only a full sync
+        // stamps another run, and it replaces this sweep when it ends.
+        // So the rows it would drop only ever shrink, and the same count
+        // dropped is the same rows the operator was shown.
+        const accept = opts.acceptSweep
+        if (accept === null || accept.kept !== counts.kept || accept.dropped !== counts.dropped) {
+          // Left pending, so the next complete pull refuses it again.
+          result.sweepRefused = counts
+          throw new PullError('sweep-refused')
+        }
       }
-      result.reconciled = await deps.store.finishSweep(peer.id, peer.sweepRun, leaseId)
+      const removed = await deps.store.finishSweep(peer.id, peer.sweepRun, leaseId)
+      if (removed === null) throw new PullError('lease-lost')
+      result.reconciled = removed
       result.reconcilePending = false
+      if (refused) result.sweepAccepted = counts
     }
     result.ok = true
     await record(null)

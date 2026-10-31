@@ -9,7 +9,7 @@
  * in-memory list, so every case states its rows outright.
  */
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { DatasetRow, DecorationRows, NodeIdentityRow } from './catalog-store'
 import type { WireDataset } from './dataset-serializer'
 import {
@@ -131,31 +131,49 @@ function page(store: FederationFeedStore, after: FeedPosition | null, limit = 10
 }
 
 describe('buildFeedPage', () => {
-  it('skips one unserializable row without blocking progress past it', async () => {
+  it('holds one unserializable row without blocking progress past it', async () => {
     const { store } = fakeStore(['A', 'B', 'C'].map(id => row(id, '2026-01-01T00:00:00.000Z')))
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
     const body = await buildFeedPage(store, {
       identity: IDENTITY, after: null, limit: 2, nowMs: NOW_MS,
       serialize: record => {
-        if (record.id === 'B') throw new Error('poison row')
+        if (record.id === 'B') throw new SyntaxError('Unexpected token, "secret" is not valid JSON')
         return serialize(record)
       },
     })
     expect(body.datasets.map(record => record.id)).toEqual(['A'])
+    expect(body.held).toEqual(['B'])
     expect(body.has_more).toBe(true)
     const after = decodeFeedCursor(body.cursor)
     expect(after?.id).toBe('B')
-    expect((await page(store, after)).datasets.map(record => record.id)).toEqual(['C'])
+    const next = await page(store, after)
+    expect(next.datasets.map(record => record.id)).toEqual(['C'])
+    expect(next).not.toHaveProperty('held')
+    // One line for the page, naming the error's kind but not its text.
+    expect(errors).toHaveBeenCalledTimes(1)
+    expect(errors).toHaveBeenCalledWith('[federation/feed] held unserializable rows', 1, 'B', 'SyntaxError')
+    expect(JSON.stringify(errors.mock.calls)).not.toContain('secret')
+    errors.mockRestore()
   })
 
   // The feed cannot tell a bad row from a broken serializer, so it does
-  // not try: every failure is skipped, and the subscriber's sweep guard
-  // is what keeps a page of failures from emptying a mirror.
-  it('skips every unserializable row, even a whole page of them', async () => {
-    const { store } = fakeStore(['A', 'B'].map(id => row(id, '2026-01-01T00:00:00.000Z')))
+  // not try: every failure is held, and the subscriber keeps its copies.
+  it('holds every unserializable row, even a whole page of them', async () => {
+    const { store } = fakeStore([
+      row('A', '2026-01-01T00:00:00.000Z'),
+      row('B', '2026-01-01T00:00:00.000Z', false),
+      row('C', '2026-01-01T00:00:00.000Z'),
+    ])
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
     const body = await buildFeedPage(store, { identity: IDENTITY, after: null, limit: 10, nowMs: NOW_MS, serialize: () => { throw new Error('broken serializer') } })
     expect(body.datasets).toEqual([])
+    expect(body.held).toEqual(['A', 'C'])
+    // A retraction needs no serializer, so it still goes out.
+    expect(body.tombstones).toEqual(['B'])
     expect(body.has_more).toBe(false)
     expect(decodeFeedCursor(body.cursor)!.updatedAt > '2026-01-01T00:00:00.000Z').toBe(true)
+    expect(errors).toHaveBeenCalledTimes(1)
+    errors.mockRestore()
   })
 
   it('asks for one row past the limit, up to the settle watermark', async () => {
@@ -177,6 +195,9 @@ describe('buildFeedPage', () => {
     expect(body.datasets.map(d => d.id)).toEqual(['A', 'C'])
     expect(body.tombstones).toEqual(['B'])
     expect(body.has_more).toBe(false)
+    // A page with nothing held does not carry the field at all, so its
+    // signed bytes are the same as before `held` existed.
+    expect(body).not.toHaveProperty('held')
     expect(decorated).toEqual([['A', 'C']])
   })
 

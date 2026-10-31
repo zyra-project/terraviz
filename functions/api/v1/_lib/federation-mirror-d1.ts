@@ -208,6 +208,15 @@ export function d1FederationMirrorStore(db: D1Database): FederationMirrorStore {
       for (const id of page.tombstones) {
         statements.push(drop.bind(page.peerId, id, page.peerId, page.leaseId))
       }
+      // A held row keeps its payload and signature; only the run moves,
+      // so a sweep of this run keeps it.
+      const hold = db.prepare(
+        `UPDATE federated_datasets SET seen_run = ?
+         WHERE peer_id = ? AND remote_id = ? AND ${HOLDS_LEASE}`,
+      )
+      for (const id of page.held) {
+        statements.push(hold.bind(page.runId, page.peerId, id, page.peerId, page.leaseId))
+      }
       statements.push(
         db
           .prepare(
@@ -245,18 +254,10 @@ export function d1FederationMirrorStore(db: D1Database): FederationMirrorStore {
       return { kept: row?.kept ?? 0, dropped: row?.dropped ?? 0 }
     },
 
-    async abandonSweep(peerId, sweepRun, leaseId) {
-      await db
-        .prepare(
-          `UPDATE federation_peers SET sweep_run = NULL, sweep_after = NULL
-           WHERE id = ? AND sync_lease = ? AND sweep_run = ?`,
-        )
-        .bind(peerId, leaseId, sweepRun)
-        .run()
-    },
-
     async finishSweep(peerId, sweepRun, leaseId) {
-      const [removed] = await db.batch([
+      // Both statements test the same lease and run inside one batch, so
+      // when the update matched nothing the delete removed nothing too.
+      const [removed, cleared] = await db.batch([
         db
           .prepare(
             `DELETE FROM federated_datasets
@@ -272,6 +273,7 @@ export function d1FederationMirrorStore(db: D1Database): FederationMirrorStore {
           )
           .bind(peerId, leaseId, sweepRun),
       ])
+      if ((cleared.meta?.changes ?? 0) !== 1) return null
       return removed.meta?.changes ?? 0
     },
 
