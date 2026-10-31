@@ -658,7 +658,7 @@ CREATE UNIQUE INDEX idx_current_events_feed_external
 CREATE INDEX idx_current_events_origin_node ON current_events(origin_node);
 CREATE INDEX idx_current_events_owner ON current_events(owner_id);
 CREATE INDEX idx_current_events_status      ON current_events(status, created_at);
-CREATE INDEX idx_datasets_federation_feed ON datasets (visibility, updated_at, id);
+CREATE INDEX idx_datasets_federation_feed ON datasets (visibility, is_hidden, origin_node, updated_at, id);
 CREATE UNIQUE INDEX idx_datasets_legacy_id
   ON datasets(legacy_id)
   WHERE legacy_id IS NOT NULL;

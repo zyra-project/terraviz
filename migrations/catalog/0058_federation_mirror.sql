@@ -84,4 +84,7 @@ CREATE TABLE federated_datasets (
   PRIMARY KEY (peer_id, remote_id)
 );
 
-CREATE INDEX idx_datasets_federation_feed ON datasets (visibility, updated_at, id);
+-- Every equality column of the feed scan comes before the range, so
+-- the scan reads only rows it can return: hidden rows and other
+-- nodes' rows are skipped by the index, not read and discarded.
+CREATE INDEX idx_datasets_federation_feed ON datasets (visibility, is_hidden, origin_node, updated_at, id);
