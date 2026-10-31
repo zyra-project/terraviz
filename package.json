@@ -45,6 +45,7 @@
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
+    "test:federation": "vitest run functions/api/v1/federation functions/api/v1/publish/federation functions/api/v1/_lib/federation-",
     "build:qa": "npx tsx scripts/build-qa-index.ts",
     "build:privacy-page": "npx tsx scripts/build-privacy-page.ts",
     "check:privacy-page": "npx tsx scripts/build-privacy-page.ts --check",
@@ -76,6 +77,7 @@
     "build:android": "tsc && vite build && tauri android build"
   },
   "dependencies": {
+    "@noble/curves": "^2.4.0",
     "@noble/hashes": "^2.2.0",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-deep-link": "^2.4.8",

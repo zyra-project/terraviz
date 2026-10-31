@@ -64,7 +64,9 @@ export interface WireDataset {
     keywords?: string[]
     relatedDatasets?: Array<{ title: string; url: string }>
     datasetDeveloper?: { name: string; affiliationUrl?: string }
+    datasetDevelopers?: Array<{ name: string; affiliationUrl?: string }>
     visDeveloper?: { name: string; affiliationUrl?: string }
+    visDevelopers?: Array<{ name: string; affiliationUrl?: string }>
   }
   // Phase-1a additive fields (always present).
   originNode: string
@@ -279,7 +281,15 @@ function resolveAsset(
 function parseJsonField(v: string | null | undefined): unknown {
   if (v == null || v.length === 0) return undefined
   try {
-    return JSON.parse(v) as unknown
+    const parsed: unknown = JSON.parse(v)
+    const valid = (value: unknown, depth: number): boolean => {
+      if (depth > 60) return false
+      if (typeof value === 'number') return Number.isFinite(value)
+      if (Array.isArray(value)) return value.every(member => valid(member, depth + 1))
+      if (value && typeof value === 'object') return Object.values(value).every(member => valid(member, depth + 1))
+      return true
+    }
+    return valid(parsed, 0) ? parsed : undefined
   } catch {
     return undefined
   }
@@ -343,6 +353,7 @@ function groupCategories(
 ): Record<string, string[]> {
   const out: Record<string, string[]> = {}
   for (const r of rows) {
+    if (r.facet === '__proto__' || r.facet === 'constructor') continue
     const arr = out[r.facet] ?? []
     arr.push(r.value)
     out[r.facet] = arr
@@ -514,6 +525,8 @@ export function serializeDataset(
       name: dev.name,
       affiliationUrl: dev.affiliation_url ?? undefined,
     }
+    const listTarget = dev.role === 'data' ? 'datasetDevelopers' : 'visDevelopers'
+    ;(enriched[listTarget] ??= []).push(enriched[target]!)
   }
   if (Object.keys(enriched).length) wire.enriched = enriched
 

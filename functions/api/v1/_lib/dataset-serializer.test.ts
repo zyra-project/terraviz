@@ -110,6 +110,20 @@ const fakeIdentity: NodeIdentityRow = {
 const passthroughResolver: DataRefResolver = (ref) =>
   ref.startsWith('url:') ? ref.slice(4) : null
 
+describe('developer provenance', () => {
+  it('preserves every producer while retaining the legacy singular credit', () => {
+    const developers = [
+      { role: 'data' as const, name: 'Producer One', affiliation_url: null },
+      { role: 'data' as const, name: 'Producer Two', affiliation_url: 'https://example.org' },
+      { role: 'vis' as const, name: 'Visualizer', affiliation_url: null },
+    ]
+    const wire = serializeDataset(fakeRow(), { ...emptyDecoration, developers }, fakeIdentity, passthroughResolver)
+    expect(wire.enriched?.datasetDevelopers?.map(developer => developer.name)).toEqual(['Producer One', 'Producer Two'])
+    expect(wire.enriched?.datasetDeveloper?.name).toBe('Producer Two')
+    expect(wire.enriched?.visDevelopers?.map(developer => developer.name)).toEqual(['Visualizer'])
+  })
+})
+
 describe('serializeDataset — tour rows', () => {
   it('sets tourJsonUrl when format is tour/json and the resolver finds a URL', () => {
     const wire = serializeDataset(
