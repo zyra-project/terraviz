@@ -56,7 +56,7 @@
  * `dataset-mutations.ts`. We don't second-guess that.
  */
 
-import { validateDraftCreate, type DatasetDraftBody } from '../../functions/api/v1/_lib/validators'
+import { isValidWeight, validateDraftCreate, type DatasetDraftBody } from '../../functions/api/v1/_lib/validators'
 import { isOperationalId, resolveCrosswalk, type CrosswalkReport, type SnapshotCrosswalk } from './snapshot-crosswalk'
 
 // Deferred runtime compatibility: src/services/dataService.ts still performs
@@ -114,7 +114,8 @@ export interface RawSosEntry {
   /** Image Y-axis flip flag. */
   isFlippedInY?: boolean
   tags?: string[]
-  weight?: number
+  /** A number in most rows, a numeric string (`"10"`) in a few. */
+  weight?: number | string
   isHidden?: boolean
   runTourOnLoad?: string
 }
@@ -521,7 +522,14 @@ export function mapSnapshotEntry(
   const period = clipString(sos.period, 100)
   if (period) draft.period = period
 
-  if (typeof sos.weight === 'number') draft.weight = sos.weight
+  // Most SOS rows carry `10`, a few the string `"10"`; both are kept.
+  // A weight the publish API would refuse is dropped, as a bad
+  // `radiusMi` or `lonOrigin` is, rather than costing the dataset: the
+  // validator below would otherwise skip the whole row.
+  const weight = typeof sos.weight === 'string' && /^-?\d+$/.test(sos.weight.trim())
+    ? Number(sos.weight)
+    : sos.weight
+  if (isValidWeight(weight)) draft.weight = weight
   if (typeof sos.isHidden === 'boolean') draft.is_hidden = sos.isHidden
 
   const runTour = clipString(sos.runTourOnLoad, 1024)
