@@ -16,8 +16,8 @@
  *
  * One self-hosted Access application covering both the publisher API
  * (`/api/v1/publish`) and the browser portal (`/publish`, `/publish/*`)
- * on both the custom hostname and the `*.pages.dev` host, plus two
- * policies:
+ * on both the custom hostname and the `*.pages.dev` host, with its
+ * login cookie set to HttpOnly and SameSite Lax, plus two policies:
  *
  *   - `Staff` — Allow, include "emails ending in <domain>". The
  *     humans who publish.
@@ -72,6 +72,13 @@ export interface AccessApp {
   /** The audience tag — `ACCESS_AUD`. Returned on create and list. */
   aud: string
   domain?: string
+  /**
+   * As the API reports them. Whether a list response carries these
+   * fields has not been checked against a live account, so absent
+   * means "not reported", not "off".
+   */
+  same_site_cookie_attribute?: string
+  http_only_cookie_attribute?: boolean
 }
 
 export interface AccessPolicy {
@@ -269,6 +276,23 @@ export interface AccessAppBody {
   domain: string
   destinations: Array<{ type: 'public'; uri: string }>
   app_launcher_visible: boolean
+  /**
+   * The `CF_Authorization` cookie is the publisher's credential for
+   * every write under `/api/v1/publish`, so both attributes are set
+   * here rather than left to Cloudflare. (The project's own node had
+   * SameSite None and HttpOnly off.)
+   *
+   * SameSite defaults to `none`, which lets a browser send the cookie
+   * on a form POST another website starts. `lax` keeps the cookie to
+   * requests from this site and to top-level links into it, which is
+   * all the portal and its sign-in need. HttpOnly stops scripts on the
+   * page from reading the token. Nothing in the app reads it from
+   * JavaScript: the server gets it from the request. The CLI and the
+   * workflows authenticate with service-token headers, which neither
+   * attribute touches.
+   */
+  http_only_cookie_attribute: true
+  same_site_cookie_attribute: 'lax'
 }
 
 export function buildAppBody(opts: {
@@ -288,7 +312,43 @@ export function buildAppBody(opts: {
     domain: opts.destinations[0],
     destinations: opts.destinations.map(uri => ({ type: 'public' as const, uri })),
     app_launcher_visible: false,
+    http_only_cookie_attribute: true,
+    same_site_cookie_attribute: 'lax',
   }
+}
+
+/**
+ * Where an existing application's cookie settings fall short of what
+ * {@link buildAppBody} sets, one line per gap, empty when there is
+ * none. Strict passes: an operator who set it chose something
+ * stricter, though it is untested with Access's sign-in redirect.
+ * A field the API did not report is a gap too, worded as unknown:
+ * a quiet run would read as "checked and fine".
+ *
+ * Adoption never edits an application. Cloudflare's update replaces
+ * the whole configuration, and an application the operator built or
+ * split by hand may carry settings this script knows nothing about.
+ * So a gap is reported for the operator to close in the dashboard
+ * (`SELF_HOSTING.md` §6.2), not repaired.
+ */
+export function cookieSettingsGaps(app: AccessApp): string[] {
+  const gaps: string[] = []
+  const sameSite = app.same_site_cookie_attribute?.toLowerCase()
+  if (sameSite !== 'lax' && sameSite !== 'strict') {
+    gaps.push(
+      sameSite
+        ? `SameSite is ${sameSite}, not Lax`
+        : "SameSite is not reported (Cloudflare's default is None)",
+    )
+  }
+  if (app.http_only_cookie_attribute !== true) {
+    gaps.push(
+      app.http_only_cookie_attribute === false
+        ? 'HttpOnly is off'
+        : 'HttpOnly is not reported',
+    )
+  }
+  return gaps
 }
 
 export interface PolicyBody {
