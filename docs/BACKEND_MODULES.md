@@ -148,7 +148,7 @@ Phase 2 opt-in public projection:
 
 | File | Responsibility |
 |---|---|
-| `functions/api/v1/publish/_middleware.ts` | Auth middleware for /api/v1/publish/ |
+| `functions/api/v1/publish/_middleware.ts` | Auth middleware for /api/v1/publish/. First it refuses a write (POST, PUT, PATCH, DELETE) that a page on another origin started, as 403 `cross_origin_request`, before it authenticates anyone (`isCrossOriginWrite`). The browser's `Sec-Fetch-Site` is read first and anything but `same-origin` is refused, `same-site` included: the Access cookie's `SameSite=Lax` does not stop sibling hosts or `pages.dev` branch previews. Without that header, `Origin` must be the request's own. A request with neither is not from a page (service-token callers send neither) and passes. `Sec-Fetch-Site` comes first because the Vite dev proxy forwards a page's `Origin` to another port. Then it verifies the Access JWT (or the loopback-only dev bypass), JIT-provisions the publisher, refuses pending and suspended accounts, and applies the per-node feature gate (`featureForPath`) |
 | `functions/api/v1/publish/analytics-export.ts` | POST /api/v1/publish/analytics-export — nightly analytics export tick (bookmark walk + operator `?day=` backfill); privileged callers only, driven by `.github/workflows/analytics-export.yml` |
 | `functions/api/v1/publish/analytics.ts` | GET /api/v1/publish/analytics — typed section facade over the D1 analytics rollups for the `/publish/analytics` tab (KV-cached ~5 min; privileged callers only) |
 | `functions/api/v1/publish/datasets.ts` | /api/v1/publish/datasets |

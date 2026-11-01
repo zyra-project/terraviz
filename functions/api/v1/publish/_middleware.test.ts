@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Zyra Project
+// @vitest-environment node
 
 /**
  * Tests for the publisher-API auth middleware.
@@ -10,6 +11,9 @@
  * doesn't require a downstream handler.
  *
  * Coverage:
+ *   - 403 cross_origin_request for a write a page on another origin
+ *     started, judged by `Sec-Fetch-Site` and then `Origin`, before
+ *     anything else runs.
  *   - 503 binding_missing.
  *   - 503 access_unconfigured (no Access env, no dev bypass).
  *   - 500 dev_bypass_unsafe (DEV_BYPASS_ACCESS=true on a non-loopback
@@ -23,7 +27,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { featureForPath, onRequest } from './_middleware'
+import { featureForPath, isCrossOriginWrite, onRequest } from './_middleware'
 import { asD1, makeCtx, makeKV, seedFixtures } from '../_lib/test-helpers'
 
 interface NextStub {
@@ -40,6 +44,7 @@ function stubNext(body = 'next-called'): NextStub {
 interface MakeCtxOpts {
   env: Record<string, unknown>
   url?: string
+  method?: string
   headers?: Record<string, string>
 }
 
@@ -47,6 +52,7 @@ function ctxWithNext(opts: MakeCtxOpts, next: NextStub) {
   const base = makeCtx({
     env: opts.env,
     url: opts.url ?? 'https://localhost/api/v1/publish/me',
+    method: opts.method,
     headers: opts.headers,
   })
   return Object.assign(base, { next: next.fn })
@@ -273,6 +279,101 @@ describe('publish/_middleware', () => {
       expect(body.message).not.toMatch(/file:\/\//)
     } finally {
       console.error = consoleSpy
+    }
+  })
+})
+
+describe('isCrossOriginWrite', () => {
+  const URL_ = 'https://node.example.org/api/v1/publish/datasets'
+  const write = (headers: Record<string, string>, method = 'POST') =>
+    isCrossOriginWrite(new Request(URL_, { method, headers }))
+
+  it('refuses a write any page but this origin started, by Sec-Fetch-Site', () => {
+    for (const site of ['cross-site', 'same-site', 'none', 'garbage', '']) {
+      expect(write({ 'Sec-Fetch-Site': site })).toBe(true)
+    }
+    expect(write({ 'Sec-Fetch-Site': 'same-origin' })).toBe(false)
+    expect(write({ 'Sec-Fetch-Site': ' Same-Origin ' })).toBe(false)
+  })
+
+  // The Vite dev proxy forwards the page's Origin to a target on another
+  // port; the browser's own verdict is what counts.
+  it('reads Sec-Fetch-Site before Origin', () => {
+    expect(write({ 'Sec-Fetch-Site': 'same-origin', Origin: 'http://localhost:5173' })).toBe(false)
+    expect(write({ 'Sec-Fetch-Site': 'same-site', Origin: 'https://node.example.org' })).toBe(true)
+  })
+
+  it('falls back to Origin, which must be this request\'s own', () => {
+    expect(write({ Origin: 'https://node.example.org' })).toBe(false)
+    for (const origin of [
+      'https://evil.example.org',
+      'https://blog.node.example.org',
+      'http://node.example.org',
+      'https://node.example.org:8443',
+      'null',
+    ]) {
+      expect(write({ Origin: origin })).toBe(true)
+    }
+  })
+
+  it('lets a request with neither header through: service-token callers send neither', () => {
+    expect(write({})).toBe(false)
+    expect(write({ 'CF-Access-Client-Id': 'id', 'CF-Access-Client-Secret': 'secret' })).toBe(false)
+  })
+
+  it('checks every unsafe method and no safe one', () => {
+    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+      expect(write({ 'Sec-Fetch-Site': 'cross-site' }, method)).toBe(true)
+    }
+    for (const method of ['GET', 'HEAD', 'OPTIONS']) {
+      expect(write({ 'Sec-Fetch-Site': 'cross-site' }, method)).toBe(false)
+    }
+  })
+})
+
+describe('publish/_middleware cross-origin writes', () => {
+  function devEnv() {
+    const sqlite = seedFixtures({ count: 0 })
+    const env = {
+      CATALOG_DB: asD1(sqlite),
+      CATALOG_KV: makeKV(),
+      DEV_BYPASS_ACCESS: 'true',
+      DEV_PUBLISHER_EMAIL: 'me@localhost',
+    }
+    return { sqlite, env }
+  }
+  const url = 'http://localhost:8788/api/v1/publish/datasets'
+
+  it('refuses a cross-origin write before authenticating or provisioning anyone', async () => {
+    const { sqlite, env } = devEnv()
+    const next = stubNext()
+    const res = await onRequest(ctxWithNext({ env, url, method: 'POST', headers: { 'Sec-Fetch-Site': 'same-site' } }, next))
+    expect(res.status).toBe(403)
+    expect((await readJson<{ error: string }>(res)).error).toBe('cross_origin_request')
+    expect(next.fn).not.toHaveBeenCalled()
+    const rows = sqlite.prepare('SELECT COUNT(*) AS n FROM publishers').get() as { n: number }
+    expect(rows.n).toBe(0)
+  })
+
+  it('refuses one before even the binding check', async () => {
+    const next = stubNext()
+    const res = await onRequest(ctxWithNext({ env: {}, url, method: 'DELETE', headers: { Origin: 'https://evil.example' } }, next))
+    expect(res.status).toBe(403)
+    expect((await readJson<{ error: string }>(res)).error).toBe('cross_origin_request')
+  })
+
+  it('serves a same-origin write, a header-less write and a cross-origin read', async () => {
+    for (const [method, headers] of [
+      ['POST', { 'Sec-Fetch-Site': 'same-origin' }],
+      ['PUT', { Origin: 'http://localhost:8788' }],
+      ['POST', {}],
+      ['GET', { 'Sec-Fetch-Site': 'cross-site' }],
+    ] as const) {
+      const { env } = devEnv()
+      const next = stubNext('downstream')
+      const res = await onRequest(ctxWithNext({ env, url, method, headers }, next))
+      expect(res.status).toBe(200)
+      expect(next.fn).toHaveBeenCalledTimes(1)
     }
   })
 })

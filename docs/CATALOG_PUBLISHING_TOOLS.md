@@ -539,6 +539,13 @@ The CLI authenticates via Cloudflare Access **service tokens**
    publisher (JIT-provisioned on first call as described in
    "Publisher identity & roles" below).
 
+A write (POST, PUT, PATCH or DELETE) that a page on another
+origin starts is refused with 403 `cross_origin_request`, before
+authentication. The check reads the browser's `Sec-Fetch-Site`
+header, then `Origin`. The CLI, the workflows and other
+server-side clients send neither header and are unaffected. A
+client that does send `Origin` must send the node's own.
+
 Service tokens have explicit expiry; the CLI checks expiry
 before each call and surfaces a clear error if the token is
 within seven days of expiring. Rotation is the operator's

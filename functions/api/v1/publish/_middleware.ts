@@ -4,8 +4,10 @@
 /**
  * Auth middleware for /api/v1/publish/**.
  *
- * Wraps every publisher-API route. Three jobs:
+ * Wraps every publisher-API route. Its jobs:
  *
+ *   0. Refuse a write that a page on another origin started
+ *      ({@link isCrossOriginWrite}), before anything else runs.
  *   1. Verify the caller's identity. In production that means a
  *      Cloudflare Access JWT delivered via `Cf-Access-Jwt-Assertion`
  *      (browser cookie or service-token client). In dev — when
@@ -26,6 +28,9 @@
  *      the middleware owns *feature* availability.
  *
  * Failure modes (typed envelopes, same shape as the rest of the API):
+ *   - 403 `cross_origin_request` — a POST, PUT, PATCH or DELETE that a
+ *     page on another origin started. Checked first, so such a request
+ *     authenticates nothing and provisions no publisher row.
  *   - 503 `binding_missing` — CATALOG_DB not bound.
  *   - 503 `access_unconfigured` — neither Access env vars nor
  *     `DEV_BYPASS_ACCESS=true` are set; the middleware fails closed
@@ -65,6 +70,48 @@ function jsonError(status: number, error: string, message: string): Response {
     status,
     headers: { 'Content-Type': CONTENT_TYPE },
   })
+}
+
+const UNSAFE_METHODS: ReadonlySet<string> = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+
+/**
+ * Whether a write came from a page on another origin.
+ *
+ * **Why.** The browser's Access cookie (`CF_Authorization`) is what
+ * authenticates the portal, and a browser attaches it to requests that
+ * other sites start. `SameSite=Lax` (`docs/SELF_HOSTING.md` §6.2) keeps it
+ * off cross-site writes, but not off **same-site** ones. Sibling hosts
+ * under the node's domain are the same site, and so are its own
+ * `pages.dev` branch previews. A page on any of those could post to
+ * this API as the signed-in publisher. This check closes that without
+ * relying on dashboard settings.
+ *
+ * **How.** Only unsafe methods are checked; a GET here changes no state
+ * a caller can see (the routes that write on GET only fill a cache).
+ * - `Sec-Fetch-Site` is read first. A browser sets it and a page cannot,
+ *   and anything but `same-origin` is refused, including `same-site` and
+ *   `none`. It comes first because the Vite dev server's proxy forwards
+ *   the page's `Origin` to a target on another port, while the browser
+ *   correctly reports the request as same-origin.
+ * - Without it, `Origin` must equal this request's own origin. An opaque
+ *   origin (`null`, from a sandboxed frame or a file) never does.
+ * - With neither header the caller is not a browser page: the CLI, the
+ *   GitHub Actions jobs and server-side callers such as the WordPress
+ *   plugin authenticate with Access service-token headers, not the
+ *   cookie, and send neither. Current browsers send `Origin` on every
+ *   cross-origin POST, PUT, PATCH and DELETE, so passing a request that
+ *   has neither opens nothing.
+ *
+ * The portal is assumed to share the API's origin. A node that serves
+ * the portal from a different origin would need an allowlist here.
+ */
+export function isCrossOriginWrite(request: Request): boolean {
+  if (!UNSAFE_METHODS.has(request.method.toUpperCase())) return false
+  const site = request.headers.get('Sec-Fetch-Site')
+  if (site !== null) return site.trim().toLowerCase() !== 'same-origin'
+  const origin = request.headers.get('Origin')
+  if (origin === null) return false
+  return origin.trim() !== new URL(request.url).origin
 }
 
 /**
@@ -173,6 +220,14 @@ async function nextOrCaught(context: Parameters<PagesFunction<CatalogEnv>>[0]): 
 }
 
 export const onRequest: PagesFunction<CatalogEnv> = async context => {
+  if (isCrossOriginWrite(context.request)) {
+    return jsonError(
+      403,
+      'cross_origin_request',
+      "This API accepts changes only from this node's own pages.",
+    )
+  }
+
   if (!context.env.CATALOG_DB) {
     return jsonError(
       503,
