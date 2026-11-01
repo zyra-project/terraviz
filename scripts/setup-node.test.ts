@@ -578,6 +578,95 @@ describe('runSetup — access step', () => {
     expect(await runSetup(h.deps)).toBe(2)
     expect(h.errOut()).toContain('Access: Apps and Policies')
   })
+
+  it('plans the cookie settings with the application', async () => {
+    const h = harness({ argv: ['--only=access'], files: { '.terraviz-setup.json': state } })
+    expect(await runSetup(h.deps)).toBe(0)
+    expect(h.out()).toContain('HttpOnly, SameSite=Lax')
+  })
+
+  // Adoption leaves an application as it is, so an existing node's
+  // cookie stays at whatever it was created with. Silence there would
+  // read as "the setup run fixed it".
+  it('says when an adopted application\'s cookie falls short, and how to fix it', async () => {
+    const h = harness({
+      argv: ['--only=access', '--apply'],
+      env: { CLOUDFLARE_API_TOKEN: 'tok' },
+      files: { '.terraviz-setup.json': state },
+      fetchImpl: accessFetch({
+        ...HAPPY,
+        'GET /access/apps': [{ id: 'app1', name: 'Terraviz Publisher', aud: 'AUD123' }],
+      }),
+    })
+    expect(await runSetup(h.deps)).toBe(0)
+    expect(h.out()).toContain('application  Terraviz Publisher  adopted')
+    expect(h.out()).toMatch(/SameSite is not reported/)
+    expect(h.out()).toMatch(/HttpOnly is not reported/)
+    expect(h.out()).toContain('SELF_HOSTING.md §6.2')
+  })
+
+  it('says nothing about the cookie when the adopted application is already set', async () => {
+    const h = harness({
+      argv: ['--only=access', '--apply'],
+      env: { CLOUDFLARE_API_TOKEN: 'tok' },
+      files: { '.terraviz-setup.json': state },
+      fetchImpl: accessFetch({
+        ...HAPPY,
+        'GET /access/apps': [{
+          id: 'app1',
+          name: 'Terraviz Publisher',
+          aud: 'AUD123',
+          http_only_cookie_attribute: true,
+          same_site_cookie_attribute: 'lax',
+        }],
+      }),
+    })
+    expect(await runSetup(h.deps)).toBe(0)
+    expect(h.out()).toContain('application  Terraviz Publisher  adopted')
+    expect(h.out()).not.toMatch(/SameSite|HttpOnly/)
+  })
+
+  it('says nothing about the cookie when it created the application', async () => {
+    const h = harness({
+      argv: ['--only=access', '--apply'],
+      env: { CLOUDFLARE_API_TOKEN: 'tok' },
+      files: { '.terraviz-setup.json': state },
+      fetchImpl: accessFetch(HAPPY),
+    })
+    expect(await runSetup(h.deps)).toBe(0)
+    expect(h.out()).toContain('application  Terraviz Publisher  created')
+    expect(h.out()).not.toMatch(/SameSite|HttpOnly/)
+  })
+
+  // SELF_HOSTING.md §6.2 tells a node with separate portal and API
+  // applications to name the API one here. Dropping the override
+  // would adopt or create the wrong application, and the bindings
+  // step would then deploy its AUD as ACCESS_AUD.
+  it('manages the application TERRAVIZ_ACCESS_APP_NAME names', async () => {
+    const seen: string[] = []
+    const h = harness({
+      argv: ['--only=access', '--apply'],
+      env: { CLOUDFLARE_API_TOKEN: 'tok', TERRAVIZ_ACCESS_APP_NAME: 'Terraviz API' },
+      files: { '.terraviz-setup.json': state },
+      fetchImpl: accessFetch(
+        {
+          ...HAPPY,
+          'GET /access/apps': [
+            { id: 'portal1', name: 'Terraviz Publisher', aud: 'AUD-PORTAL' },
+            { id: 'api1', name: 'Terraviz API', aud: 'AUD-API' },
+          ],
+          'GET /access/apps/api1/policies': [],
+          'POST /access/apps/api1/policies': { id: 'p', name: 'x', decision: 'allow' },
+        },
+        seen,
+      ),
+    })
+    expect(await runSetup(h.deps)).toBe(0)
+    const saved = JSON.parse(h.writes.get('.terraviz-setup.json')!)
+    expect(saved.accessAud).toBe('AUD-API')
+    expect(saved.accessAppId).toBe('api1')
+    expect(seen).not.toContain('POST /access/apps')
+  })
 })
 
 describe('runSetup — secrets step', () => {

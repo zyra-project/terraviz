@@ -40,19 +40,28 @@
  *
  * ## Why content and not attributes
  *
- * 34 tracked files match a `filter=lfs` pattern; only 22 are pointers.
- * The other 12 — the `luma-check` fixtures, the events-tab handoff
- * screenshots — were committed as ordinary blobs before or around the
- * pattern being added, and are real bytes on disk. Reporting anything
- * that merely *matches* the attribute would flag all 12 every run, and a
- * check that cries wolf every run gets muted. So the attribute picks the
- * candidates and the file's own first bytes decide.
+ * An attribute says what a file should be, not what is on disk. A blob
+ * committed without git-lfs installed lands under the `filter=lfs`
+ * catch-all as real bytes, and a clone without `git lfs pull` lands
+ * every genuine LFS file as a pointer. Only the file's own first bytes
+ * tell those apart. When this check was written, 12 of the 34 files
+ * the catch-all matched were real bytes, and reporting them every run
+ * would have got the check muted. `.gitattributes` now pins each such
+ * plain blob with `-filter`, so the files it still marks LFS are
+ * genuine pointers in history: the attribute picks the candidates and
+ * the bytes decide.
+ *
+ * Pinning has a cost: a blind spot. A `-filter` path is never a
+ * candidate, so a pointer committed at one is reported by nothing
+ * here, and `git lfs fsck --pointers` skips it too. The basemaps have
+ * always had this gap; the pinned images share it.
  *
  * `git check-attr` does the matching rather than a hand-rolled glob:
- * `.gitattributes` here has three negation lines (`public/*.png`,
- * `src-tauri/icons/*.png`, `src-tauri/gen/**\/*.png` are `-filter`), and
- * reimplementing precedence between those and the `*.png` catch-all
- * above them is a bug waiting to happen. git already knows.
+ * `.gitattributes` here has a run of `-filter` lines after the
+ * catch-alls (the app icons, the basemaps, the luma-check bundle, and
+ * the plain images pinned beside them), and reimplementing the
+ * precedence between those is a bug waiting to happen. git already
+ * knows.
  */
 
 import { closeSync, openSync, readSync } from 'node:fs'

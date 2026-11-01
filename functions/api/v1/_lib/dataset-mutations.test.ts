@@ -749,6 +749,21 @@ describe('updateDataset', () => {
     expect(await kv.get(SNAPSHOT_KEY)).toBeNull()
   })
 
+  // `weight` is NOT NULL; a null used to reach D1 and come back a 500.
+  it('refuses a null weight with a 400 and leaves the row as it was', async () => {
+    const { env } = setupEnv()
+    const created = await createDataset(env, ADMIN, { title: 'Weighted', format: 'video/mp4', weight: 7 })
+    if (!created.ok) throw new Error('seed')
+    const result = await updateDataset(env, ADMIN, created.dataset.id, { weight: null } as never)
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.status).toBe(400)
+    expect(result.errors.some(e => e.field === 'weight' && e.code === 'invalid_type')).toBe(true)
+    const row = env.CATALOG_DB as unknown as D1Database
+    const stored = await row.prepare('SELECT weight FROM datasets WHERE id = ?').bind(created.dataset.id).first<{ weight: number }>()
+    expect(stored?.weight).toBe(7)
+  })
+
   it('rejects legacy_id update from a non-privileged publisher with 403 (1d/L)', async () => {
     const { env } = setupEnv()
     const created = await createDataset(env, PUBLISHER, {

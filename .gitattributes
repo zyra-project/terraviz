@@ -54,3 +54,34 @@ public/luma-check/out/*.mp4 -filter -diff -merge
 # about a megabyte of numbers nobody reviews by eye, so GitHub folds them
 # in a diff; mesh.test.ts checks them against a fresh build instead.
 scripts/second-life-exhibit/mesh/dae/*.dae linguist-generated=true eol=lf
+
+# Five more plain blobs under the catch-all, pinned for the same reason.
+# History holds their real bytes while the catch-all says LFS, and that
+# mismatch is not cosmetic. The clean filter turns each file into a
+# pointer whenever git compares it, so any checkout with LFS installed
+# shows them as permanently modified, and the next `git add -A` commits
+# the pointer in place of the image. That happened to the screenshot
+# fixture below on a feature branch. The gating smoke test uploads it
+# from a checkout made without LFS, and would have been handed a
+# 130-byte text file named `.png`.
+#
+# Each stays plain rather than moving into LFS:
+#   - The screenshot fixtures and `equirect-sample.png` are read from
+#     checkouts made without LFS. `visual-report.yml` uploads the
+#     fixture and serves the sample to the catalog fixture, and
+#     `stac-api.yml` runs the STAC test that loads the sample. The
+#     fixture rule matches PNGs at any depth but never the whole
+#     directory: `-diff` marks a file binary, and the fixtures are
+#     mostly TypeScript. A fixture in another image format needs a
+#     line of its own.
+#   - The events-tab handoff images illustrate a design brief, about
+#     190 KB between them.
+#   - The Weblate QR code is 791 bytes. Its blob stays in history
+#     however the file is tracked, so moving it into LFS would save
+#     nothing, and would add one more object the poster deploy has to
+#     find on the LFS server. Its five siblings being LFS pointers
+#     costs nothing: the poster checks out with `lfs: true`.
+scripts/screenshots/fixtures/**/*.png  -filter -diff -merge
+public/assets/equirect-sample.png      -filter -diff -merge
+docs/events-tab-handoff/images/*.png   -filter -diff -merge
+poster/assets/qr/weblate.png           -filter -diff -merge

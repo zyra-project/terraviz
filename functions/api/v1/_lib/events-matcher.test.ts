@@ -255,6 +255,21 @@ describe('topical signal', () => {
     expect(scoreLexical(ev, buildDatasetTerms({ title: 'Volcanic ash and aerosols' }))).toBeGreaterThan(0)
   })
 
+  // The table is a plain object keyed by event words, and the one
+  // lowercase word naming an Object.prototype member is "constructor":
+  // the lookup returned the Object function, `for…of` threw, and an
+  // event about, say, dam constructors was left with no links and
+  // failed again on every refresh.
+  it('buildEventTerms takes "constructor" as an ordinary word', () => {
+    const terms = buildEventTerms({
+      title: 'Dam constructors evacuated as river floods',
+      categoryValues: ['constructor'],
+      keywords: ['Constructors'],
+    })
+    expect(terms.has('constructor')).toBe(true)
+    expect(terms.has('flood')).toBe(true)
+  })
+
   it('buildEventTerms expands a category into related dataset topics', () => {
     const terms = buildEventTerms({ title: 'Tropical cyclone', categoryValues: ['Severe Storms'] })
     expect(terms.has('storm')).toBe(true)
