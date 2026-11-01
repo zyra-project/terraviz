@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Zyra Project
 // @vitest-environment node
+// (happy-dom's Request drops browser-forbidden headers such as Origin and
+// Sec-Fetch-Site, so a test could not set them; Workers keeps them.)
 
 /**
  * Tests for the publisher-API auth middleware.
@@ -11,9 +13,10 @@
  * doesn't require a downstream handler.
  *
  * Coverage:
- *   - 403 cross_origin_request for a write a page on another origin
+ *   - 403 cross_origin_request for a request a page on another origin
  *     started, judged by `Sec-Fetch-Site` and then `Origin`, before
- *     anything else runs.
+ *     anything else runs; 403 origin_required for a cookie-authenticated
+ *     write with neither header.
  *   - 503 binding_missing.
  *   - 503 access_unconfigured (no Access env, no dev bypass).
  *   - 500 dev_bypass_unsafe (DEV_BYPASS_ACCESS=true on a non-loopback
@@ -27,7 +30,15 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { featureForPath, isCrossOriginWrite, onRequest } from './_middleware'
+import { cookieWriteWithoutOrigin, crossOriginRefusal, featureForPath, onRequest } from './_middleware'
+import { verifyAccessJwt, type AccessIdentity } from '../_lib/access-auth'
+
+// The real verifier unless a test says otherwise, so the 401 tests still
+// exercise it while the origin tests can stand in a verified identity.
+vi.mock('../_lib/access-auth', async importOriginal => {
+  const actual = await importOriginal<typeof import('../_lib/access-auth')>()
+  return { ...actual, verifyAccessJwt: vi.fn(actual.verifyAccessJwt) }
+})
 import { asD1, makeCtx, makeKV, seedFixtures } from '../_lib/test-helpers'
 
 interface NextStub {
@@ -283,55 +294,110 @@ describe('publish/_middleware', () => {
   })
 })
 
-describe('isCrossOriginWrite', () => {
+describe('crossOriginRefusal', () => {
   const URL_ = 'https://node.example.org/api/v1/publish/datasets'
-  const write = (headers: Record<string, string>, method = 'POST') =>
-    isCrossOriginWrite(new Request(URL_, { method, headers }))
+  const refusal = (headers: Record<string, string>, method = 'POST') =>
+    crossOriginRefusal(new Request(URL_, { method, headers }))
 
-  it('refuses a write any page but this origin started, by Sec-Fetch-Site', () => {
-    for (const site of ['cross-site', 'same-site', 'none', 'garbage', '']) {
-      expect(write({ 'Sec-Fetch-Site': site })).toBe(true)
-    }
-    expect(write({ 'Sec-Fetch-Site': 'same-origin' })).toBe(false)
-    expect(write({ 'Sec-Fetch-Site': ' Same-Origin ' })).toBe(false)
+  describe('writes', () => {
+    it('refuses one any page but this origin started, by Sec-Fetch-Site', () => {
+      for (const site of ['cross-site', 'same-site', 'none', 'garbage', '']) {
+        expect(refusal({ 'Sec-Fetch-Site': site })).not.toBeNull()
+      }
+      expect(refusal({ 'Sec-Fetch-Site': 'same-origin' })).toBeNull()
+      expect(refusal({ 'Sec-Fetch-Site': 'Same-Origin' })).toBeNull()
+    })
+
+    // The Vite dev proxy forwards the page's Origin to its target; the
+    // browser's own verdict is what counts.
+    it('reads Sec-Fetch-Site before Origin', () => {
+      expect(refusal({ 'Sec-Fetch-Site': 'same-origin', Origin: 'http://localhost:5173' })).toBeNull()
+      expect(refusal({ 'Sec-Fetch-Site': 'same-site', Origin: 'https://node.example.org' })).not.toBeNull()
+    })
+
+    it("falls back to Origin, which must be this request's own", () => {
+      expect(refusal({ Origin: 'https://node.example.org' })).toBeNull()
+      for (const origin of [
+        'https://evil.example.org',
+        'https://blog.node.example.org',
+        'http://node.example.org',
+        'https://node.example.org:8443',
+        'https://node.example.org/',
+        'null',
+      ]) {
+        expect(refusal({ Origin: origin })).not.toBeNull()
+      }
+    })
+
+    it('says which header and value it refused, and what to send', () => {
+      expect(refusal({ 'Sec-Fetch-Site': 'same-site' })).toBe(
+        'Sec-Fetch-Site is "same-site": this API accepts changes only from https://node.example.org.',
+      )
+      expect(refusal({ Origin: 'https://evil.example.org' })).toBe(
+        'Origin "https://evil.example.org" is not this API\'s origin, https://node.example.org. Send that origin, or no Origin header.',
+      )
+      expect(refusal({ Origin: 'x'.repeat(500) })!.length).toBeLessThan(250)
+    })
+
+    // Node's fetch, which the CLI uses, sends Sec-Fetch-Mode and nothing
+    // else of the kind; a check that read any Sec-Fetch-* header would
+    // fail every CLI and workflow write.
+    it('passes a request with neither header, as the CLI sends it', () => {
+      expect(refusal({})).toBeNull()
+      expect(refusal({ 'sec-fetch-mode': 'cors', 'CF-Access-Client-Id': 'id', 'CF-Access-Client-Secret': 'secret' })).toBeNull()
+    })
+
+    it('checks every method but the safe ones, whatever its case', () => {
+      for (const method of ['POST', 'PUT', 'PATCH', 'DELETE', 'patch', 'PROPFIND']) {
+        expect(refusal({ 'Sec-Fetch-Site': 'cross-site' }, method)).not.toBeNull()
+      }
+    })
   })
 
-  // The Vite dev proxy forwards the page's Origin to a target on another
-  // port; the browser's own verdict is what counts.
-  it('reads Sec-Fetch-Site before Origin', () => {
-    expect(write({ 'Sec-Fetch-Site': 'same-origin', Origin: 'http://localhost:5173' })).toBe(false)
-    expect(write({ 'Sec-Fetch-Site': 'same-site', Origin: 'https://node.example.org' })).toBe(true)
-  })
+  describe('reads', () => {
+    it('refuses a read another site started, other than a top-level visit', () => {
+      for (const site of ['same-site', 'cross-site']) {
+        for (const [mode, dest] of [['no-cors', 'image'], ['cors', 'empty'], ['navigate', 'iframe']]) {
+          for (const method of ['GET', 'HEAD', 'OPTIONS']) {
+            expect(refusal({ 'Sec-Fetch-Site': site, 'Sec-Fetch-Mode': mode, 'Sec-Fetch-Dest': dest }, method)).not.toBeNull()
+          }
+        }
+      }
+    })
 
-  it('falls back to Origin, which must be this request\'s own', () => {
-    expect(write({ Origin: 'https://node.example.org' })).toBe(false)
-    for (const origin of [
-      'https://evil.example.org',
-      'https://blog.node.example.org',
-      'http://node.example.org',
-      'https://node.example.org:8443',
-      'null',
-    ]) {
-      expect(write({ Origin: origin })).toBe(true)
-    }
-  })
-
-  it('lets a request with neither header through: service-token callers send neither', () => {
-    expect(write({})).toBe(false)
-    expect(write({ 'CF-Access-Client-Id': 'id', 'CF-Access-Client-Secret': 'secret' })).toBe(false)
-  })
-
-  it('checks every unsafe method and no safe one', () => {
-    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
-      expect(write({ 'Sec-Fetch-Site': 'cross-site' }, method)).toBe(true)
-    }
-    for (const method of ['GET', 'HEAD', 'OPTIONS']) {
-      expect(write({ 'Sec-Fetch-Site': 'cross-site' }, method)).toBe(false)
-    }
+    // The Access sign-in comes back to the portal as a top-level visit
+    // from another site.
+    it('serves a top-level visit, a same-origin read and a read nothing judged', () => {
+      expect(refusal({ 'Sec-Fetch-Site': 'cross-site', 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Dest': 'document' }, 'GET')).toBeNull()
+      expect(refusal({ 'Sec-Fetch-Site': 'same-origin', 'Sec-Fetch-Mode': 'cors', 'Sec-Fetch-Dest': 'empty' }, 'GET')).toBeNull()
+      expect(refusal({ 'Sec-Fetch-Site': 'none', 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Dest': 'document' }, 'GET')).toBeNull()
+      expect(refusal({ Origin: 'https://evil.example.org' }, 'GET')).toBeNull()
+      expect(refusal({ 'sec-fetch-mode': 'cors' }, 'GET')).toBeNull()
+    })
   })
 })
 
-describe('publish/_middleware cross-origin writes', () => {
+describe('cookieWriteWithoutOrigin', () => {
+  const user: AccessIdentity = { email: 'a@example.org', sub: 'u1', type: 'user' }
+  const service: AccessIdentity = { email: 'svc@example.org', sub: 's1', type: 'service' }
+  const req = (headers: Record<string, string>, method = 'POST') =>
+    new Request('https://node.example.org/api/v1/publish/datasets', { method, headers })
+
+  it("refuses a user's write with neither header", () => {
+    expect(cookieWriteWithoutOrigin(req({}), user, false)).toBe(true)
+    expect(cookieWriteWithoutOrigin(req({}, 'DELETE'), user, false)).toBe(true)
+  })
+
+  it('passes a service token, the dev bypass, a read, and a write that names its origin', () => {
+    expect(cookieWriteWithoutOrigin(req({}), service, false)).toBe(false)
+    expect(cookieWriteWithoutOrigin(req({}), user, true)).toBe(false)
+    expect(cookieWriteWithoutOrigin(req({}, 'GET'), user, false)).toBe(false)
+    expect(cookieWriteWithoutOrigin(req({ Origin: 'https://node.example.org' }), user, false)).toBe(false)
+    expect(cookieWriteWithoutOrigin(req({ 'Sec-Fetch-Site': 'same-origin' }), user, false)).toBe(false)
+  })
+})
+
+describe('publish/_middleware cross-origin requests', () => {
   function devEnv() {
     const sqlite = seedFixtures({ count: 0 })
     const env = {
@@ -362,12 +428,25 @@ describe('publish/_middleware cross-origin writes', () => {
     expect((await readJson<{ error: string }>(res)).error).toBe('cross_origin_request')
   })
 
-  it('serves a same-origin write, a header-less write and a cross-origin read', async () => {
+  it('refuses a same-site page loading a read, and serves a top-level visit', async () => {
+    const { env } = devEnv()
+    const img = await onRequest(
+      ctxWithNext({ env, url, headers: { 'Sec-Fetch-Site': 'same-site', 'Sec-Fetch-Mode': 'no-cors', 'Sec-Fetch-Dest': 'image' } }, stubNext()),
+    )
+    expect(img.status).toBe(403)
+    const next = stubNext('downstream')
+    const visit = await onRequest(
+      ctxWithNext({ env, url, headers: { 'Sec-Fetch-Site': 'cross-site', 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Dest': 'document' } }, next),
+    )
+    expect(visit.status).toBe(200)
+    expect(next.fn).toHaveBeenCalledTimes(1)
+  })
+
+  it('serves a same-origin write and a header-less write under the dev bypass', async () => {
     for (const [method, headers] of [
       ['POST', { 'Sec-Fetch-Site': 'same-origin' }],
       ['PUT', { Origin: 'http://localhost:8788' }],
       ['POST', {}],
-      ['GET', { 'Sec-Fetch-Site': 'cross-site' }],
     ] as const) {
       const { env } = devEnv()
       const next = stubNext('downstream')
@@ -375,6 +454,44 @@ describe('publish/_middleware cross-origin writes', () => {
       expect(res.status).toBe(200)
       expect(next.fn).toHaveBeenCalledTimes(1)
     }
+  })
+
+  describe('behind Access', () => {
+    function accessEnv() {
+      const sqlite = seedFixtures({ count: 0 })
+      const env = { CATALOG_DB: asD1(sqlite), CATALOG_KV: makeKV(), ACCESS_TEAM_DOMAIN: 'team.cloudflareaccess.com', ACCESS_AUD: 'aud' }
+      return { sqlite, env }
+    }
+    const nodeUrl = 'https://node.example.org/api/v1/publish/datasets'
+
+    it("refuses a user's write with neither header, provisioning no one", async () => {
+      vi.mocked(verifyAccessJwt).mockResolvedValueOnce({ email: 'a@example.org', sub: 'u1', type: 'user' })
+      const { sqlite, env } = accessEnv()
+      const next = stubNext()
+      const res = await onRequest(ctxWithNext({ env, url: nodeUrl, method: 'POST', headers: { 'Cf-Access-Jwt-Assertion': 'jwt' } }, next))
+      expect(res.status).toBe(403)
+      expect((await readJson<{ error: string }>(res)).error).toBe('origin_required')
+      expect(next.fn).not.toHaveBeenCalled()
+      const rows = sqlite.prepare('SELECT COUNT(*) AS n FROM publishers').get() as { n: number }
+      expect(rows.n).toBe(0)
+    })
+
+    it("serves a service token's header-less write and a user's same-origin one", async () => {
+      const cases: Array<[AccessIdentity, Record<string, string>]> = [
+        [{ email: 'svc@example.org', sub: 's1', type: 'service' }, {}],
+        [{ email: 'a@example.org', sub: 'u1', type: 'user' }, { 'Sec-Fetch-Site': 'same-origin' }],
+      ]
+      for (const [identity, headers] of cases) {
+        vi.mocked(verifyAccessJwt).mockResolvedValueOnce(identity)
+        const { env } = accessEnv()
+        const next = stubNext('downstream')
+        const res = await onRequest(
+          ctxWithNext({ env, url: nodeUrl, method: 'POST', headers: { 'Cf-Access-Jwt-Assertion': 'jwt', ...headers } }, next),
+        )
+        expect(res.status).toBe(200)
+        expect(next.fn).toHaveBeenCalledTimes(1)
+      }
+    })
   })
 })
 

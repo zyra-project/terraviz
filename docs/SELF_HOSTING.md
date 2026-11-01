@@ -2451,6 +2451,19 @@ The cross-origin (CORS) gate rejected it, for one of two reasons.
 2. The origin isn't in the allowlist, doesn't match the request URL,
    and doesn't end with `.pages.dev`.
 
+### Publisher API returns 403 `cross_origin_request` or `origin_required`
+The publisher API refuses a request that a page on another origin
+started, and the message names the header and value it refused. Likely
+causes:
+- A script or proxy that sets or forwards an `Origin` header. Send your
+  node's own origin (`https://` + `W2`, no path), or no `Origin` at all.
+- A reverse proxy in front of the node that rewrites the host, seen by a
+  browser that sends no `Sec-Fetch-Site` (Safari before 16.4).
+- A browser extension that sends `Sec-Fetch-Site: none` with its requests.
+- `origin_required`: a signed-in user's change arrived with neither
+  `Sec-Fetch-Site` nor `Origin`. That happens with an old browser, or a
+  client using a copied cookie. Send the node's `Origin`.
+
 ### Publisher API returns 503 `access_unconfigured`
 `ACCESS_TEAM_DOMAIN` or `ACCESS_AUD` is missing — most often set on
 Production but not Preview. Confirm with

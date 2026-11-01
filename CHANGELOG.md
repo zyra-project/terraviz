@@ -16,6 +16,27 @@ referenced in [`README.md`](README.md).
 
 ---
 
+## Unreleased - Publisher API origin check
+
+- The publisher API (`/api/v1/publish/**`) now refuses a request that a page
+  on another origin started, with 403 `cross_origin_request`, before it reads
+  the caller's identity. This closes requests from sibling hosts under the
+  node's domain and from `pages.dev` branch previews, which the Access
+  cookie's `SameSite=Lax` does not.
+  - A write (anything but GET, HEAD or OPTIONS) is refused unless the browser
+    says `Sec-Fetch-Site: same-origin`. Without that header, `Origin` must be
+    the node's own.
+  - A read another site starts is refused too, unless it is a top-level visit.
+- A write the Access cookie authenticated that carries neither header gets
+  403 `origin_required`.
+- **API clients:** the CLI, the GitHub Actions jobs and the WordPress plugin
+  are unaffected, since they send neither header by default and use service
+  tokens. A client that sets `Origin` must send the node's origin, such as
+  `https://terraviz.example.org`, with no path. A client acting as a signed-in
+  user (a copied cookie, `cloudflared access`) must send that `Origin`.
+- **Local development:** open the Vite dev server at `http://localhost:5173`,
+  not a LAN address. See `docs/CATALOG_BACKEND_DEVELOPMENT.md`.
+
 ## Unreleased - Metadata Phase 2
 
 - STAC core 1.1.0 resources are opt-in via `STAC_ENABLED=true`; this is not
