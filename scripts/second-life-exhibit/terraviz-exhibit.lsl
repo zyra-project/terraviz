@@ -14,16 +14,19 @@
 //   The source:  https://github.com/zyra-project/terraviz
 //
 // WHAT THIS SCRIPT DOES
-// It is one of four scripts that make a sphere a TerraViz exhibit: a
+// It is one of five scripts that make a sphere a TerraViz exhibit: a
 // globe that stays up all the time, that anyone who walks up can use, and
 // that a presenter can take over for a talk.
 //   terraviz-exhibit.lsl           this one: what the globe shows
 //   terraviz-exhibit-visitors.lsl  touches, menus, talks, who is nearby
 //   terraviz-exhibit-info.lsl      the floating text, and "About"
+//   terraviz-exhibit-owner.lsl     the owner's commands on channel 9
 //   terraviz-exhibit-menu.lsl      the dataset menu from the node, in a
 //                                  small prim of its own linked to the sphere
-// The first three go in the sphere's Content tab, the menu script in that
-// small prim's.
+// The first four go in the sphere's Content tab, the menu script in that
+// small prim's. An optional sixth, terraviz-exhibit-kiosk.lsl, goes in a
+// flat screen linked to the sphere, and shows what the globe shows there
+// for visitors to read.
 //
 // The sphere's surface shows TerraViz's output page: a web page that
 // draws the whole Earth unwrapped into a flat 2:1 picture, which Second
@@ -32,9 +35,10 @@
 // dataset, where in its animation, and whether it is paused. Every copy
 // reads the same address, so everyone at the globe sees the same moment.
 // This script is the only one that sets that address. The visitors script
-// asks it for changes, as the info script does to put back a dataset the
-// page can't show, and it tells the other two what the globe shows after
-// each one. The info script also tells it how long the clip is, so that a
+// asks it for changes, as the owner script does for the owner and the
+// info script does to put back a dataset the page can't show, and it
+// tells the visitors and info scripts what the globe shows after each
+// one. The info script also tells it how long the clip is, so that a
 // pause, a nudge or a change of rate lands on the frame the copies show
 // however long the globe has played (position()): every copy that loops
 // on the stream's playlist total, and one looping on a length of its own
@@ -57,32 +61,16 @@
 //   What "/9 telemetry on" sends:
 //     https://terraviz.zyra-project.org/privacy
 //
-// COMMANDS, said on channel 9 by the owner. Visitors use the touch menu.
-//   /9 show <name or id>   a dataset, playing from its start
-//   /9 list                the names /9 show knows
-//   /9 earth               back to the live Earth
-//   /9 pause, /9 play      every visitor stops on, or starts from, the same frame
-//   /9 jump <s or m:ss>    go to that point in the clip, paused or playing
-//   /9 rate <speed>        0.084 to 12.8; 1 is the clip's own speed
-//   /9 rotation <degrees>  the longitude at the centre of the picture, east, and
-//                          where the globe goes back to once visitors leave
-//   /9 turn <degrees>      turn the globe that far east, as the Earth turns; minus is
-//                          west. Visitors' Turn east and Turn west buttons do this.
-//   /9 spin <degrees/s>    turn the whole sphere; /9 spin off stops it
-//   /9 debug on|off        TerraViz's diagnostic readout, drawn on the globe
-//   /9 sound on|off        a dataset's sound track; on at the start unless SOUND below says not
-//   /9 width 1024|2048     the picture's resolution
-//   /9 telemetry on|off    anonymous counts (reloads every visitor's page)
-//   /9 steer hash|query    where changes go in the address (see above)
-//   /9 status              the current address and state
-//   /9 tilt south|north    tip the sphere 30 degrees so that pole comes round toward
-//                          you, until it faces you. Visitors' "South Pole to me" and
-//                          "North Pole to me" buttons do this.
-//   /9 level               stand a tilted sphere back as it was
-//   /9 home                make the sphere's rotation now its rest, which a reset keeps
-//   /9 upright             stand the poles upright again
-//   /9 memory              each of the four scripts says how much of its 64 KB it uses
-// The visitors script answers /9 talk and /9 presenters too.
+// COMMANDS
+// The owner's commands on channel 9 are the owner script's
+// (terraviz-exhibit-owner.lsl), which lists them. It checks each one and
+// hands it here, and this script makes the change. What a visitor can
+// ask for too, this script answers whoever asked; the rest, it tells the
+// owner script how it went (MSG_RESULT), which says so. They moved out of
+// this script to give it room: it read 57 KB of its 64 at rest and up to
+// 60 showing a dataset, the least room of any of the scripts, with the
+// console's motion still to come (docs/SECOND_LIFE_COMPAT.md §9 Phase 5,
+// step 1).
 //
 // TELEMETRY
 // "/9 telemetry on" has each visitor's page report, anonymously and only
@@ -101,44 +89,31 @@
 // quarter faster or slower for a while, and a short loop repeats its
 // sound every pass. "/9 sound off" silences the globe until a reset, with
 // no reload while changes go after the #; SOUND below sets how it starts.
-//
-// Channel 9 rather than the smoke-test globe's 8 or the probe's 7, so one
-// command never reaches two kinds of object at once.
 
-// The TerraViz node the globe shows, with no slash at the end. The other
-// two scripts take it from this one.
+// The TerraViz node the globe shows, with no slash at the end. The
+// visitors and info scripts take it from this one.
 string  NODE = "https://terraviz.zyra-project.org";
-integer CHAN = 9;
 integer FACE = 0;              // a sphere has only face 0
 integer UPRIGHT_ON_START = TRUE; // FALSE for a mesh globe with its own mapping
 integer SOUND = TRUE;          // FALSE for a globe that starts silent
 
-// The link messages the three scripts in the sphere share. The numbers are
-// arbitrary; all three must agree, and exhibit.test.ts holds them to it.
+// The link messages the scripts in the sphere share. The numbers are
+// arbitrary; every script must agree, and exhibit.test.ts holds them to it.
 integer MSG_STATE   = 271001;  // globe to all: what the globe shows, as JSON
 integer MSG_CONTROL = 271002;  // visitors or info to globe: a control, for the key who asked
 integer MSG_HELLO   = 271003;  // any to globe: say the state again (a script reset)
+integer MSG_OWNER   = 271010;  // owner to globe: one of the owner's commands, checked
+integer MSG_RESULT  = 271011;  // globe to owner: how an owner-only command went, as a JSON array
 
 // Shared media is capped at 2048 pixels a side (indra/llprimitive/
 // llmediaentry.h); a script asking for more gets a bounds error.
 integer MEDIA_W = 2048;
 integer MEDIA_H = 1024;
 
-// Datasets /9 show knows by name: name, the node's id for it, what it is.
-// The touch menu takes its own list from the "datasets" notecard. The ids
-// are terraviz.zyra-project.org's, and a preview build shares them.
-list PRESETS = [
-    "hurricanes", "01KQG611HF8YXJNRBEHT0757KT", "Hurricane Season 2024 (video)",
-    "sst",        "01KQG65ZW1JC7M27EQ1CYD8YZ7", "Sea Surface Temperature, real-time (video)",
-    "smoke",      "01KYJDXB4909JWG8DP257D3D0Z", "Wildfire Smoke Forecast, United States (data video, one region)",
-    "quakes",     "01KQG62M0Z3EC0T9EXFH1MVXDV", "Earthquakes 2001-2015 (video)",
-    "lights",     "01KQG629957NPZN7NTW4VK6FW0", "Nighttime Lights (still image)"
-];
-
 // The page plays rates from 1/12 (0.0833...) to 12.8 and reads anything
 // outside as 1 (docs/EMBED_URL_GRAMMAR.md). Held a little inside 1/12,
 // because an address carries three decimal places and 0.083 would read
-// as 1.
+// as 1. The owner script checks a rate against its copy of these first.
 float   MIN_RATE = 0.084;
 float   MAX_RATE = 12.8;
 
@@ -176,13 +151,6 @@ integer gHash = TRUE;   // changes go after the #
 float   gSpin;          // degrees a second, 0 for still
 integer gPeak;          // the most memory used while showing a dataset
 key     gBy = NULL_KEY; // who chose a dataset, or paused, played or moved the clip, for the next broadcast
-
-help()
-{
-    llOwnerSay("[exhibit] Commands on /" + (string)CHAN + ": show <name or id>, list, earth, pause, play, "
-        + "jump <s or m:ss>, rate <speed>, rotation <degrees>, turn <degrees east>, tilt south|north, level, home, spin <degrees/s or off>, debug on|off, "
-        + "width 1024|2048, sound on|off, telemetry on|off, steer hash|query, status, upright, memory, talk, presenters");
-}
 
 // Tells whoever asked. The owner hears it privately wherever they are; a
 // visitor in their own chat, which nobody else at the globe sees; and a
@@ -422,17 +390,19 @@ restore(list s)
     gSound = llList2Integer(s, 12);
 }
 
-// Tells the other two scripts what the globe shows. The info script times
-// the date from the clip's anchor, so it gets the anchor itself rather
-// than a position that would be stale on arrival. After a pause, a play or
-// a move, the key is whoever asked, and the info script answers them with
-// the date the globe now shows, which this script doesn't know. "turned"
-// is anything the idle return puts back: the owner's rotation, an upright
+// Tells the visitors and info scripts what the globe shows, and a kiosk
+// screen's script, which is in a prim of its own, so this goes to the
+// whole object. The info script and the kiosk time the date from the
+// clip's anchor, so they get the anchor itself rather than a position
+// that would be stale on arrival. After a pause, a play or a move, the
+// key is whoever asked, and the info script answers them with the date
+// the globe now shows, which this script doesn't know. "turned" is
+// anything the idle return puts back: the owner's rotation, an upright
 // sphere, and the owner's spin, which a tilt ends and Upright again
 // doesn't restart.
 broadcast()
 {
-    llMessageLinked(LINK_THIS, MSG_STATE, llList2Json(JSON_OBJECT, [
+    llMessageLinked(LINK_SET, MSG_STATE, llList2Json(JSON_OBJECT, [
         "dataset", gDataset, "title", gTitle,
         "pos", gPos, "atS", gAtS, "atMs", gAtMs, "rate", gRate, "paused", gPaused,
         "telemetry", gTelemetry, "turned", gRotation != gHome || gTilted || gSpin != gOwnerSpin,
@@ -440,12 +410,16 @@ broadcast()
     gBy = NULL_KEY;
 }
 
-// Puts the current state on the face, every setting every time: a face
-// given only an address takes media's defaults for the rest, which let
-// anyone click it, and the owner may have changed the face's media by
-// hand. Sending the rest costs nothing, since the call sleeps the script
-// for a second whatever it carries and a viewer navigates only when the
-// address changed (llviewermedia.cpp).
+// Puts the current state on the face, with every setting that decides who
+// can click it and how it is drawn, every time: a face given only an
+// address takes media's defaults for the rest, which let anyone click
+// it, and the owner may have changed the face's media by hand. Sending
+// the rest costs nothing, since the call sleeps the script for a second
+// whatever it carries and a viewer navigates only when the address
+// changed (llviewermedia.cpp). A list of allowed sites left on the face
+// is turned off first, so the address isn't checked against it; should
+// the simulator check it before turning it off, the face's media is
+// cleared, list and all, and set once more.
 // The media is not interactive for anyone, so no visitor's click can
 // move it to another address: a viewer broadcasts such a navigation to
 // everyone near the globe (docs/SECOND_LIFE_COMPAT.md section 7, item 4).
@@ -453,7 +427,8 @@ broadcast()
 integer setMedia()
 {
     string url = address();
-    list p = [PRIM_MEDIA_CURRENT_URL, url, PRIM_MEDIA_HOME_URL, url,
+    list p = [PRIM_MEDIA_WHITELIST_ENABLE, FALSE,
+        PRIM_MEDIA_CURRENT_URL, url, PRIM_MEDIA_HOME_URL, url,
         PRIM_MEDIA_AUTO_PLAY, TRUE,
         PRIM_MEDIA_AUTO_SCALE, FALSE,
         PRIM_MEDIA_AUTO_ZOOM, FALSE,
@@ -463,6 +438,11 @@ integer setMedia()
         PRIM_MEDIA_PERMS_INTERACT, PRIM_MEDIA_PERM_NONE,
         PRIM_MEDIA_PERMS_CONTROL, PRIM_MEDIA_PERM_NONE];
     integer r = llSetPrimMediaParams(FACE, p);
+    if (r == STATUS_WHITELIST_FAILED)
+    {
+        llClearPrimMedia(FACE);
+        r = llSetPrimMediaParams(FACE, p);
+    }
     if (r != STATUS_OK)
     {
         llOwnerSay("[exhibit] Second Life refused the media (status " + (string)r + "). The globe is unchanged.");
@@ -625,9 +605,17 @@ show(key who, string id, string title)
     if (llGetSPMaxMemory() > gPeak) gPeak = llGetSPMaxMemory();
 }
 
-// One command, from the owner's chat or a visitor's menu. A visitor
-// reaches only the commands the touch menu offers; everything else is
-// the owner's. Who may act at all is the visitors script's to decide.
+// Tells the owner script how an owner-only command went: the command,
+// then "ok" and what it now is, or why it was refused.
+report(string cmd, list how)
+{
+    llMessageLinked(LINK_THIS, MSG_RESULT, llList2Json(JSON_ARRAY, [cmd] + how), llGetOwner());
+}
+
+// One command, from a visitor's menu, the owner script or the scripts'
+// own requests. A visitor reaches only the commands the touch menu
+// offers; everything else is the owner's. Who may act at all is the
+// visitors script's to decide.
 act(key who, integer owner, string msg)
 {
     list w = llParseString2List(llStringTrim(msg, STRING_TRIM), [" "], []);
@@ -638,36 +626,23 @@ act(key who, integer owner, string msg)
 
     if (cmd == "show")
     {
-        if (arg == "") { tell(who, "Show what? /" + (string)CHAN + " list names a few."); return; }
-        string dataset = arg;
+        // The owner script has turned a name from /9 list into its id.
+        if (!isId(arg))
+        {
+            tell(who, "That dataset isn't available right now. The globe is unchanged.");
+            if (!owner) llOwnerSay("[exhibit] A visitor chose \"" + arg + "\" from the menu, which isn't a dataset id.");
+            return;
+        }
         // The menu sends its own name for the dataset after the id, so a
         // title the node can't give still reads as the menu said.
         // (A list of two would come back whole: llList2List's range runs
         // backwards there, and a backwards range means everything outside it.)
         string described = "";
         if (llGetListLength(w) > 2) described = llDumpList2String(llList2List(w, 2, -1), " ");
-        integer at = llListFindList(PRESETS, [larg]);
-        // A name sits at a multiple of three; an id or description elsewhere is not one.
-        if (at != -1 && at % 3 == 0)
-        {
-            dataset = llList2String(PRESETS, at + 1);
-            described = llList2String(PRESETS, at + 2);
-        }
-        else if (!isId(arg))
-        {
-            if (owner) tell(who, "\"" + arg + "\" is neither a name from /" + (string)CHAN
-                + " list nor a dataset id. Ids are letters, digits, - and _.");
-            else
-            {
-                tell(who, "That dataset isn't available right now. The globe is unchanged.");
-                llOwnerSay("[exhibit] A visitor chose \"" + arg + "\" from the menu, which isn't a dataset id.");
-            }
-            return;
-        }
         // Shown at once. The info script reads the record next and puts
         // the globe back on the live Earth if the node has no such
         // dataset or it is a tour; this script holds no reply of its own.
-        show(who, dataset, described);
+        show(who, arg, described);
         return;
     }
     // The clip's length in microseconds and the dataset it is for, from the
@@ -798,149 +773,102 @@ act(key who, integer owner, string msg)
         return;
     }
 
-    // Everything below is the owner's.
+    // Everything below is the owner's. It comes from the owner script,
+    // which has checked it and words the answer: this script makes the
+    // change and reports it (report()). The checks here only keep a value
+    // the owner script should never send out of the address and the
+    // clock. Nothing is reported when Second Life refuses the media, which
+    // setMedia() has told the owner already.
     if (!owner) return;
 
-    if (cmd == "help") { help(); return; }
-    if (cmd == "list")
-    {
-        integer i;
-        for (i = 0; i < llGetListLength(PRESETS); i += 3)
-            tell(who, "/" + (string)CHAN + " show " + llList2String(PRESETS, i) + " - " + llList2String(PRESETS, i + 2));
-        tell(who, "Or /" + (string)CHAN + " show <id>, with any dataset id from the node's catalog. "
-            + "The touch menu offers the \"datasets\" notecard's list instead.");
-        return;
-    }
     if (cmd == "rate")
     {
         // Rounded to what the address will carry, so the scripts time the
         // clip at the rate every copy plays it.
-        float r = -1.0;
-        if (isNumber(arg)) r = (float)num((float)arg);
-        if (r < MIN_RATE || r > MAX_RATE)
-        {
-            tell(who, "A rate from " + num(MIN_RATE) + " to " + num(MAX_RATE) + ", where 1 is the clip's own speed.");
-            return;
-        }
+        float r = (float)num((float)arg);
+        if (!isNumber(arg) || r < MIN_RATE || r > MAX_RATE) return;
         reanchor();
         gRate = r;
-        if (commit(saved)) tell(who, "Rate " + num(gRate) + ".");
+        if (commit(saved)) report(cmd, ["ok", num(gRate)]);
         return;
     }
     if (cmd == "rotation")
     {
-        if (!isNumber(arg) || llFabs((float)arg) > 3600.0)
-        {
-            tell(who, "Rotation in degrees east, from -3600 to 3600, like 90 or -75.");
-            return;
-        }
+        if (!isNumber(arg) || llFabs((float)arg) > 3600.0) return;
         // Home first, since commit() tells the other scripts whether the
         // globe is turned from it.
         float home = gHome;
         gRotation = degrees((float)arg);
         gHome = gRotation;
         if (!commit(saved)) { gHome = home; return; }
-        tell(who, num(gRotation) + " degrees east is at the centre of the picture.");
+        report(cmd, ["ok", num(gRotation)]);
         return;
     }
     if (cmd == "spin")
     {
         float rate = (float)arg;
-        if (larg == "off" || (isNumber(arg) && rate == 0.0))
+        if (!isNumber(arg) || llFabs(rate) > 90.0) return;
+        if (rate == 0.0)
         {
             stopSpin();
             gOwnerSpin = 0.0;
-            tell(who, "Spin off.");
-            return;
-        }
-        if (!isNumber(arg) || llFabs(rate) > 90.0)
-        {
-            tell(who, "Spin in degrees a second, up to 90, like 6 for a turn a minute, or off.");
+            report(cmd, ["off"]);
             return;
         }
         // The spin turns about the region's vertical, which a tilted
         // sphere's poles no longer are.
-        if (gTilted) { tell(who, "Not while the globe is tilted: /" + (string)CHAN + " level first."); return; }
+        if (gTilted) { report(cmd, ["tilted"]); return; }
         gSpin = rate;
         gOwnerSpin = rate;
         llTargetOmega(<0.0, 0.0, 1.0>, gSpin * DEG_TO_RAD, 1.0);
-        tell(who, "Spinning at " + num(gSpin) + " degrees a second. Each viewer draws the spin for itself, so "
-            + "visitors don't all see the same side at once. Leave it off when someone will point at a place.");
+        report(cmd, ["ok", num(gSpin)]);
         return;
     }
     if (cmd == "debug")
     {
-        if (larg != "on" && larg != "off") { tell(who, "debug on, or debug off."); return; }
         gDebug = (larg == "on");
-        if (commit(saved)) tell(who, "Debug readout " + larg + ".");
+        if (commit(saved)) report(cmd, ["ok", larg]);
         return;
     }
     if (cmd == "sound")
     {
-        if (larg != "on" && larg != "off") { tell(who, "sound on, or sound off."); return; }
         gSound = (larg == "on");
-        if (commit(saved)) tell(who, "Sound " + larg + ".");
+        if (commit(saved)) report(cmd, ["ok", larg]);
         return;
     }
     if (cmd == "width")
     {
-        if (arg != "1024" && arg != "2048") { tell(who, "width 1024, or width 2048."); return; }
+        if (arg != "1024" && arg != "2048") return;
         gWidth = (integer)arg;
-        if (commit(saved)) tell(who, "Width " + arg + ". The picture changes size at once, and the "
-            + "video's resolution follows at the next dataset.");
+        if (commit(saved)) report(cmd, ["ok", arg]);
         return;
     }
     if (cmd == "telemetry")
     {
-        if (larg != "on" && larg != "off") { tell(who, "telemetry on, or telemetry off."); return; }
-        if (larg == "on" && !gHash)
-        {
-            tell(who, "Not while changes go before the #: each would reload every visitor's page, and each "
-                + "reload reports again as a new visit. Say /" + (string)CHAN + " steer hash first.");
-            return;
-        }
+        // Each reload reports again as a new visit, so a measured globe
+        // keeps its changes after the #.
+        if (larg == "on" && !gHash) { report(cmd, ["steer"]); return; }
         gTelemetry = (larg == "on");
-        if (!commit(saved)) return;
-        if (gTelemetry)
-            tell(who, "Telemetry on. In the first minute after each visitor's page loads, it reports "
-                + "anonymously which dataset it showed and anything that failed, then nothing more. A viewer "
-                + "that sends Global Privacy Control reports nothing. The floating text and the object's "
-                + "description now say so, as the policy asks: " + NODE + "/privacy. Every visitor's page "
-                + "reloaded to pick this up. Every change from here on goes after the #.");
-        else
-            tell(who, "Telemetry off. Every visitor's page reloaded to pick this up.");
+        if (commit(saved)) report(cmd, ["ok", larg, NODE]);
         return;
     }
     if (cmd == "steer")
     {
-        if (larg != "hash" && larg != "query") { tell(who, "steer hash, or steer query."); return; }
-        if (larg == "query" && gTelemetry)
-        {
-            tell(who, "Not while telemetry is on: each change would reload every visitor's page, and each "
-                + "reload reports again as a new visit. Say /" + (string)CHAN + " telemetry off first.");
-            return;
-        }
+        // Anything but the two words is refused before the telemetry
+        // check, or a third would turn the # off unchecked.
+        if (larg != "hash" && larg != "query") return;
+        if (larg == "query" && gTelemetry) { report(cmd, ["telemetry"]); return; }
         gHash = (larg == "hash");
-        if (!commit(saved)) return;
-        if (gHash) tell(who, "Changes now go after the #, which a browser applies without a reload.");
-        else tell(who, "Changes now go before the #, so each one reloads every visitor's page: the globe "
-            + "shows the plain live Earth for a few seconds, then the same moment. For viewers that "
-            + "reload on a # change anyway.");
+        if (commit(saved)) report(cmd, ["ok", larg]);
         return;
     }
     if (cmd == "status")
     {
-        string what = "the live Earth";
-        if (gDataset != "")
-        {
-            // The clip's length, once the info script has said it, which is
-            // also how the owner tells the clock is kept round the loop.
-            string of = "";
-            if (gLen > 0 && gLenFor == gDataset) of = " of " + num((float)gLen / 1000000.0);
-            what = gTitle + " at " + num(position(now())) + of + " s, " + llList2String(["playing", "paused"], gPaused)
-                + ", rate " + num(gRate);
-        }
-        tell(who, "Showing " + what + ". Spin " + num(gSpin) + " degrees a second. Address: " + address());
+        // The clip's length, once the info script has said it, which is
+        // also how the owner tells the clock is kept round the loop.
+        string len = "";
+        if (gLen > 0 && gLenFor == gDataset) len = num((float)gLen / 1000000.0);
+        report(cmd, ["ok", gDataset, gTitle, num(position(now())), len, gPaused, num(gRate), num(gSpin), address()]);
         return;
     }
     if (cmd == "home")
@@ -948,7 +876,7 @@ act(key who, integer owner, string msg)
         if (gSpin != 0.0) stopSpin();
         home();
         broadcast();
-        tell(who, "The globe's rotation now is its rest: the idle return, Upright again and a reset stand it like this.");
+        report(cmd, ["ok"]);
         return;
     }
     if (cmd == "upright")
@@ -957,26 +885,20 @@ act(key who, integer owner, string msg)
         home();
         gOwnerSpin = 0.0;
         broadcast();
-        tell(who, "Poles upright, texture turned 90 degrees, spin off.");
+        report(cmd, ["ok"]);
         return;
     }
     if (cmd == "memory")
     {
-        string peaked = "";
-        if (gPeak) peaked = ", and at most " + (string)(gPeak / 1024) + " KB while showing a dataset";
-        tell(who, "Globe script: " + (string)(llGetUsedMemory() / 1024) + " KB used of 64" + peaked + ".");
+        report(cmd, ["ok", llGetUsedMemory() / 1024, gPeak / 1024]);
         return;
     }
-    // The visitors script's commands, which it answers itself.
-    if (cmd == "talk" || cmd == "presenters") return;
-    help();
 }
 
 default
 {
     state_entry()
     {
-        llListen(CHAN, "", llGetOwner(), "");
         gSound = SOUND;
         while (llGetSubString(NODE, -1, -1) == "/") NODE = llDeleteSubString(NODE, -1, -1);
         if (llGetObjectName() == "Object") llSetObjectName("TerraViz globe");
@@ -1000,10 +922,12 @@ default
         if (setMedia())
         {
             describe();
-            llOwnerSay("[exhibit] Showing the live Earth from " + NODE + ". Address: " + address());
+            // Said here too, since without the owner script in the sphere
+            // nothing else would point to it.
+            llOwnerSay("[exhibit] Showing the live Earth from " + NODE + ". The owner script, "
+                + "terraviz-exhibit-owner, answers /9 help. Address: " + address());
         }
         broadcast();
-        help();
     }
 
     on_rez(integer p) { llResetScript(); }
@@ -1013,14 +937,11 @@ default
         if (c & CHANGED_OWNER) llResetScript();
     }
 
-    listen(integer ch, string name, key id, string msg)
-    {
-        act(id, TRUE, msg);
-    }
-
     link_message(integer sender, integer n, string str, key id)
     {
         if (n == MSG_HELLO) { broadcast(); return; }
+        // The owner's chat, which the owner script has checked.
+        if (n == MSG_OWNER) { act(llGetOwner(), TRUE, str); return; }
         if (n != MSG_CONTROL) return;
         // A visitor's own request, or one the scripts made (NULL_KEY). The
         // owner using the menu is still the owner.

@@ -10,7 +10,7 @@
 //   The source:  https://github.com/zyra-project/terraviz
 //
 // WHAT THIS SCRIPT DOES
-// It is one of the exhibit's four scripts: the dataset menu read from the
+// It is one of the exhibit's five scripts: the dataset menu read from the
 // node's catalog, which terraviz-exhibit-visitors.lsl opens for whoever
 // chooses Datasets when the globe has no "datasets" notecard. It is a
 // script of its own because the visitors script had no room left for it

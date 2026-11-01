@@ -76,6 +76,29 @@ describe('renderColorbar', () => {
     expect(label).toContain('kg m-2')
   })
 
+  it('keeps its ticks on the ramp\'s ends in a right-to-left page', () => {
+    // The ramp is drawn left to right in every language, so the axis
+    // under it must run the same way: placed from the inline start of a
+    // right-to-left axis, the high value sat over the low colour.
+    document.documentElement.dir = 'rtl'
+    try {
+      const el = renderColorbar({ scale: SCALE, display: DEFAULT_DISPLAY })
+      const axis = el.querySelector('.panel-colorbar-axis') as HTMLElement
+      expect(axis.dir).toBe('ltr')
+      expect(el.querySelector('.panel-colorbar-gradient')?.getAttribute('style')).toContain('linear-gradient(to right,')
+    } finally {
+      document.documentElement.dir = ''
+    }
+  })
+
+  it('names a bar that is only to be read as an image, and a control as a button', () => {
+    // An unnamed role, as a bare div's is, can't carry a label.
+    const shown = renderColorbar({ scale: SCALE, display: DEFAULT_DISPLAY, title: 'Smoke' })
+    expect(shown.getAttribute('role')).toBe('img')
+    const control = renderColorbar({ scale: SCALE, display: DEFAULT_DISPLAY, onOpen: () => {} })
+    expect(control.hasAttribute('role')).toBe(false)
+  })
+
   it('shows the units once, outside the ticks', () => {
     const el = renderColorbar({ scale: SCALE, display: DEFAULT_DISPLAY })
     expect(el.querySelector('.panel-colorbar-units')?.textContent).toBe('kg m-2')
