@@ -1101,11 +1101,13 @@ a large organisation's domain, that is every host the organisation
 runs. Each `pages.dev` project is a site of its own, but a branch
 preview such as `<branch>.<W10>.pages.dev` shares a site with
 `<W10>.pages.dev`. Lax closes the door to other websites, not to your
-own hosts. The publish routes don't yet check where a request came
-from. Until they do, a page on another host under your domain, or on
-a branch preview, can send POST requests as a publisher who is signed
-in. A publisher who signs in only at `<W2>` is not exposed to
-`pages.dev` previews, which are a different site.
+own hosts. So the publish routes also check where a request came
+from, using headers the browser sets and a page cannot. They refuse
+a change that a page on any other origin started, including one on
+another host under your domain or on a branch preview. They also
+refuse a read such a page starts, unless it is a visit to the page.
+If a legitimate client is refused, see
+[Publisher API returns 403 `cross_origin_request` or `origin_required`](#publisher-api-returns-403-cross_origin_request-or-origin_required).
 
 Verified on the project's own node (`terraviz.zyra-project.org`) on
 2026-10-30. Before the change, its cookie went out with SameSite None

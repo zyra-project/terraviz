@@ -90,8 +90,8 @@ function quoted(value: string): string {
  *
  * **Why check.** The browser's Access cookie (`CF_Authorization`) is
  * what authenticates the portal, and a browser attaches it to requests
- * other pages start. `SameSite=Lax` (which zyra-project/terraviz#510
- * sets) keeps it off cross-site writes but not off **same-site**
+ * other pages start. `SameSite=Lax` (`docs/SELF_HOSTING.md` §6.2) keeps
+ * it off cross-site writes but not off **same-site**
  * requests: sibling hosts under the node's registrable domain, and the
  * project's own `pages.dev` branch previews. A node whose cookie is
  * still Cloudflare's default (`SameSite=None`) sends it cross-site too,
