@@ -220,6 +220,9 @@ describe('authenticateFeedbackAdmin', () => {
       [{ ...env(), CATALOG_KV: makeKV() }, (async () => Response.json({ keys: 'nope' })) as unknown as typeof fetch],
       [{ ...env(), CATALOG_KV: throwingKv }, (async () => { throw new TypeError('offline') }) as unknown as typeof fetch],
     ]
+    // A cache that can't be read is a miss, not an outage.
+    const certs = (async () => Response.json({ keys: [publicJwk] })) as unknown as typeof fetch
+    expect(await feedbackAccessVerdict(req(access(await token())), { ...env({ ACCESS_FEEDBACK_AUD: FEEDBACK_AUD }), CATALOG_KV: throwingKv }, { fetchImpl: certs })).toBe('verified')
     for (const [e, fetchImpl] of cases) {
       const request = req({ ...access(await token()), Authorization: 'Bearer s' })
       await expect(authenticateFeedbackAdmin(request, { ...e, FEEDBACK_ADMIN_TOKEN: 's' }, { fetchImpl, warn: vi.fn() })).resolves.toBe(true)

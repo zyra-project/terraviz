@@ -30,7 +30,7 @@ referenced in [`README.md`](README.md).
 - **Operators:** with `ACCESS_TEAM_DOMAIN` set, set the new plaintext variable
   `ACCESS_FEEDBACK_AUD` in both Production and Preview, then redeploy
   (`docs/SELF_HOSTING.md` §6.4). `npm run setup` writes it only if you export
-  it first.
+  it, then keeps that value on later runs.
   - If an Access application covers `/api/feedback-admin`, use its AUD.
   - If your publisher application covers that path, use `ACCESS_AUD`'s value.
   - If no application does, use `none`. Every Access token is then refused,

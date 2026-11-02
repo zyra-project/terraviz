@@ -126,12 +126,16 @@ async function fetchJwks(
   // A cache or network failure is no key set, not an exception: the
   // feedback admin routes fall through to their bearer on null, and a
   // throw here would answer 500 during a certs outage instead.
-  let jwks: Jwks
-  try {
-    if (env.CATALOG_KV) {
+  if (env.CATALOG_KV) {
+    try {
       const cached = (await env.CATALOG_KV.get(cacheKey, 'json')) as Jwks | null
       if (cached && Array.isArray(cached.keys)) return cached
+    } catch {
+      // A cache that can't be read is a cache miss: ask the network.
     }
+  }
+  let jwks: Jwks
+  try {
     const res = await fetchImpl(`https://${teamDomain}/cdn-cgi/access/certs`)
     if (!res.ok) return null
     jwks = (await res.json()) as Jwks

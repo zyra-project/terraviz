@@ -1259,7 +1259,8 @@ go through a script that sends the `FEEDBACK_ADMIN_TOKEN` bearer.
 
 Then set the plaintext variable `ACCESS_FEEDBACK_AUD` in both
 Production and Preview, and redeploy. `npm run setup` writes it only
-if you export it first.
+if you export it, and then rewrites that value on every later run. To
+change it, export the new value rather than editing the dashboard.
 - **With this app:** its AUD, from the same place as `W13` (6.2).
 - **If your publisher app covers this path instead:** `W13`.
 - **With no app on this path:** `none`. The routes then refuse every
