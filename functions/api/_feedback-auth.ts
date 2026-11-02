@@ -23,22 +23,28 @@
  * routes outside Access unless its operator added the optional
  * application in `docs/SELF_HOSTING.md` §6.4.
  *
- * **Transitional.** Verifying the token closes that hole on any node
- * with `ACCESS_TEAM_DOMAIN`. Checking its audience as well would
- * break nodes that run §6.4's application, whose tokens carry that
- * application's AUD, and have no variable naming it. So:
+ * **Transitional.** Verifying the token closes that hole on every
+ * node. Checking its audience as well would break nodes that run
+ * §6.4's application, whose tokens carry that application's AUD, and
+ * have no variable naming it. So:
  *
  *   | Node has | Access token accepted when |
  *   |---|---|
+ *   | `ACCESS_FEEDBACK_AUD` is `none` | never: the bearer only |
  *   | `ACCESS_TEAM_DOMAIN` and `ACCESS_FEEDBACK_AUD` | signed by the team, for `ACCESS_FEEDBACK_AUD`'s application |
  *   | `ACCESS_TEAM_DOMAIN` only | signed by the team, for any of its applications; one other than `ACCESS_AUD`'s is logged with its AUD |
  *   | no `ACCESS_TEAM_DOMAIN` | never: nothing to check a token against |
  *
- * The second row takes application tokens only (`type: 'app'`), not
- * the team-wide session token, which no application's policy gates.
- * A later release drops it.
+ * In the third row, a token for an application other than the
+ * publisher's must be an application token (`type: 'app'`), not the
+ * team-wide session token, which no application's policy gates.
+ * A later release drops that row.
  *
- * The third row refuses the header's mere presence, which the routes
+ * `none` is for a node with no Access application on these paths,
+ * where no browser ever sends a token: there, any token is one a
+ * caller copied in by hand.
+ *
+ * The last row refuses the header's mere presence, which the routes
  * used to accept. A node built by the guide without Access has no
  * Access application in front of these paths, so on it every such
  * header is forged. The `FEEDBACK_ADMIN_TOKEN` bearer is its way in.
@@ -50,7 +56,11 @@
  * says so by setting `ACCESS_FEEDBACK_AUD` to the same value.
  */
 
+import { CF_ACCESS_HEADERS } from './ingest'
 import { accessConfig, verifyAccessJwtAnyAudience } from './v1/_lib/access-auth'
+
+/** `ACCESS_FEEDBACK_AUD` value that accepts no Access token at all. */
+export const BEARER_ONLY = 'none'
 
 export interface FeedbackAdminEnv {
   FEEDBACK_DB?: D1Database
@@ -60,7 +70,8 @@ export interface FeedbackAdminEnv {
   /**
    * AUD of the Access application covering the feedback admin paths
    * (`docs/SELF_HOSTING.md` §6.4). Set it to `ACCESS_AUD`'s value if
-   * the publisher application covers them.
+   * the publisher application covers them, or to `none` if no
+   * application does.
    */
   ACCESS_FEEDBACK_AUD?: string
   /** JWKS cache, shared with the publisher API. */
@@ -88,8 +99,6 @@ const ADMITS = {
   absent: false,
 } satisfies Record<FeedbackAccessVerdict, boolean>
 
-const ACCESS_HEADERS = ['cf-access-jwt-assertion', 'cf-access-authenticated-user-email'] as const
-
 interface Options {
   fetchImpl?: typeof fetch
   now?: number
@@ -106,9 +115,11 @@ async function judge(request: Request, env: FeedbackAdminEnv, options: Options):
   const { teamDomain, aud } = accessConfig(env)
   const feedbackAud = env.ACCESS_FEEDBACK_AUD?.trim() || undefined
   const token = request.headers.get('cf-access-jwt-assertion')?.trim()
+  const hasHeader = CF_ACCESS_HEADERS.some(h => request.headers.get(h)?.trim())
 
+  if (feedbackAud?.toLowerCase() === BEARER_ONLY) return { verdict: hasHeader ? 'refused' : 'absent' }
   if (!teamDomain) {
-    if (!ACCESS_HEADERS.some(h => request.headers.get(h)?.trim())) return { verdict: 'absent' }
+    if (!hasHeader) return { verdict: 'absent' }
     return {
       verdict: 'unverifiable',
       warning:

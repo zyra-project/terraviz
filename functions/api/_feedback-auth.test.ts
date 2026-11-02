@@ -174,8 +174,9 @@ describe('authenticateFeedbackAdmin', () => {
     expect(warn).toHaveBeenCalledWith(expect.not.stringContaining('staff@example.org'))
   })
 
-  // A forged header must not be a way to fill the logs.
-  it('refuses a forged header silently', async () => {
+  // On a node with a team domain, a forged header logs nothing. (A
+  // node without one logs each, which is one line per request made.)
+  it('refuses a forged header silently on a node with a team domain', async () => {
     for (const headers of [access('x'), access(await token({}, otherKey)), {}]) {
       const { ok, warn } = await auth(headers, env())
       expect(ok).toBe(false)
@@ -193,6 +194,37 @@ describe('authenticateFeedbackAdmin', () => {
     expect((await auth({ Authorization: 'Bearer ' }, env({ FEEDBACK_ADMIN_TOKEN: '  ' }))).ok).toBe(false)
     const bare = { FEEDBACK_ADMIN_TOKEN: 'secret' }
     expect((await auth({ ...access('x'), Authorization: 'Bearer secret' }, bare)).ok).toBe(true)
+  })
+
+  // For a node with no Access app on these paths: no browser sends a
+  // token there, so any token is one a caller copied in by hand.
+  it('accepts no Access token at all, silently, when ACCESS_FEEDBACK_AUD is none', async () => {
+    for (const e of [env({ ACCESS_FEEDBACK_AUD: ' None ', FEEDBACK_ADMIN_TOKEN: 's' }), { ACCESS_FEEDBACK_AUD: 'NONE', FEEDBACK_ADMIN_TOKEN: 's' }]) {
+      for (const jwt of [await token({ aud: PUBLISHER_AUD }), await token(), 'x']) {
+        const { ok, warn } = await auth(access(jwt), e)
+        expect(ok).toBe(false)
+        expect(warn).not.toHaveBeenCalled()
+      }
+      expect((await auth({ ...access('x'), Authorization: 'Bearer s' }, e)).ok).toBe(true)
+      expect(await feedbackAccessVerdict(req({}), e)).toBe('absent')
+    }
+  })
+
+  // The key fetch is no attacker's to break, but a certs outage with a
+  // cold cache used to answer 500 and skip the bearer.
+  it('falls through to the bearer when the team keys cannot be read', async () => {
+    const throwingKv = { get: vi.fn(async () => { throw new SyntaxError('bad json') }), put: vi.fn() } as unknown as KVNamespace
+    const cases: Array<[FeedbackAdminEnv, typeof fetch]> = [
+      [{ ...env(), CATALOG_KV: makeKV() }, (async () => { throw new TypeError('offline') }) as unknown as typeof fetch],
+      [{ ...env(), CATALOG_KV: makeKV() }, (async () => new Response('<html>', { status: 200 })) as unknown as typeof fetch],
+      [{ ...env(), CATALOG_KV: makeKV() }, (async () => Response.json({ keys: 'nope' })) as unknown as typeof fetch],
+      [{ ...env(), CATALOG_KV: throwingKv }, (async () => { throw new TypeError('offline') }) as unknown as typeof fetch],
+    ]
+    for (const [e, fetchImpl] of cases) {
+      const request = req({ ...access(await token()), Authorization: 'Bearer s' })
+      await expect(authenticateFeedbackAdmin(request, { ...e, FEEDBACK_ADMIN_TOKEN: 's' }, { fetchImpl, warn: vi.fn() })).resolves.toBe(true)
+      await expect(feedbackAccessVerdict(req(access(await token())), e, { fetchImpl })).resolves.toBe('refused')
+    }
   })
 
   it('refuses, with a warning, an Access header on a node with no team domain', async () => {

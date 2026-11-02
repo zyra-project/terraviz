@@ -31,10 +31,12 @@
  * outside Access (the feedback admin routes) pass attacker-chosen
  * strings here, and a throw would skip their bearer fall-through.
  *
- * Service tokens are distinguished from user logins by the `type`
- * claim Cloudflare emits — `"app"` for service tokens. Users always
- * carry an `email` claim; service tokens may not, so the verifier
- * synthesises `<sub>@service.local` for the publisher-store JIT row.
+ * Service tokens are told from user logins by their claims (an empty
+ * `sub` with a `common_name`), not by `type`: that marks an application
+ * token (`"app"`) or the team-wide session token (`"org"`), and both
+ * kinds of login carry it. Users always carry an `email` claim;
+ * service tokens may not, so the verifier synthesises
+ * `<sub>@service.local` for the publisher-store JIT row.
  *
  * The verifier returns a small `AccessIdentity` rather than raw
  * claims so callers don't have to re-validate the JWT shape; if it
@@ -121,13 +123,22 @@ async function fetchJwks(
   const { teamDomain } = accessConfig(env)
   if (!teamDomain) return null
   const cacheKey = jwksKey(teamDomain)
-  if (env.CATALOG_KV) {
-    const cached = (await env.CATALOG_KV.get(cacheKey, 'json')) as Jwks | null
-    if (cached) return cached
+  // A cache or network failure is no key set, not an exception: the
+  // feedback admin routes fall through to their bearer on null, and a
+  // throw here would answer 500 during a certs outage instead.
+  let jwks: Jwks
+  try {
+    if (env.CATALOG_KV) {
+      const cached = (await env.CATALOG_KV.get(cacheKey, 'json')) as Jwks | null
+      if (cached && Array.isArray(cached.keys)) return cached
+    }
+    const res = await fetchImpl(`https://${teamDomain}/cdn-cgi/access/certs`)
+    if (!res.ok) return null
+    jwks = (await res.json()) as Jwks
+  } catch {
+    return null
   }
-  const res = await fetchImpl(`https://${teamDomain}/cdn-cgi/access/certs`)
-  if (!res.ok) return null
-  const jwks = (await res.json()) as Jwks
+  if (!jwks || !Array.isArray(jwks.keys)) return null
   if (env.CATALOG_KV) {
     // Best-effort: a KV write failure shouldn't fail the request.
     try {
@@ -207,8 +218,9 @@ export async function verifyAccessJwt(
  * signature against the team's keys, the issuer, the expiry and the
  * identity claims. Returns the token's audiences beside the
  * identity, and **the caller must check them**. A token that passes
- * here was minted by this node's Access team for *some* application,
- * not necessarily one that covers the route reading it.
+ * here was minted by this node's Access team, for *some* application
+ * or, with `tokenType` `org`, for the team as a whole. It is not
+ * necessarily for one that covers the route reading it.
  *
  * It exists for the feedback admin routes (`functions/api/_feedback-auth.ts`),
  * which may sit behind an Access application of their own, so a token
