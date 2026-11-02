@@ -79,7 +79,7 @@ const JWKS_KV_PREFIX = 'access:jwks:'
  * one turns the whole publisher API into a blanket 401 that looks
  * like an expired login rather than a stray byte in a config value.
  */
-export function accessConfig(env: CatalogEnv): {
+export function accessConfig(env: Pick<CatalogEnv, 'ACCESS_TEAM_DOMAIN' | 'ACCESS_AUD'>): {
   teamDomain?: string
   aud?: string
 } {
@@ -106,8 +106,11 @@ function decodeUtf8(bytes: Uint8Array): string {
   return new TextDecoder().decode(bytes)
 }
 
+/** What verifying a token reads from the environment. */
+type VerifyEnv = Pick<CatalogEnv, 'ACCESS_TEAM_DOMAIN' | 'ACCESS_AUD' | 'CATALOG_KV'>
+
 async function fetchJwks(
-  env: CatalogEnv,
+  env: VerifyEnv,
   fetchImpl: typeof fetch,
 ): Promise<Jwks | null> {
   const { teamDomain } = accessConfig(env)
@@ -178,11 +181,35 @@ interface JwtClaims {
  */
 export async function verifyAccessJwt(
   token: string,
-  env: CatalogEnv,
+  env: VerifyEnv,
   options: VerifyOptions = {},
 ): Promise<AccessIdentity | null> {
   const { teamDomain, aud: expectedAud } = accessConfig(env)
   if (!teamDomain || !expectedAud) return null
+  const verified = await verifyAccessJwtAnyAudience(token, env, options)
+  if (!verified || !verified.audiences.includes(expectedAud)) return null
+  return verified.identity
+}
+
+/**
+ * Everything `verifyAccessJwt` checks except the audience: the
+ * signature against the team's keys, the issuer, the expiry and the
+ * identity claims. Returns the token's audiences beside the
+ * identity, and **the caller must check them**. A token that passes
+ * here was minted by this node's Access team for *some* application,
+ * not necessarily one that covers the route reading it.
+ *
+ * It exists for the feedback admin routes (`functions/api/_feedback-auth.ts`),
+ * which may sit behind an Access application of their own, so a token
+ * there carries that application's AUD rather than `ACCESS_AUD`.
+ */
+export async function verifyAccessJwtAnyAudience(
+  token: string,
+  env: VerifyEnv,
+  options: VerifyOptions = {},
+): Promise<{ identity: AccessIdentity; audiences: string[] } | null> {
+  const { teamDomain } = accessConfig(env)
+  if (!teamDomain) return null
   const fetchImpl = options.fetchImpl ?? fetch
   const now = options.now ?? Math.floor(Date.now() / 1000)
 
@@ -215,8 +242,8 @@ export async function verifyAccessJwt(
   if (typeof claims.exp !== 'number' || claims.exp <= now) return null
   const expectedIss = `https://${teamDomain}`
   if (claims.iss !== expectedIss) return null
-  const aud = Array.isArray(claims.aud) ? claims.aud : claims.aud ? [claims.aud] : []
-  if (!aud.includes(expectedAud)) return null
+  const audiences = (Array.isArray(claims.aud) ? claims.aud : claims.aud ? [claims.aud] : [])
+    .filter((a): a is string => typeof a === 'string')
 
   // Distinguish service tokens from user logins.
   //
@@ -264,5 +291,5 @@ export async function verifyAccessJwt(
     : (claims.email ?? null)
   if (!email) return null
 
-  return { email, sub: subject, type: isService ? 'service' : 'user' }
+  return { identity: { email, sub: subject, type: isService ? 'service' : 'user' }, audiences }
 }
