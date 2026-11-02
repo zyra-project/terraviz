@@ -177,7 +177,7 @@ describe('public/_routes.json: the static output stays out', () => {
 })
 
 describe('public/_routes.json: the app is routed, the portal is not', () => {
-  it.each(['/', '/dataset/sea-surface-temperature', '/blog', '/blog/a-post', '/orbit', '/output/output', '/publisher'])(
+  it.each(['/', '/dataset/sea-surface-temperature', '/blog', '/blog/a-post', '/orbit', '/output/output', '/output/kiosk', '/publisher'])(
     '%s invokes the middleware, which treats it as the public app',
     path => {
       expect(invokesFunctions(routes, path)).toBe(true)

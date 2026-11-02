@@ -33,12 +33,7 @@ const numberFormatters = new Map<string, Intl.NumberFormat>()
 const relativeFormatters = new Map<string, Intl.RelativeTimeFormat>()
 const regionFormatters = new Map<string, Intl.DisplayNames>()
 
-/** Format a `Date` (or ISO string) with the active locale. */
-export function formatDate(
-  value: Date | string | number,
-  opts?: Intl.DateTimeFormatOptions,
-): string {
-  const date = value instanceof Date ? value : new Date(value)
+function dateFormatter(opts: Intl.DateTimeFormatOptions | undefined): Intl.DateTimeFormat {
   const locale = getLocale()
   const key = cacheKey(locale, opts)
   let fmt = dateFormatters.get(key)
@@ -46,7 +41,32 @@ export function formatDate(
     fmt = new Intl.DateTimeFormat(locale, opts)
     dateFormatters.set(key, fmt)
   }
-  return fmt.format(date)
+  return fmt
+}
+
+/** Format a `Date` (or ISO string) with the active locale. */
+export function formatDate(
+  value: Date | string | number,
+  opts?: Intl.DateTimeFormatOptions,
+): string {
+  const date = value instanceof Date ? value : new Date(value)
+  return dateFormatter(opts).format(date)
+}
+
+/**
+ * Format the span from `start` to `end` with the active locale, as the
+ * language writes one: its own joining mark, and the parts both ends
+ * share written once ("Jan 1 – 11, 2024"), or a single date where they
+ * are the same. `formatRange` is in every engine this app supports, but
+ * not in the ES2020 types; an engine without it gets the two ends joined
+ * by an en dash.
+ */
+export function formatDateRange(start: Date, end: Date, opts?: Intl.DateTimeFormatOptions): string {
+  const fmt = dateFormatter(opts) as Intl.DateTimeFormat & { formatRange?: (a: Date, b: Date) => string }
+  if (typeof fmt.formatRange === 'function') return fmt.formatRange(start, end)
+  const a = fmt.format(start)
+  const b = fmt.format(end)
+  return a === b ? a : `${a} – ${b}` // i18n-exempt: punctuation, for an engine without formatRange
 }
 
 /** Format a number with the active locale (default: locale-default). */

@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { serializeDataset } from '../../functions/api/v1/_lib/dataset-serializer'
 import {
+  buildCard,
   CARD_ABSTRACT_CHARS,
   CARD_BUDGET,
   CARD_SKELETON,
@@ -24,11 +25,14 @@ import { asD1, makeCtx } from '../../functions/api/v1/_lib/test-helpers'
 import { onRequestGet as getPage } from '../../functions/api/exhibit/v1/datasets'
 import { onRequestGet as getTags } from '../../functions/api/exhibit/v1/tags'
 import { freshMigratedDb } from '../lib/catalog-migrations'
+import { readWebSettings } from '../../src/output/webMode'
+import { KIOSK_STAGE } from '../../src/ui/kioskUI'
+import { kioskDatasetFrom } from '../../src/output/kioskModel'
 
 // LSL compiles only in-world, so nothing here runs the scripts. What the
 // globe script writes into the page's address is held to the page by
 // ../second-life-probe/globe.test.ts, which checks both globe scripts.
-// These tests hold the exhibit's four scripts to each other and to the
+// These tests hold the exhibit's six scripts to each other and to the
 // node: a link message, a state key or a command one script renamed would
 // leave the others quietly doing nothing, with no error anywhere.
 
@@ -39,7 +43,9 @@ const globe = read('./terraviz-exhibit.lsl')
 const visitors = read('./terraviz-exhibit-visitors.lsl')
 const info = read('./terraviz-exhibit-info.lsl')
 const menu = read('./terraviz-exhibit-menu.lsl')
-const SCRIPTS = { globe, visitors, info, menu }
+const owner = read('./terraviz-exhibit-owner.lsl')
+const kiosk = read('./terraviz-exhibit-kiosk.lsl')
+const SCRIPTS = { globe, visitors, info, menu, owner, kiosk }
 const readme = read('./README.md')
 const plan = read('../../docs/SECOND_LIFE_COMPAT.md')
 
@@ -97,10 +103,11 @@ describe('second-life exhibit scripts', () => {
           ([other, s]) => other !== name && new RegExp(`\\bn [!=]= ${sent}\\b`).test(s),
         )
         expect(handlers.length, `${name} sends ${sent}`).toBeGreaterThan(0)
-        // The menu script is in a prim of its own, so what passes between
-        // it and the visitors script goes to the whole object; everything
-        // else stays in the globe's prim.
-        const across = handlers.some(([other]) => other === 'menu') || name === 'menu'
+        // The menu and kiosk scripts are each in a prim of their own, so
+        // what passes between them and the sphere's scripts goes to the
+        // whole object; everything else stays in the globe's prim.
+        const apart = (script: string) => script === 'menu' || script === 'kiosk'
+        const across = handlers.some(([other]) => apart(other)) || apart(name)
         expect(target, `${name} sends ${sent}`).toBe(across ? 'LINK_SET' : 'LINK_THIS')
       }
     }
@@ -111,7 +118,7 @@ describe('second-life exhibit scripts', () => {
     // The keys are the literals; their values are the globe's variables.
     const broadcast = new Set(literals(list))
     expect(broadcast.size).toBeGreaterThan(0)
-    for (const [name, script] of Object.entries({ visitors, info })) {
+    for (const [name, script] of Object.entries({ visitors, info, kiosk })) {
       const read = all(script, /llJsonGetValue\(str, \["(\w+)"\]\)/g)
       expect(read.length, name).toBeGreaterThan(0)
       for (const key of read) expect(broadcast, `${name} reads ${key}`).toContain(key)
@@ -192,7 +199,8 @@ describe('second-life exhibit scripts', () => {
     // restart (found in review); a spin, about the region's vertical, waits
     // until it is level.
     expect(body(globe, 'broadcast()')).toContain('"turned", gRotation != gHome || gTilted || gSpin != gOwnerSpin,')
-    expect(body(globe, 'act(key who, integer owner, string msg)')).toContain('if (gTilted) { tell(who, "Not while the globe is tilted')
+    expect(body(globe, 'act(key who, integer owner, string msg)')).toContain('if (gTilted) { report(cmd, ["tilted"]); return; }')
+    expect(body(owner, 'result(string r)')).toContain('if (done == "tilted") say("Not while the globe is tilted')
     const turn = body(visitors, 'turnMenu(key who)')
     expect(turn).toContain('[BTN_NORTH, BTN_SOUTH, BTN_LEVEL, BTN_WEST, BTN_EAST, BTN_MENU], gDlgTurn);')
     expect(visitors).toContain('else if (msg == BTN_SOUTH) ask(who, "tilt south");')
@@ -212,7 +220,7 @@ describe('second-life exhibit scripts', () => {
     expect(globe).not.toContain('llHTTPRequest')
     const act = body(globe, 'act(key who, integer owner, string msg)')
     const show = act.slice(act.indexOf('if (cmd == "show")'), act.indexOf('if (cmd == "earth"'))
-    expect(show).toMatch(/\n\s+show\(who, dataset, described\);/)
+    expect(show).toMatch(/\n\s+show\(who, arg, described\);/)
     // The info script, which reads the card anyway, puts the globe back
     // on the live Earth when the node has no such dataset or it is a tour,
     // as a script's own request, and tells the owner and whoever chose it.
@@ -264,7 +272,8 @@ describe('second-life exhibit scripts', () => {
     expect(statements[0].trim()).toBe('llScriptProfiler(PROFILE_SCRIPT_MEMORY);')
     expect(shown).toMatch(/llScriptProfiler\(PROFILE_NONE\);\n\s+if \(llGetSPMaxMemory\(\) > gPeak\) gPeak = llGetSPMaxMemory\(\);$/)
     expect(shown).not.toContain('return;')
-    expect(act).toContain('KB while showing a dataset')
+    expect(act).toContain('report(cmd, ["ok", llGetUsedMemory() / 1024, gPeak / 1024]);')
+    expect(body(owner, 'result(string r)')).toContain('KB while showing a dataset')
   })
 
   it('read a card once, and copy what it tells a visitor as few times as it can be', () => {
@@ -346,7 +355,7 @@ describe('second-life exhibit scripts', () => {
     expect(timer).toMatch(/if \(gRetryAt && llGetUnixTime\(\) >= gRetryAt\)\n\s+\{\n\s+gRetryAt = 0;\n\s+fetch\(\);/)
     // The timer runs while a retry waits, a retry is the earliest asked
     // for, and every dataset starts with its tries unspent.
-    expect(body(info, 'pace()')).toContain('if (moving || gRetryAt) llSetTimerEvent(TICK);')
+    expect(body(info, 'pace()')).toContain('if (moving || gRetryAt || gKioskBy) llSetTimerEvent(TICK);')
     expect(body(info, 'later(integer s)')).toMatch(/integer at = llGetUnixTime\(\) \+ s;\n\s+if \(gRetryAt == 0 \|\| at < gRetryAt\) gRetryAt = at;/)
     expect(body(info, 'forget()')).toMatch(/gTries = 0;\n\s+gRetryAt = 0;\n\s+gReq = NULL_KEY;/)
     // A region restart drops a request in flight, which is asked again,
@@ -456,8 +465,8 @@ describe('second-life exhibit scripts', () => {
     expect(count).toBeLessThanOrEqual(12)
   })
 
-  it("offer the globe's own presets when there is no datasets notecard", () => {
-    const presets = literals(globe.match(/^list PRESETS = \[([\s\S]*?)\];/m)?.[1] ?? '')
+  it("offer the owner's presets when there is no datasets notecard", () => {
+    const presets = literals(owner.match(/^list PRESETS = \[([\s\S]*?)\];/m)?.[1] ?? '')
     const menu = literals(visitors.match(/^list\s+DEFAULT_MENU = \[([\s\S]*?)\];/m)?.[1] ?? '')
     const presetIds = presets.filter((_, i) => i % 3 === 1)
     const menuIds = menu.filter((_, i) => i % 2 === 1)
@@ -470,20 +479,35 @@ describe('second-life exhibit scripts', () => {
   })
 
   it('share a channel, and leave each command to the script that answers it', () => {
-    const chan = constant(globe, 'integer', 'CHAN')
+    const chan = constant(owner, 'integer', 'CHAN')
     expect(constant(visitors, 'integer', 'CHAN')).toBe(chan)
     expect(constant(info, 'integer', 'CHAN')).toBe(chan)
     expect(constant(menu, 'integer', 'CHAN')).toBe(chan)
-    // The globe answers anything it doesn't know with its help text, so
-    // it has to stay quiet on the visitors script's commands.
-    expect(body(globe, 'act(key who, integer owner, string msg)')).toMatch(
+    // The globe script hears no chat at all: the owner script hears the
+    // owner and hands it over. Nor does the kiosk script, which has
+    // nothing to say to it.
+    expect(globe).not.toMatch(/\bCHAN\b|llListen|\n    listen\(/)
+    expect(kiosk).not.toMatch(/\bCHAN\b|llListen|\n    listen\(/)
+    // Every script that hears the channel hears only the owner: anyone
+    // else on it could otherwise turn telemetry on or steer the address.
+    // The owner script, which acts on all of it, checks the key again.
+    for (const [name, script] of Object.entries({ owner, visitors, info, menu })) {
+      expect(script, name).toContain('llListen(CHAN, "", llGetOwner(), "");')
+      expect(script.match(/llListen\(CHAN,/g), name).toHaveLength(1)
+    }
+    expect(owner).toMatch(/listen\(integer ch, string name, key id, string msg\)\n\s+\{\n(\s+\/\/[^\n]*\n)*\s+if \(id != llGetOwner\(\)\) return;/)
+    // The owner script answers anything it doesn't know with its help
+    // text, so it has to stay quiet on the visitors script's commands.
+    expect(body(owner, 'command(string msg)')).toMatch(
       /if \(cmd == "talk" \|\| cmd == "presenters"\) return;\n {4}help\(\);/,
     )
     expect(visitors).toMatch(/cmd == "talk"/)
     expect(visitors).toMatch(/cmd == "presenters"/)
-    // All four say how much memory they use, and the menu script nothing
-    // else: it answers no command, so it never asks the globe for one.
+    // All but the kiosk say how much memory they use, the globe through
+    // the owner script, and the menu script nothing else: it answers no
+    // command, so it never asks the globe for one.
     expect(globe).toMatch(/cmd == "memory"/)
+    expect(owner).toMatch(/cmd == "memory"/)
     expect(visitors).toMatch(/cmd == "memory"/)
     expect(info).toMatch(/!= "memory"/)
     expect(menu).toMatch(/!= "memory"\) return;/)
@@ -605,9 +629,13 @@ describe('second-life exhibit scripts', () => {
     // 2026); the page stays silent unless its address asks.
     expect(constant(globe, 'integer', 'SOUND')).toBe('TRUE')
     expect(body(globe, 'act(key who, integer owner, string msg)')).toMatch(
-      /if \(cmd == "sound"\)\n\s+\{\n\s+if \(larg != "on" && larg != "off"\)[^\n]+\n\s+gSound = \(larg == "on"\);\n\s+if \(commit\(saved\)\)/,
+      /if \(cmd == "sound"\)\n\s+\{\n\s+gSound = \(larg == "on"\);\n\s+if \(commit\(saved\)\) report\(cmd, \["ok", larg\]\);/,
     )
-    expect(globe).toMatch(/llListen\(CHAN, "", llGetOwner\(\), ""\);\n\s+gSound = SOUND;/)
+    // The owner script lets only on and off through.
+    expect(body(owner, 'command(string msg)')).toMatch(
+      /if \(cmd == "debug" \|\| cmd == "sound" \|\| cmd == "telemetry"\)\n\s+\{\n\s+if \(larg != "on" && larg != "off"\)/,
+    )
+    expect(globe).toMatch(/state_entry\(\)\n\s+\{\n\s+gSound = SOUND;/)
     // After the #, so it reloads nobody's page.
     expect(body(globe, 'string address()')).toContain('if (gSound) live += ["sound=1"];')
     // A face that refuses the new address puts the old sound back with
@@ -617,9 +645,113 @@ describe('second-life exhibit scripts', () => {
     const restore = body(globe, 'restore(list s)')
     fields.forEach((field, i) => expect(restore, field).toMatch(new RegExp(`${field} = llList2\\w+\\(s, ${i}\\);`)))
     // And the docs name the command.
-    expect(globe).toMatch(/sound on\|off, telemetry on\|off/)
+    expect(owner).toMatch(/sound on\|off, telemetry on\|off/)
     // In a table, where the README escapes the bar.
     expect(readme).toMatch(/\/9 sound on\\?\|off/)
+  })
+
+  it('hear the owner in the owner script, which has the globe make each change and says how it went', () => {
+    // The owner's commands moved out of the globe script to give it room
+    // (docs/SECOND_LIFE_COMPAT.md §9 Phase 5, step 1). They travel on
+    // numbers of their own, never the visitors' control: a globe script
+    // from before the split answers the owner's chat itself and ignores
+    // them, so a sphere holding both does each command once, not twice.
+    expect(owner).not.toContain('MSG_CONTROL')
+    expect(body(owner, 'ask(string cmd)')).toContain('llMessageLinked(LINK_THIS, MSG_OWNER, cmd, llGetOwner());')
+    for (const name of ['MSG_OWNER', 'MSG_RESULT']) {
+      expect(messages(owner)[name], name).toBeDefined()
+      // Nor the retired relay's, for the same reason.
+      expect(['271006', '271007'], name).not.toContain(messages(owner)[name])
+    }
+    expect(globe).toContain('if (n == MSG_OWNER) { act(llGetOwner(), TRUE, str); return; }')
+    // The two agree on every command, both ways. What a visitor may ask
+    // for too, the owner script hands over as said and the globe words
+    // for whoever asked: those sit before the globe's gate, beside `show`,
+    // the scripts' own `rest` and `length`, and `rate`, which is the
+    // owner's but is turned away there on the live Earth. Everything only
+    // the owner may ask for comes after the gate, and the owner script
+    // takes exactly those.
+    const command = body(owner, 'command(string msg)')
+    const shared = literals(command.match(/llListFindList\(\[([^\]]*)\], \[cmd\]\)/)?.[1] ?? '')
+    const act = body(globe, 'act(key who, integer owner, string msg)')
+    const gate = act.indexOf("// Everything below is the owner's.")
+    expect(gate).toBeGreaterThan(-1)
+    expect(new Set(all(act.slice(0, gate), /cmd == "(\w+)"/g))).toEqual(new Set([...shared, 'show', 'rest', 'length', 'rate']))
+    const ownerOnly = new Set(all(act.slice(gate), /cmd == "(\w+)"/g))
+    const answered = ['show', 'list', 'talk', 'presenters']
+    expect(new Set(all(command, /cmd == "(\w+)"/g).filter((cmd) => !answered.includes(cmd)))).toEqual(ownerOnly)
+    expect(command).toContain('ask("spin 0");')
+    // A name from /9 list goes over as its id and its description, which
+    // the globe titles the dataset with until the node's card says.
+    expect(command).toContain('ask("show " + llList2String(PRESETS, at + 1) + " " + llList2String(PRESETS, at + 2));')
+    // The globe reports each owner-only command, never wording it, and the
+    // owner script words each report, refusal and stopped spin.
+    const result = body(owner, 'result(string r)')
+    for (const cmd of ownerOnly) expect(result, cmd).toContain(`cmd == "${cmd}"`)
+    // The globe's peak is said only once it has shown a dataset.
+    expect(result).toContain('if ((integer)llJsonGetValue(r, [3])) peaked = ')
+    expect(act.slice(gate)).not.toContain('tell(')
+    const outcomes = all(act, /report\(cmd, \["(\w+)"\]\)/g).filter((how) => how !== 'ok')
+    expect(outcomes.sort()).toEqual(['off', 'steer', 'telemetry', 'tilted'])
+    for (const how of outcomes) expect(result, how).toContain(`done == "${how}"`)
+    // Its own checks keep a measured globe's changes after the # whatever
+    // an owner script of another version sends, and round a rate as the
+    // address carries it.
+    expect(act).toMatch(/if \(larg != "hash" && larg != "query"\) return;\n\s+if \(larg == "query" && gTelemetry\) \{ report\(cmd, \["telemetry"\]\); return; \}/)
+    expect(act).toContain('if (larg == "on" && !gHash) { report(cmd, ["steer"]); return; }')
+    expect(act.slice(gate)).toContain('float r = (float)num((float)arg);')
+    // The status the owner script reads is the one the globe sends, field
+    // by field: each field the globe sends, and where the owner script
+    // reads it.
+    const fields: Array<[string, string]> = [
+      ['gDataset', 'if (v != "")'],
+      ['gTitle', 'what = llJsonGetValue(r, [3]) + " at "'],
+      ['num(position(now()))', '" at " + llJsonGetValue(r, [4]) + of'],
+      ['len', 'of = " of " + llJsonGetValue(r, [5])'],
+      ['gPaused', '["playing", "paused"], (integer)llJsonGetValue(r, [6])'],
+      ['num(gRate)', '", rate " + llJsonGetValue(r, [7])'],
+      ['num(gSpin)', '". Spin " + llJsonGetValue(r, [8])'],
+      ['address()', 'Address: " + llJsonGetValue(r, [9])'],
+    ]
+    const status = act.match(/report\(cmd, \["ok", (gDataset, [^\]]*)\]\);/)?.[1] ?? ''
+    expect(status.split(', ')).toEqual(fields.map(([sent]) => sent))
+    expect(result).toContain('string v = llJsonGetValue(r, [2]);')
+    for (const [sent, read] of fields) expect(result, sent).toContain(read)
+    // The owner script checks a command as the globe script would.
+    for (const fn of ['string num(float f)', 'integer isNumber(string s)', 'integer isId(string s)']) {
+      expect(body(owner, fn), fn).toBe(body(globe, fn))
+    }
+    for (const [type, name] of [['float', 'MIN_RATE'], ['float', 'MAX_RATE'], ['string', 'ID_CHARS'], ['integer', 'ID_MAX']]) {
+      expect(constant(owner, type, name), name).toBe(constant(globe, type, name))
+    }
+    // And the globe script holds none of the owner's help, names or wording.
+    expect(globe).not.toMatch(/\bhelp\(\)|PRESETS|Commands on \//)
+  })
+
+  it("word the owner's answers as the smoke-test globe does, for the commands the two share", () => {
+    // The exhibit's owner script and the probe kit's globe answer the
+    // same commands, and an owner who knows one reads the other. These
+    // sentences are each one's, word for word; the exhibit's own (sound,
+    // home, a spin a tilt refuses, the privacy notice) are its alone.
+    const smoke = new Set(literals(read('../second-life-probe/terraviz-globe.lsl')).map((s) => s.replace(/^\[globe\] /, '')))
+    const said = new Set(literals(owner))
+    for (const sentence of [
+      'Show what? /', ' list names a few.', ' list nor a dataset id. Ids are letters, digits, - and _.',
+      'A rate from ', ", where 1 is the clip's own speed.", 'Rate ',
+      'Rotation in degrees east, from -3600 to 3600, like 90 or -75.', ' degrees east is at the centre of the picture.',
+      'Spin in degrees a second, up to 90, like 6 for a turn a minute, or off.', 'Spin off.', 'Spinning at ',
+      'Debug readout ', 'width 1024, or width 2048.', 'Width ', '. The picture changes size at once, and the ',
+      "video's resolution follows at the next dataset.",
+      "Telemetry on. In the first minute after each visitor's page loads, it reports ",
+      'anonymously which dataset it showed and anything that failed, then nothing more. A viewer ',
+      "Telemetry off. Every visitor's page reloaded to pick this up.", ' steer hash first.', ' telemetry off first.',
+      'steer hash, or steer query.', 'Changes now go after the #, which a browser applies without a reload.',
+      'reload on a # change anyway.', 'Showing ', ', rate ', '. Spin ', ' degrees a second. Address: ',
+      'Poles upright, texture turned 90 degrees, spin off.',
+    ]) {
+      expect(said, sentence).toContain(sentence)
+      expect(smoke, sentence).toContain(sentence)
+    }
   })
 
   it('answer each kind of menu on its own channel', () => {
@@ -1340,3 +1472,274 @@ function fullRow(): DatasetRow {
     source_digest: 'abc',
   }
 }
+
+describe("the exhibit's kiosk screen", () => {
+  const address = body(kiosk, 'string address(string str)')
+  const ID = '01KQG611HF8YXJNRBEHT0757KT'
+
+  /** The kiosk's reads of the state, as the globe's own variables they carry, from its broadcast. */
+  function asGlobe(source: string): string {
+    const sent = body(globe, 'broadcast()').match(/llList2Json\(JSON_OBJECT, \[([\s\S]*?)\]\)/)?.[1] ?? ''
+    const vars = Object.fromEntries([...sent.matchAll(/"(\w+)", (\w+)/g)].map((m) => [m[1], m[2]]))
+    return source
+      .replace(/llJsonGetValue\(str, \["(\w+)"\]\)/g, (_m, key: string) => vars[key] ?? `<${key}>`)
+      .replace(/\((?:float|integer|string)\)/g, '')
+      // The locals it reads them into.
+      .replace(/(?<!")\bdataset\b/g, 'gDataset')
+      .replace(/(?<!")\brate\b/g, 'gRate')
+  }
+
+  /** The `key=` value a script appends, up to the next element or the end of the list. */
+  const appended = (source: string, key: string): string | undefined =>
+    source.match(new RegExp(`"${key}=" \\+ (.+?)(?:, "|\\];)`))?.[1]
+
+  it('writes the clock keys the globe writes, in the same way, from the same state', () => {
+    // The page reckons the date from these, as the globe's page reckons
+    // its frame, so the two can't disagree: the same anchor, the same
+    // rounding, the same keys left out.
+    expect(body(kiosk, 'string num(float f)')).toBe(body(globe, 'string num(float f)'))
+    const ours = asGlobe(address)
+    const theirs = asGlobe(body(globe, 'string address()'))
+    for (const key of ['dataset', 't', 'at', 'rate']) {
+      expect(appended(ours, key), key).toBeDefined()
+      expect(appended(ours, key), key).toBe(appended(theirs, key))
+    }
+    expect(ours).toContain('if (gDataset != "")')
+    const clock = (source: string) =>
+      (source.match(/if \(gPaused\)[\s\S]*?\n\s+\}/)?.[0] ?? '')
+        .split('\n').filter((line) => !/^\s*float gRate = gRate;$/.test(line)).join(' ').replace(/\s+/g, ' ')
+    expect(clock(ours)).toContain('live += ["paused=1"]; else {')
+    expect(clock(ours)).toBe(clock(theirs))
+    // Nothing reads a key the broadcast doesn't carry.
+    expect(ours).not.toMatch(/<\w+>/)
+  })
+
+  it('writes only what the kiosk page acts on, all of it after the #', () => {
+    const keys = literals(address).flatMap((l) => l.split('&')).filter((l) => l.includes('='))
+      .map((l) => l.slice(0, l.indexOf('=')))
+    expect(new Set(keys)).toEqual(new Set(['dataset', 't', 'paused', 'at', 'rate']))
+    expect(address).toContain('return node + "/output/kiosk#" + llDumpList2String(live, "&");')
+    // Always something after the #: an empty dataset= is the live Earth.
+    expect(address).toContain('list live = ["dataset=" + dataset];')
+    expect(readWebSettings('', '#dataset=').datasetId).toBeNull()
+    // The page the address names is built.
+    expect(read('../../src/output/kiosk.html')).toContain('./kioskMain.ts')
+    expect(read('../../vite.config.ts')).toContain("kiosk: path.resolve(__dirname, 'src/output/kiosk.html')")
+  })
+
+  it('gives no one the media to click, at the size the page draws', () => {
+    const media = body(kiosk, 'show()')
+    const sent = media.match(/list p = \[([\s\S]*?)\];/)?.[1] ?? ''
+    expect(sent).toContain('PRIM_MEDIA_PERMS_INTERACT, PRIM_MEDIA_PERM_NONE')
+    expect(sent).toContain('PRIM_MEDIA_PERMS_CONTROL, PRIM_MEDIA_PERM_NONE')
+    expect(sent).toContain('PRIM_MEDIA_CURRENT_URL, url')
+    const call = media.indexOf('llSetPrimMediaParams(FACE, p)')
+    expect(call).toBeGreaterThan(-1)
+    expect(media.slice(media.indexOf('list p ='), call)).not.toMatch(/\bif\b|\bp \+=/)
+    expect(Number(constant(kiosk, 'integer', 'MEDIA_W'))).toBe(KIOSK_STAGE.width)
+    expect(Number(constant(kiosk, 'integer', 'MEDIA_H'))).toBe(KIOSK_STAGE.height)
+    // A face takes no more than 2048 a side.
+    expect(KIOSK_STAGE.width).toBeLessThanOrEqual(2048)
+  })
+
+  it('takes over a face that had media before, as the globe does', () => {
+    // A face that had media keeps every setting it isn't given, so a list
+    // of allowed sites left on would block the node's address. It is turned
+    // off first, before the address it would be checked against, and should
+    // the simulator have checked the old list anyway, the face's media is
+    // cleared and set once more, before a refusal is reported.
+    for (const [name, fn] of [['globe', 'integer setMedia()'], ['kiosk', 'show()']] as const) {
+      const media = body(SCRIPTS[name], fn)
+      const sent = media.match(/list p = \[([\s\S]*?)\];/)?.[1] ?? ''
+      expect(sent.trimStart(), name).toMatch(/^PRIM_MEDIA_WHITELIST_ENABLE, FALSE,\s+PRIM_MEDIA_CURRENT_URL, url,/)
+      expect(media, name).toMatch(
+        /integer r = llSetPrimMediaParams\(FACE, p\);\n\s+if \(r == STATUS_WHITELIST_FAILED\)\n\s+\{\n\s+llClearPrimMedia\(FACE\);\n\s+r = llSetPrimMediaParams\(FACE, p\);\n\s+\}\n\s+if \(r != STATUS_OK\)/,
+      )
+    }
+  })
+
+  it("draws the page once across the face, says what it changed, and leaves the rest", () => {
+    const fit = body(kiosk, 'string fit()')
+    // Repeats, offset, rotation and mapping are each set only when off,
+    // since each change sleeps the script, each to a new box's, and each
+    // with what it was, for the owner to put back.
+    expect(fit).toContain('llGetPrimitiveParams([PRIM_TEXTURE, FACE, PRIM_TEXGEN, FACE])')
+    expect(fit).toMatch(/if \(v\.x != 1\.0 \|\| v\.y != 1\.0\)\n\s+\{\n\s+llScaleTexture\(1\.0, 1\.0, FACE\);\n\s+had \+= "repeats "/)
+    expect(fit).toMatch(/if \(v\.x != 0\.0 \|\| v\.y != 0\.0\)\n\s+\{\n\s+llOffsetTexture\(0\.0, 0\.0, FACE\);\n\s+had \+= "offset "/)
+    expect(fit).toMatch(/if \(turn != 0\.0\)\n\s+\{\n\s+llRotateTexture\(0\.0, FACE\);\n\s+had \+= "rotation "/)
+    expect(fit).toMatch(/if \(llList2Integer\(t, 4\) != PRIM_TEXGEN_DEFAULT\)\n\s+\{\n\s+llSetLinkPrimitiveParamsFast\(LINK_THIS, \[PRIM_TEXGEN, FACE, PRIM_TEXGEN_DEFAULT\]\);\n\s+had \+= "planar mapping";/)
+    // Nothing else about the prim is set: not the texture itself, its
+    // colour, transparency, glow or material. Only these setters appear,
+    // and the one parameter list set is the mapping's.
+    expect(new Set(all(kiosk, /\b(llSet\w*|llClear\w*|llScale\w*|llOffset\w*|llRotate\w*)\(/g))).toEqual(
+      new Set(['llSetTimerEvent', 'llSetPrimMediaParams', 'llClearPrimMedia', 'llScaleTexture', 'llOffsetTexture', 'llRotateTexture', 'llSetLinkPrimitiveParamsFast']),
+    )
+    expect(kiosk.match(/llSetLinkPrimitiveParamsFast\(/g)).toHaveLength(1)
+    expect(kiosk).toContain('llSetLinkPrimitiveParamsFast(LINK_THIS, [PRIM_TEXGEN, FACE, PRIM_TEXGEN_DEFAULT]);')
+    // Only a face that took the page is fitted, once a start, and the owner
+    // is told then which face it is, what was changed, and whether the
+    // face's colour or a PBR material would spoil the page.
+    const show = body(kiosk, 'show()')
+    const live = show.slice(show.indexOf('if (!gTold)'))
+    expect(show.indexOf('if (!gTold)')).toBeGreaterThan(show.indexOf('gShown = url;'))
+    expect(all(kiosk, /(gTold = \w+);/g)).toEqual(['gTold = TRUE'])
+    expect(kiosk.match(/\bfit\(\);/g)).toHaveLength(1)
+    expect(live).toContain('"[exhibit] Kiosk: showing the page on face " + (string)FACE + "." + fit();')
+    expect(live).toContain('llGetPrimitiveParams([PRIM_COLOR, FACE, PRIM_RENDER_MATERIAL, FACE])')
+    expect(live).toContain('if (llList2Vector(c, 0) != <1.0, 1.0, 1.0> || llList2Float(c, 1) < 1.0)')
+    expect(live).toContain('if (m != "" && m != NULL_KEY)')
+    expect(live).toMatch(/\n\s+llOwnerSay\(say\);\n\s+\}$/)
+  })
+
+  it("waits, and says why, when FACE isn't one of the prim's faces", () => {
+    // A face the prim doesn't have isn't always refused, so the script
+    // checks before it asks the globe for anything.
+    expect(kiosk).toMatch(
+      /state_entry\(\)\n\s+\{\n(\s+\/\/[^\n]*\n)*\s+if \(FACE < 0 \|\| FACE >= llGetNumberOfSides\(\)\)\n\s+\{\n\s+llOwnerSay\([^;]+;\n\s+state noFace;\n\s+\}\n\s+gPrims = /,
+    )
+    // It waits for the script to be saved with another FACE, or for the
+    // prim's shape, and with it its faces, to change.
+    const waiting = kiosk.slice(kiosk.indexOf('\nstate noFace\n'))
+    expect(waiting).toContain('if (c & (CHANGED_OWNER | CHANGED_SHAPE)) llResetScript();')
+    expect(waiting).toContain('on_rez(integer p) { llResetScript(); }')
+    expect(waiting).not.toMatch(/link_message|timer|llSetPrimMediaParams/)
+    expect(kiosk.match(/llOwnerSay\(/g)).toHaveLength(4)
+  })
+
+  it('hears the globe wherever it is linked, and asks for what it missed when it starts', () => {
+    expect(body(globe, 'broadcast()')).toContain('llMessageLinked(LINK_SET, MSG_STATE, ')
+    expect(kiosk).toMatch(/\n\s+\}\n\s+gPrims = llGetObjectPrimCount\(llGetKey\(\)\);\n\s+llMessageLinked\(LINK_SET, MSG_HELLO, "", NULL_KEY\);\n\s+llSetTimerEvent\(WAIT\);/)
+    // Linked or unlinked, it starts over; someone sitting down doesn't count.
+    expect(kiosk).toMatch(/if \(c & CHANGED_LINK\)\n\s+if \(llGetObjectPrimCount\(llGetKey\(\)\) != gPrims\) llResetScript\(\);/)
+    // A burst of changes is one change of media, and a globe that never
+    // speaks is reported to the owner.
+    // The wait is set for every state, so the latest of a burst is answered.
+    expect(kiosk).toMatch(/gWant = a;\n(\s+\/\/[^\n]*\n)*\s+llSetTimerEvent\(0\.2\);\n\s+\}/)
+    expect(kiosk).toMatch(/timer\(\)\n\s+\{\n\s+if \(gWant != ""\) \{ show\(\); return; \}\n\s+llSetTimerEvent\(0\.0\);\n\s+llOwnerSay\(/)
+    // Only an address the face took counts as shown, so a refused one is
+    // tried again with the next state.
+    const show = body(kiosk, 'show()')
+    expect(show).toMatch(/\{\n\s+llSetTimerEvent\(0\.0\);\n\s+if \(gWant != gShown\)\n\s+\{\n\s+string url = gWant;/)
+    expect(show).toMatch(/if \(r != STATUS_OK\)\n\s+\{\n\s+llOwnerSay\([^;]+;\n\s+gLive = FALSE;\n\s+llMessageLinked\(LINK_SET, MSG_KIOSK, "away", NULL_KEY\);\n\s+return;\n\s+\}\n\s+gShown = url;\n\s+\}\n\s+gLive = TRUE;\n\s+llMessageLinked\(LINK_SET, MSG_KIOSK, "here", NULL_KEY\);/)
+    expect(all(kiosk, /(gShown = \w+);/g)).toEqual(['gShown = url'])
+  })
+
+  it("takes the date and credit out of the floating text while a kiosk shows them, and keeps the rest", () => {
+    // The info script asks when it starts and when the prims change, and
+    // shows the full text until a kiosk answers. Only "here" says one is.
+    expect(info).toMatch(/gPrims = llGetObjectPrimCount\(llGetKey\(\)\);\n\s+llMessageLinked\(LINK_SET, MSG_KIOSK, "\?", NULL_KEY\);/)
+    expect(info).toMatch(/if \(c & CHANGED_LINK\)\n\s+\{\n\s+integer prims = llGetObjectPrimCount\(llGetKey\(\)\);\n\s+if \(prims != gPrims\)\n\s+\{\n\s+gPrims = prims;\n\s+gKiosk = FALSE;\n\s+gKioskBy = 0;\n\s+llMessageLinked\(LINK_SET, MSG_KIOSK, "\?", NULL_KEY\);\n\s+hover\(\);\n\s+pace\(\);/)
+    // "here" says a kiosk shows the state, anything else ("away") that it
+    // doesn't; the "?" is the info script's own, sent to the whole object.
+    expect(info).toMatch(/if \(n == MSG_KIOSK\)\n\s+\{\n\s+if \(str == "\?"\) return;\n\s+integer was = gKiosk;\n\s+gKiosk = str == "here";\n\s+gKioskBy = 0;\n\s+if \(gKiosk != was\) hover\(\);\n\s+pace\(\);\n\s+return;/)
+    expect(all(info, /gKiosk = ([^;]+);/g).sort()).toEqual(['FALSE', 'FALSE', 'str == "here"'])
+    // The kiosk says it is here only once its face has taken the page,
+    // since until then nothing shows what the floating text leaves out;
+    // then it answers every state, "away" when its face refused it.
+    expect(kiosk).toContain('if (str == "?" && gLive) llMessageLinked(LINK_SET, MSG_KIOSK, "here", NULL_KEY);')
+    expect(all(kiosk, /llMessageLinked\(LINK_SET, MSG_KIOSK, "(\w+)"/g).sort()).toEqual(['away', 'here', 'here'])
+    expect(all(kiosk, /gLive = (\w+);/g).sort()).toEqual(['FALSE', 'TRUE'])
+    // A state the kiosk doesn't answer in KIOSK_WAIT seconds puts the date
+    // and the credit back. The wait starts at the first state unanswered,
+    // so states that keep coming can't put it off, and the timer runs
+    // while it waits.
+    const state = info.slice(info.indexOf('if (n != MSG_STATE) return;'), info.indexOf('    http_response('))
+    expect(state).toMatch(/if \(gKiosk && !gKioskBy\) gKioskBy = llGetUnixTime\(\) \+ KIOSK_WAIT;\n\s+hover\(\);\n\s+pace\(\);/)
+    const timer = info.slice(info.indexOf('    timer()'), info.indexOf('    listen('))
+    expect(timer).toMatch(/if \(gKioskBy && llGetUnixTime\(\) >= gKioskBy\)\n\s+\{\n\s+gKiosk = FALSE;\n\s+gKioskBy = 0;\n\s+\}\n\s+hover\(\);\n\s+pace\(\);/)
+    expect(Number(constant(info, 'integer', 'KIOSK_WAIT'))).toBe(10)
+    // Longer than the kiosk's slowest answer: the gathering wait, then a
+    // refused address, the clearing and the second try, a second each, and a
+    // state that arrives during the once-a-start fit waits out its four
+    // calls, a fifth of a second each. Whole seconds and a 2 s timer can
+    // make the wait a second short.
+    const gather = Number(/gWant = a;\n(?:\s+\/\/[^\n]*\n)*\s+llSetTimerEvent\(([\d.]+)\);/.exec(kiosk)?.[1])
+    expect(gather).toBeGreaterThan(0)
+    expect(kiosk.match(/llSetPrimMediaParams\(|llClearPrimMedia\(/g)).toHaveLength(3)
+    expect(gather + 3 * 1 + 4 * 0.2).toBeLessThan(Number(constant(info, 'integer', 'KIOSK_WAIT')) - 1)
+    expect(all(info, /(gKioskBy = [^;]+);/g).sort()).toEqual(['gKioskBy = 0', 'gKioskBy = 0', 'gKioskBy = 0', 'gKioskBy = llGetUnixTime() + KIOSK_WAIT'])
+    // What goes, before the lines are laid out: the date and the credit.
+    // The title stays, for a visitor whose viewer shows no media, and so
+    // do the telemetry notice the privacy policy asks for, a talk and how
+    // to touch the globe; the layout is the one held to 254 bytes above.
+    const hover = body(info, 'hover()')
+    const cleared = hover.indexOf('if (gKiosk) { stamp = ""; credit = ""; }')
+    expect(cleared).toBeGreaterThan(-1)
+    expect(cleared).toBeLessThan(hover.indexOf('string tail = "";'))
+    expect(hover.slice(cleared)).toContain('if (gTelemetry) tail += "\\nCounts anonymous use: " + gNode + "/privacy";')
+    // The date isn't worked out every couple of seconds for nobody.
+    expect(body(info, 'pace()')).toContain('integer moving = !gKiosk && ')
+  })
+
+  it("reads the node's own card and record, as the producers write them", () => {
+    // Built by the node's code, so a field renamed on either side fails here.
+    const row = fullRow()
+    const card = buildCard({ row, kind: 'video', showable: true, tags: [] } as Parameters<typeof buildCard>[0], { seconds: 96.5, settled: true })
+    const wire = serializeDataset(
+      row,
+      { tags: [], categories: [], keywords: [], developers: [], related: [] },
+      { node_id: 'N', display_name: 'N', base_url: 'https://n.example', description: null, contact_email: null, public_key: 'k', created_at: T },
+    )
+    const json = (v: unknown) => JSON.parse(JSON.stringify(v)) as Record<string, unknown>
+    const ds = kioskDatasetFrom(json(card), json(wire), 'https://n.example/')
+    expect(ds).toMatchObject({
+      id: row.id,
+      title: row.title,
+      abstract: [row.abstract],
+      license: 'CC-BY-4.0',
+      kind: 'video',
+      period: 'P1D',
+      lengthS: 96.5,
+    })
+    // The row is data-encoded, so its legend is its colour scale, parsed.
+    expect(ds.legend?.kind).toBe('scale')
+    expect(ds.thumbnail).toMatch(/^https:\/\//)
+    expect(ds.credit).toBe(card.credit)
+    expect(ds.credit).not.toBe('')
+    expect(ds.license).toBe(card.license)
+    expect(ds.licenseText).toBe(card.licenseText)
+    const read = (over: Partial<ReturnType<typeof fullRow>>) => {
+      const r = { ...row, ...over }
+      const c = buildCard({ row: r, kind: 'video', showable: true, tags: [] } as Parameters<typeof buildCard>[0], { seconds: 96.5, settled: true })
+      const w = serializeDataset(
+        r,
+        { tags: [], categories: [], keywords: [], developers: [], related: [] },
+        { node_id: 'N', display_name: 'N', base_url: 'https://n.example', description: null, contact_email: null, public_key: 'k', created_at: T },
+      )
+      return { card: c, ds: kioskDatasetFrom(json(c), json(w), 'https://n.example/') }
+    }
+    // Whatever the card's own parser makes of a credit, the screen says the
+    // same, so the screen and the in-world text credit one party alike:
+    // an autolink, an entity with no semicolon, words in adjacent tags.
+    for (const attribution_text of ['<https://noaa.gov>', 'NOAA&nbsp GSL', '<cite>NOAA</cite><cite>GSL</cite>', 'A &auml; B']) {
+      const { card: c, ds: d } = read({ attribution_text })
+      expect(d.credit, attribution_text).toBe(c.credit)
+    }
+    // An address the card won't show isn't shown on the screen either.
+    for (const license_url of ['https:\\\\noaa.gov\\lic', 'https:noaa.gov/x']) {
+      const { card: c, ds: d } = read({ license_url })
+      expect(d.licenseText, license_url).toBe(c.licenseText)
+    }
+    // Past the card's 200 and 400 bytes, the screen has the whole of each.
+    const credit = 'NOAA Global Systems Laboratory, '.repeat(10) + 'and partners.'
+    const statement = 'Free to use, with credit, ' + 'and so on, '.repeat(40) + 'the end.'
+    const long = read({ attribution_text: credit, license_statement: statement })
+    expect(long.card.credit.endsWith('...')).toBe(true)
+    expect(long.ds.credit).toBe(credit)
+    expect(long.card.licenseText).toMatch(/\.\.\. https:\/\/creativecommons\.org\/licenses\/by\/4\.0\/$/)
+    expect(long.ds.licenseText).toBe(`${statement} https://creativecommons.org/licenses/by/4.0/`)
+    expect(ds.startTime?.toISOString()).toBe('2024-06-01T12:00:00.000Z')
+    expect(ds.endTime?.toISOString()).toBe('2024-11-30T12:00:00.000Z')
+    // A dataset the card says the globe can't show is refused.
+    const tour = buildCard({ row, kind: 'tour', showable: false, tags: [] } as Parameters<typeof buildCard>[0], { seconds: 0, settled: true })
+    expect(() => kioskDatasetFrom(json(tour), json(wire), 'https://n.example/')).toThrow(/can't show/)
+  })
+
+  it('answers on a number of its own, never a retired one', () => {
+    expect(messages(kiosk).MSG_KIOSK).toBe('271012')
+    expect(messages(info).MSG_KIOSK).toBe('271012')
+    for (const [name, script] of Object.entries(SCRIPTS)) {
+      for (const value of Object.values(messages(script))) expect(['271006', '271007'], name).not.toContain(value)
+    }
+  })
+})

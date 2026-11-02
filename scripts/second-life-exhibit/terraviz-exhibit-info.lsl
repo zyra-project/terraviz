@@ -10,7 +10,7 @@
 //   The source:  https://github.com/zyra-project/terraviz
 //
 // WHAT THIS SCRIPT DOES
-// It is one of the exhibit's four scripts, and the one that says what the
+// It is one of the exhibit's five scripts, and the one that says what the
 // globe shows. terraviz-exhibit.lsl tells it what that is after every
 // change. From the node it reads the dataset's card, a reply of at most
 // 2 KB that the node writes for the exhibit, its text already plain and
@@ -29,6 +29,17 @@
 //   48 where both fit, the title's first where they don't, and either is
 //   cut with "..." when it has to be. Nothing else is cut, so the notice
 //   is never lost.
+//   While a kiosk screen linked to the globe shows its page
+//   (terraviz-exhibit-kiosk.lsl), the date and the credit are left out,
+//   since the screen shows them in full, and the date stops being worked
+//   out every couple of seconds. The title stays, for a visitor whose
+//   viewer shows no media. This script asks whether a kiosk is there when
+//   it starts and when a prim is linked or unlinked, and the kiosk
+//   answers once its face has taken the page. The kiosk answers each of
+//   the globe's states too, and the date and the credit come back when
+//   one goes unanswered for ten seconds, or the kiosk says its screen
+//   couldn't take it, so a stopped or deleted kiosk script can't leave
+//   them missing beside a screen that has fallen behind.
 // - "About", from the touch menu. If the globe holds a notecard named by
 //   the dataset's id, the visitor is given it. Otherwise they get the
 //   abstract, the full credit, the licence and a link to the dataset's
@@ -65,7 +76,7 @@
 // in, and this script has little room to spare while it reads a card (63
 // KB of 64 in-world on 27 October 2026, with a card filled to 2 KB).
 //
-// The owner can ask "/9 memory": each of the four scripts says how much
+// The owner can ask "/9 memory": each of the five scripts says how much
 // of its 64 KB it uses, and this one also says the most it has used while
 // reading a card or answering "About", which are when it needs the most.
 
@@ -76,6 +87,7 @@ integer MSG_CONTROL = 271002;  // visitors or info to globe: a control, for the 
 integer MSG_HELLO   = 271003;  // any to globe: say the state again (a script reset)
 integer MSG_TALK    = 271004;  // visitors to info: "1" during a talk, "0" otherwise
 integer MSG_ABOUT   = 271005;  // visitors to info: tell the key about what the globe shows
+integer MSG_KIOSK   = 271012;  // info and kiosk: "?" asks whether a kiosk is linked, "here" says one shows the state, "away" that it doesn't
 
 // A card's budget, in bytes. The node keeps every card within it, so a
 // card arrives whole, and a reply cut short isn't one. A request reads one
@@ -87,6 +99,7 @@ integer TRIES = 4;             // asks for one dataset's card, a failed one or o
 integer ABSTRACT_MAX = 500;    // characters of an abstract kept for "About"; the link has the rest
 integer PIECE = 1000;          // bytes of a chat piece; a chat line holds 1024
 float   TICK = 2.0;            // how often a playing clip's date is worked out again
+integer KIOSK_WAIT = 10;       // seconds a kiosk has to answer a state before the floating text takes the date and credit back
 integer MIN_CREDIT = 48;       // bytes the credit keeps when the hover text is full
 integer MIN_TITLE = 32;        // bytes the title keeps, first, when there isn't room for both
 
@@ -113,6 +126,9 @@ integer gPaused;
 integer gTelemetry;
 string  gNode;
 integer gTalk;
+integer gKiosk;        // a linked kiosk shows the page, with the date and the credit in full
+integer gKioskBy;      // when a kiosk that hasn't answered the globe's latest state counts as gone; 0 when none is awaited
+integer gPrims;        // the object's prims, not counting anyone sitting on it
 
 // What the node's card says about it.
 string  gFor;          // the dataset the fields below describe
@@ -442,6 +458,10 @@ hover()
             stamp = date();
         }
     }
+    // A kiosk shows the date and the credit in full, so they are left out
+    // here. The title stays, for a visitor whose viewer shows no media,
+    // and so does what the kiosk doesn't say.
+    if (gKiosk) { stamp = ""; credit = ""; }
     string tail = "";
     if (stamp != "") tail += "\n" + stamp;
     if (gTelemetry) tail += "\nCounts anonymous use: " + gNode + "/privacy";
@@ -473,12 +493,12 @@ hover()
     llSetText(s, <1.0, 1.0, 1.0>, 1.0);
 }
 
-// The timer runs while a clip's date moves, and while a request waits to
-// be made again.
+// The timer runs while a clip's date moves in the hover text, while a
+// request waits to be made again, and while a kiosk's answer is awaited.
 pace()
 {
-    integer moving = gDataset != "" && !gPaused && gDated && gLen > 0 && gFor == gDataset;
-    if (moving || gRetryAt) llSetTimerEvent(TICK);
+    integer moving = !gKiosk && gDataset != "" && !gPaused && gDated && gLen > 0 && gFor == gDataset;
+    if (moving || gRetryAt || gKioskBy) llSetTimerEvent(TICK);
     else llSetTimerEvent(0.0);
 }
 
@@ -751,6 +771,8 @@ default
         llListen(CHAN, "", llGetOwner(), "");
         llSetText("", <1.0, 1.0, 1.0>, 1.0);
         gShown = "";
+        gPrims = llGetObjectPrimCount(llGetKey());
+        llMessageLinked(LINK_SET, MSG_KIOSK, "?", NULL_KEY);
         llMessageLinked(LINK_THIS, MSG_HELLO, "", NULL_KEY);
     }
 
@@ -767,11 +789,40 @@ default
             if (gReq) { gReq = NULL_KEY; later(10); }
             pace();
         }
+        // A prim linked or unlinked, which may be a kiosk: the full text
+        // comes back until a kiosk says it is still here. Someone sitting
+        // down or standing up changes the links too, and the prims not at all.
+        if (c & CHANGED_LINK)
+        {
+            integer prims = llGetObjectPrimCount(llGetKey());
+            if (prims != gPrims)
+            {
+                gPrims = prims;
+                gKiosk = FALSE;
+                gKioskBy = 0;
+                llMessageLinked(LINK_SET, MSG_KIOSK, "?", NULL_KEY);
+                hover();
+                pace();
+            }
+        }
     }
 
     link_message(integer sender, integer n, string str, key id)
     {
         if (n == MSG_TALK) { gTalk = str == "1"; hover(); return; }
+        // A kiosk answers the globe's states, the latest of each burst:
+        // "here" once its screen shows it, "away" when its screen can't. The
+        // "?" is this script's own.
+        if (n == MSG_KIOSK)
+        {
+            if (str == "?") return;
+            integer was = gKiosk;
+            gKiosk = str == "here";
+            gKioskBy = 0;
+            if (gKiosk != was) hover();
+            pace();
+            return;
+        }
         if (n == MSG_ABOUT)
         {
             llScriptProfiler(PROFILE_SCRIPT_MEMORY);
@@ -805,6 +856,13 @@ default
             fetch();
         }
         else if (id) moved(id);
+        // A kiosk that doesn't answer this state in time has stopped, or its
+        // script is gone, and its screen will fall behind: the date and the
+        // credit come back. The wait starts at the first state unanswered,
+        // so a stream of states can't put it off; an answer to an earlier
+        // state ends it too, so a kiosk that stops in the second or two an
+        // answer takes is noticed at the state after.
+        if (gKiosk && !gKioskBy) gKioskBy = llGetUnixTime() + KIOSK_WAIT;
         hover();
         pace();
     }
@@ -852,6 +910,11 @@ default
         {
             gRetryAt = 0;
             fetch();
+        }
+        if (gKioskBy && llGetUnixTime() >= gKioskBy)
+        {
+            gKiosk = FALSE;
+            gKioskBy = 0;
         }
         hover();
         pace();

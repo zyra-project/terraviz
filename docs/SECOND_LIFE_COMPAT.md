@@ -17,7 +17,16 @@ you don't need it. Every claim about TerraViz cites a file and line.
 Every claim about Second Life cites a public source, the viewer's
 source code, or a test result in §4, all collected in §11.
 
-**Last reviewed:** 2026-10-25 (in-world: the exhibit controller from
+**Last reviewed:** 2026-10-28 (design only, from a conversation with
+Eric about rebuilding the Science On a Sphere building on NOAA's
+Virtual Island: a kiosk screen, motion in the address and both sides of
+a sphere as §7 items 9–11, an exhibit console of buttons, a pilot's
+seat and optional trackball as §9 Phase 5, four non-goals in §8, and
+§10 questions 14–19. Later the same day, after concept renders reviewed
+with Eric, Phase 5 gained controls inside the sphere, "Orbit comes to
+you", the building with its field, and the furniture's look, with §10
+questions 20–22. Then the first meshes and Phase 5's first step, the
+owner script, were built; neither has been seen in-world yet.) 2026-10-25 (in-world: the exhibit controller from
 #500 ran, and its scripts ran out of their 64 KB, first the globe
 script and then the info script; fixed in #501, and §9 Phase 2's status
 note updated. The same day, the page camera of §7 item 7 and §9 Phase 4
@@ -1204,6 +1213,183 @@ The work, smallest first:
    with Second Life. It is a small one, and far more people see this
    case. With the copy in place it uses the same pointer and the same
    fallback as the output page.
+9. **A kiosk screen beside the globe.** *Proposed 28 October, from a
+   conversation with Eric about rebuilding the Science On a Sphere
+   building on NOAA's Virtual Island; its display half built the same
+   day as §9 Phase 5's step 2, and the catalog and touches still to
+   come.* Phase 2 put
+   everything a visitor reads into the scripts: the title, date and
+   credit in hover text, the abstract in a dialog, the catalog in
+   dialog buttons. That is where most of its trouble came from. Every
+   character costs script memory (§9 Phase 2's status notes are mostly
+   Stack-Heap Collisions), hover text holds 254 bytes and looks dated,
+   the abstract was cut to 500 characters to fit, a dialog holds
+   twelve buttons of 24 characters, and a legend can't be shown at all.
+   A web page beside the globe has none of these limits, so the plan
+   moves everything a visitor *reads* there, and leaves the scripts
+   carrying ids and state.
+   - **What it shows.**
+     - *Now showing:* the title, thumbnail, credit and the full
+       abstract, read from the node by the page itself
+       (`GET /api/v1/datasets/:id`), so no script holds the text.
+     - *The legend.* An SOS dataset's own legend image (`legendLink`,
+       `functions/api/v1/_lib/dataset-serializer.ts:380`). A
+       data-encoded dataset has no image; its colour bar is drawn from
+       its colour scale through the same pure functions the app's
+       colorbar uses (`src/services/colorScaleDisplay.ts`), with its
+       units made readable by `toDisplayUnits`
+       (`src/types/unit-scale.ts`). This is the answer to "we need to
+       figure out the legend graphics": in a page a legend is an
+       `<img>`, and a colour bar is a gradient.
+     - *The dataset's date and time,* ticking in step with the globe.
+       The kiosk's address carries the same clock keys as the globe's
+       (`dataset`, `t`, `at`, `rate`, `paused`), and the page turns them
+       into a date through `videoTimeToDate` (`src/utils/time.ts`), the
+       function the control window's own time label uses. The globe and
+       the kiosk then read one clock and can't disagree; today the info
+       script computes the date in LSL, a second implementation.
+     - *The catalog:* a grid of thumbnails a page at a time, with
+       category tabs. A visitor picks one by touching the screen
+       (§9 Phase 5).
+   - **It is display-only, and one screen for everyone.** A page can't
+     tell a script who clicked it: each visitor runs their own copy,
+     the page never learns which avatar is looking at it, and the only
+     thing that leaves a copy is a navigation, which goes to everyone
+     at the screen and arrives without a name (item 4 above). A kiosk
+     that let each visitor browse their own copy and "send" a dataset
+     to the globe would therefore reload everyone's kiosk on every send,
+     and the hold and talk rules couldn't apply, since the script would
+     not know who sent it. So the page draws, and touches go to a
+     script (§9 Phase 5). Everyone at the kiosk sees the same screen,
+     which is how a museum kiosk behaves anyway.
+   - **Each copy can speak its visitor's language.** The address
+     carries state, never text, so the page can draw its labels in the
+     language of the browser it runs in, through the app's i18n layer.
+     That is something hover text and dialogs can't do. Dataset text
+     comes from the node in the catalog's own language until
+     [`I18N_PLAN.md`](I18N_PLAN.md)'s L2–L4 land.
+   - **Its address carries no one.** No avatar name or key goes in it,
+     the same rule as the globe's (§9 Phase 2, "Nothing about a visitor
+     leaves the object"). "The controls are held" is a state; who holds
+     them stays in the object.
+   - **It is a page of its own, not a mode of the output page.** It
+     draws no sphere, so it needs neither Three nor the output's render
+     loop. It would be a new small entry, as `/orbit` is
+     (`src/orbitMain.ts`), with its keys added to
+     [`EMBED_URL_GRAMMAR.md`](EMBED_URL_GRAMMAR.md). Its layout is
+     fixed at one media size (at most 2048 a side, §11), because a
+     script maps touches onto it by position: the regions of the
+     screen and what each does live in one table that the page and the
+     script both carry, held equal by a test, as `exhibit.test.ts`
+     already holds the scripts' message numbers equal.
+   - **It costs a visitor a browser, so it has to be light.** The
+     viewer runs at most 8 web pages at once and gives full priority to
+     the 2 that look largest on screen (item 4, "A field of globes").
+     A full building is up to four: the globe, its inside (item 11),
+     the kiosk and a flat map panel. The
+     kiosk should play no video and run no WebGL, so that when a
+     visitor walks up to read it and it becomes one of their two, it
+     costs them little. A globe that drops priority meanwhile falls
+     back into step when it returns, as item 4 says.
+10. **Motion in the address.** *Proposed 28 October; not built.* Item 7
+    built a camera whose keys name the view the picture comes to rest
+    on, and the page glides there. That makes one change a second look
+    like one motion, but steering is laggy at that rate, and a script
+    can't write faster: `llSetPrimMediaParams` sleeps the script for a
+    second (§11). So the address should carry *motion* as well as
+    position, the idea item 7 left as its next layer.
+    - **A rate beside each view key.** Proposed names, to be settled in
+      the grammar review: `drotation`, `dlat` and `dzoom`, each a change
+      per second in the key it is named for, and `vat`, the moment the
+      view was current. Each copy works out the view as each key plus
+      its rate times the time since then, clamped as the keys already
+      are (`lat` within ±90, `zoom` within the projection's cap), and
+      the heavy-globe glide follows that moving target.
+    - **Pressing a control is then one address change, and releasing it
+      is another.** "Turning east at 20° a second" is written once, and
+      every copy turns smoothly at its own frame rate until "stopped
+      here" arrives. The stop carries a position and no rate, so every
+      copy comes to rest on the same view.
+    - **A motion with no moment is timed from when each copy reads it.**
+      That is the clock's own rule: a clock with no `at` is anchored to
+      when the copy read it (`readAtMs` in `src/output/webClock.ts`).
+      It matters more here than for the clock. The clock relies on
+      visitors' computer clocks being close (item 4); an error of two
+      seconds moves a video two seconds, which nobody sees, but at 20°
+      a second it moves the globe 40°, and a copy with a slow clock
+      would lurch on every press. So a press sends a rate without `vat`
+      and each copy starts turning as it reads it, at most a moment
+      apart. A spin meant to run for hours, where every copy should
+      show the same longitude, sends `vat` and is shared through the
+      wall clock as the dataset clock is. That spin also replaces
+      `llTargetOmega`, which each viewer draws at its own phase.
+    - **The stop is written where the page has got to.** The globe
+      script sleeps a second after the press's change, so a release
+      inside that second is written when it wakes. It writes the
+      position the motion has reached by then, not the position at the
+      release, so the picture eases to a stop rather than turning back.
+      A tap is therefore a short step of about one second's turning,
+      which suits a button.
+    - **Turning goes through the picture, never the prim, once zoom is
+      in use.** Turning the sphere prim is immediate, and every viewer
+      sees one angle. But zoom magnifies whatever is at the front of the
+      *picture*: turn the prim to show Asia and zoom, and the
+      magnified place is the picture's front, now facing away. So a
+      globe that zooms turns through these keys. Tilting the prim, the
+      Phase 2 menu's pole buttons, comes out with them, as Phase 4
+      already planned.
+11. **Both sides of a sphere.** *Proposed 28 October; not built.* NOAA's
+    Virtual Island had a large phantom sphere on its SOS building:
+    from outside a globe, and flown into, a world all round you, which
+    Eric remembers feeling in mouselook like a 360° video. The
+    output's frame is the same projection a 360° video uses, so a
+    visitor at the centre of the sphere sees exactly that.
+    - **Second Life draws a face from one side only**, so from inside
+      an ordinary sphere there is nothing to see. Its newer PBR
+      materials can be double-sided, but they show one picture on both
+      sides, and seen from inside a globe's picture reads mirrored
+      (Madagascar west of Africa).
+    - **A hollow sphere has an inside face of its own.** Hollowed as far
+      as the build tools allow, the sphere is a shell whose inner
+      surface faces in and can carry its own media. The outside keeps
+      the globe as it is. The inside shows the same address, flipped
+      left to right with a negative horizontal repeat
+      (`llScaleTexture(-1.0, 1.0, face)`) and turned as the outside is
+      (the globe script's `upright`). The globe script already relies on
+      media following a face's texture settings, since `upright` turns
+      the texture 90° with media on it, so a flip should follow too.
+      That is untested; if it doesn't, the fallback is a `mirror` key
+      on the page, which is grammar work.
+    - **The inside face is fed by a script of its own, not the globe
+      script.** The globe script is near its memory limit and sleeps a
+      second per media change. A small copy script in the same prim
+      hears every media change (`changed` with `CHANGED_MEDIA`), reads
+      the outside's address and writes it to the inside without
+      `sound` and `telemetry`, so the audio doesn't play twice and no
+      visitor is counted twice. The same script can feed a flat map
+      panel beside the globe: the frame *is* a flat map, so the panel
+      shows the same dataset at the same moment, centred on the same
+      longitude, and keeps only the keys that make sense on a flat
+      surface (`rotation` and its rate; never `lat` or `zoom`, which
+      move the poles and stretch one side).
+    - **Sharpness differs inside.** From the centre of a sphere the
+      2048-wide frame is spread round 360° whatever the sphere's size:
+      about 6 pixels a degree, against about 18 on a visitor's screen
+      at the viewer's default field of view. Outside, a 25 m sphere
+      seen from 40 m away gets about 12. So the inside is soft, as the
+      original was. Splitting the inside into tiles from a mesh with
+      several inward faces would reach about 11 a degree from a
+      4096×2048 source, the largest most datasets have; it needs a key
+      that draws one tile of the frame, and every tile is one more
+      browser per visitor. It waits until the plain inside has been
+      seen.
+    - **Things that bite at that size.** The floor people stand on
+      inside must be a separate object, because phantom applies to a
+      whole linked object and a linked floor would let them fall
+      through. Prim spin (`/9 spin`) must be off, or the walls turn
+      round the people inside. And the info script's hover text sits
+      above the top of the sphere, out of sight from inside and from
+      the ground, which item 9's kiosk replaces.
 
 Things this touches beyond the code:
 
@@ -1568,6 +1754,23 @@ Written down so these don't get re-proposed in six months.
 - **Patching around #5189 inside TerraViz.** Nothing here reproduced
   it, and there is nothing in TerraViz to change if it does fire — it
   is a crash in the viewer's own embedded browser.
+- **A trackball run by Second Life physics.** A physical ball held in
+  place by `llMoveToTarget` should spin when someone grabs it
+  off-centre, but the grab and the hold fight, so it feels springy;
+  avatars walking into it push it; a grab that wins throws it across
+  the region; and only the region simulates it, so a script would still
+  have to read the spin and pass it on. The momentum belongs in the
+  page, where every copy computes it alike (§9 Phase 5, "A trackball").
+- **A kiosk that each visitor browses and sends from.** Sending would
+  have to be a navigation, which reloads everyone's kiosk and arrives
+  with no name, so the hold and talk rules couldn't apply (§7 item 9).
+  A visitor who wants to explore on their own has the full app on a
+  flat panel (Option E).
+- **Double-sided materials for the inside of a sphere.** One picture on
+  both sides reads mirrored from inside. A hollow sphere's own inside
+  face does it instead (§7 item 11).
+- **Visitors' names on the kiosk or in any address.** "The controls are
+  held" is shown; who holds them stays in the object.
 
 ---
 
@@ -1644,22 +1847,24 @@ driven by its owner in chat, with none of the visitor controls.
 
 *How the controller is built* (in
 [`scripts/second-life-exhibit/`](../scripts/second-life-exhibit/README.md)):
-- **Four scripts, talking by link messages: three in the globe prim
+- **Five scripts, talking by link messages: four in the globe prim
   and one in a prim linked to it.** A
   script gets 64 KB in all, and a dataset record costs about 1.8 bytes
   of it per character while held (§4.1). One script doing everything
   would hold a record while it also holds menus, notecards and visitor
-  lists, so the work is split three ways, and since 27 October four,
-  for the dataset menu below, whose script is in a small prim of its
-  own because a web reply reaches every script in the prim that asked:
+  lists, so the work is split three ways; since 27 October four, for
+  the dataset menu below, whose script is in a small prim of its own
+  because a web reply reaches every script in the prim that asked; and
+  since 28 October five, for the owner's commands (Phase 5, step 1):
   - **globe** owns the address, the clock and the media. It is the
     smoke-test script's core and writes the same keys, though since 27
     October not always the same `t` (below), and it is
-    the only script that changes what visitors see. It takes the
-    owner's chat commands, as before, and control requests from the
-    visitors script, and from the info script to put back a dataset the
-    page can't show. After every change it tells the other two what
-    the globe now shows. It asks the node nothing: a web reply goes to
+    the only script that changes what visitors see. It takes control
+    requests from the visitors script, from the info script to put back
+    a dataset the page can't show, and since 28 October the owner's
+    commands from the owner script rather than from chat. After every
+    change it tells the visitors and info scripts what the globe now
+    shows. It asks the node nothing: a web reply goes to
     every script in the prim with a handler for one, and this one has
     the least room. Since 27 October it keeps the clip's position in
     whole microseconds round the loop, once the info script has passed
@@ -1704,6 +1909,13 @@ driven by its owner in chat, with none of the visitor controls.
     exhibit's reads, below). It reads the node itself, from a prim of
     its own linked to the globe, and takes the node and the owner's
     categories from the visitors script each time it opens.
+  - **owner** (since 28 October, Phase 5 step 1) hears the owner's
+    `/9` commands, checks each one, holds the help and the names
+    `/9 show` knows, and hands the command to the globe, which reports
+    how an owner-only one went; what a visitor can also ask for, the
+    globe words itself. It talks on link messages of its own, not the
+    visitors' control, so beside a globe script from before the split
+    each command is done once.
 - **What visitors can do.** A touch opens a menu for whoever touched.
   "About" is always there, since reading changes nothing. The
   controls are pause or play, back and forward ten seconds, start
@@ -2245,6 +2457,8 @@ driven by its owner in chat, with none of the visitor controls.
     3. Phase 4b's buttons, with the owner's chat commands moved to a
        fifth script to give the globe script room. It goes in the globe
        prim, since it neither asks the node nor needs to be apart.
+       *The move was made on its own on 28 October, as Phase 5's first
+       step; the buttons became Phase 5's console.*
   - **The node and the scripts go together.** A TerraViz node without
     these reads answers them with the app's page and a 200, not JSON,
     which Second Life refuses with its own HTTP 415, since the script
@@ -2320,6 +2534,9 @@ clunky for presenting:
   Turn east and Turn west, all moving that one camera. The Phase 2
   tilt comes out then. The globe script should keep `lat` within ±90
   itself, since the page reads a latitude past a pole as 0.
+  *Superseded on 28 October by Phase 5's console, whose hold buttons
+  move the same camera through §7 item 10's motion keys. The `lat`
+  clamp and the tilt's removal carry over.*
 - **A presenter remote.** A TerraViz globe the presenter drags and
   zooms like the app, opened from a private link the globe gives them,
   in their own browser, the viewer's built-in one or a HUD. It sends its
@@ -2329,6 +2546,270 @@ clunky for presenting:
   it, a probe settles whether a page in the viewer's browser can reach
   that address and whether the viewer's browser runs the full app; if
   not, the remote goes through the node instead.
+
+**Phase 5 — the exhibit console** (§7 items 9–11). *Proposed 28
+October; not built.* The Phase 2 menu works, but it is a dialog of
+twelve text buttons, and it is the part visitors find clunky. Phase 5
+replaces it with things in the world: a kiosk screen to read, buttons
+to press, and a seat to steer from. Every control still goes through
+the visitors script's hold and talk rules, as the menu's do now, and
+every touch still names the avatar who made it, which is what those
+rules need and what a page can't supply (§7 item 9).
+- **The kiosk screen.** A flat prim showing §7 item 9's page, with a
+  clear prim laid over it to catch touches. The clear prim is there
+  because whether a left-click on a face showing media reaches a script
+  is still unconfirmed (§10 question 14). A clear prim shows no media,
+  so its touches are ordinary ones: `llDetectedTouchST` says where on
+  the screen and `llDetectedKey` says who. The kiosk script maps the
+  spot to the region the page drew there, from the table both carry,
+  and acts. The menu script becomes the kiosk script: it already lives
+  in a child prim and already reads pages of the list, and as a kiosk it
+  carries ids and no titles, since the page draws them. It writes the
+  kiosk's own address, so its one-second sleep runs beside the globe
+  script's rather than after it.
+- **A button console.** Buttons where a control is one action, and
+  hold buttons where it is a motion:
+
+  | Control | Form | What it writes |
+  |---|---|---|
+  | Play/pause, step back and forward, slower and faster | Tap | The clock keys that exist (`paused`, `t`, `rate`) |
+  | The live Earth, previous and next dataset, home view | Tap | One address change each, as the menu does now |
+  | Turn east, west, north and south; zoom in and out | Hold | §7 item 10's motion keys: a rate on press, a stop on release |
+  | The catalog | The kiosk screen | Too many items for buttons |
+
+  - **Feedback is immediate even though the globe is not.** A button
+    glows and sinks the moment it is pressed, since changing a prim's
+    glow or position doesn't sleep a script, so the second the media
+    change takes is hidden behind it. A press the rules refuse (someone
+    else holds the controls, or a talk is on) flashes the button red,
+    where today it is a line in chat.
+  - **One script for the whole console**, finding each button by its
+    link name, so buttons can be added or moved without editing it.
+  - **Icons from one texture sheet**, each button showing its own cell
+    through texture offsets: one upload (§10 question 3), and no hover
+    text.
+  - **A lost release can't spin the globe forever.** `touch` repeats
+    for as long as a button is held. If it stops arriving without a
+    `touch_end`, because the visitor crashed or teleported, the console
+    sends the stop itself.
+- **A pilot's seat for presenters.** Sitting on an object grants its
+  script the sitter's keys without asking (`llTakeControls`), and the
+  `control` event fires for as long as a key is held. Arrows turn the
+  globe and Page Up and Page Down zoom; in mouselook the left and right
+  arrows arrive as strafing and are read as turning too. It is the
+  most responsive control here, it works in every viewer, and it has
+  one operator by construction, which is what the hold rule otherwise
+  has to enforce. During a talk it answers only a presenter.
+- **Optional, only if buttons feel coarse:**
+  - *A trackball.* Not Second Life physics (§8). The script reads the
+    drag: `touch` repeats while the button is held, `llDetectedTouchPos`
+    gives the point under the pointer, and the angle between successive
+    points is the turn. A flick hands over a rate that decays, and the
+    ball spins at the same rate with `llTargetOmega`, drawn by each
+    viewer, so the ball and the picture visibly move together. A live
+    mini-globe on the ball waits on §10 question 14, since its clicks
+    would land on media.
+  - *A zoom lever* swinging on a hinge, with detents at a few zoom
+    levels. It writes the `zoom` the page already takes, and the glide
+    makes one change a second look smooth, so it needs no motion keys.
+  - *A time slider* for scrubbing through a season (`t`), and a shuttle
+    dial for speed (`rate`), both through clock keys that exist.
+- **What the scripts shed.** The info script loses the hover text, the
+  card and the abstract, keeping only the clip length the clock needs,
+  which ends most of the memory pressure Phase 2 fought. The globe
+  script gains the motion keys, so the owner commands move to a fifth
+  script first, as Phase 4 already planned. The globe's state message
+  goes to the whole object (`LINK_SET`) instead of its own prim
+  (`LINK_THIS`), so the kiosk prim hears it. The dialog stays for the
+  owner's commands and as a fallback for visitors.
+- **Linked or separate.** A console and kiosk linked to the globe talk
+  to it by link message, the simplest case and the first one built.
+  Linking a large phantom sphere makes the whole linked object phantom,
+  which is fine for screens, buttons and a seat but not for a floor
+  (§7 item 11). A kiosk in a separate object, such as one in the room
+  below a rooftop sphere, would talk by region chat to the globe's own
+  key, with an owner check; that waits for a building that needs it.
+- **Controls inside the sphere.** *Added later on 28 October, after
+  concept renders reviewed with Eric.* A visitor standing on the floor
+  inside the 25 m sphere (§7 item 11) is about twenty metres above the
+  console and can't see it, so the inside gets its own controls:
+  - *A ring of buttons at waist height* round the middle of the floor:
+    the console's buttons in groups round the ring, so several people
+    can stand at it, and below eye level, so it blocks none of the view.
+    It is the console script with a different mesh.
+  - *The pilot's seat in the middle.* Inside, the seat is the most
+    natural control: sit, the arrow keys turn the world round you, and
+    mouselook looks about.
+  - *Touching the inside wall* opens today's menu, since a touch on
+    either face is a touch on the sphere.
+
+  What a visitor reads reaches them through Orbit's card (below), so no
+  screen stands in the view.
+- **Orbit comes to you.** *Added later on 28 October.* Orbit, the
+  app's companion character (`/orbit`, `src/services/orbitCharacter/`),
+  as an object in the world: a pearl body with two large eyes, two small
+  moons, a warm glow and a sparkle wake. It is not the web page on a
+  screen, because shared media can't be transparent and Orbit would be a
+  character inside a television. Every part has a Second Life
+  equivalent:
+
+  | On the page | In Second Life |
+  |---|---|
+  | Flight ("Fly to Earth") | `llSetKeyframedMotion`: the region moves the object, so every viewer sees one path |
+  | The two moons | Child meshes spun with `llTargetOmega`, drawn smoothly by each viewer |
+  | The sparkle wake | Particles, which stay where they were emitted while the body moves on |
+  | The glow | The prim's glow setting |
+  | Eyes and lids | Pieces turned by script toward the person it attends |
+  | Behaviour and emotion states | A table in its script using the page's names (`IDLE`, `CURIOUS`, `PRESENTING`, `POINTING`, `SLEEPY`…, `orbitStates.ts`) |
+
+  - **Whom it attends.** Whoever holds the controls under the visitors
+    script's hold rule; failing that, whoever last touched anything;
+    failing that, nobody, and it circles the globe. During a talk, the
+    presenter. One Orbit attends one person, which is the hold rule's
+    one operator anyway.
+  - **Where it goes.** About 1.5 m beside that person at head height,
+    facing them, re-aimed every second or two as they move. For a
+    visitor inside the big sphere it flies straight through the
+    phantom shell, which is the point: from the floor inside, an Orbit
+    circling outside can't be seen.
+  - **What it reacts to.** The globe's state, through the same state
+    message the scripts share: curious at a new dataset, pointing while
+    the view turns, presenting during a talk, sleepy when the visitors
+    script counts nobody near.
+  - **A card, if wanted.** A thin panel flying with Orbit shows the
+    kiosk page (§7 item 9) to whoever it attends, display only. It is
+    one more browser for every visitor near it, so it shows only while
+    Orbit is with someone.
+  - **Its own object.** A moving object can't be linked to a still one,
+    so Orbit hears the globe on a private channel, checking the
+    sender's owner, and reads the attended avatar's position itself
+    (`llGetObjectDetails`). The key and the position stay in the
+    objects, the visitors script's rule (§9 Phase 2). It is the first
+    object here that follows a person, which is reason enough to ask
+    in-world whether visitors welcome it (§10 question 20), and to keep
+    the following limited to someone who is using the controls if not.
+  - **No conversation.** Orbit answering visitors in chat is §8's
+    in-world Orbit chatbot, still ruled out, and entry 10 in
+    [`LLM_INTEGRATION_OPPORTUNITIES.md`](LLM_INTEGRATION_OPPORTUNITIES.md).
+    The body asks for no LLM and nothing on the node, and costs a
+    visitor no browser unless the card is showing.
+- **The building.** *Added later on 28 October; concepts rendered and
+  reviewed with Eric, nothing modelled for upload.* Two scales:
+  - **The exhibit globe, about 3 m across, on a stem:** one lathed mesh
+    with an accent line where it meets the globe. Eric chose it over a
+    floating halo and a cradle on three blades.
+  - **The fly-in sphere, 25 m across,** a modern take on the Virtual
+    Island building: hollow (§7 item 11), floating 2.8 m clear of a
+    glass rotunda about 30 m across, whose roof is a ring round a glass
+    oculus. The exhibit globe, the kiosk and the console stand inside
+    the rotunda, under the oculus. The floor inside the sphere puts a
+    standing visitor's eyes at its centre, where the 360° view is
+    undistorted.
+  - **The field: nothing crosses the picture.** The sphere is held,
+    visibly, by a cone of light rising from eight emitter fins round the
+    oculus and narrowing to meet the sphere only within about 14° of the
+    south pole, which from the plaza is the underside. A first version
+    hugged the sphere's lower third and was rejected because it lay over
+    the data. In Second Life the cone is one alpha mesh whose gradient
+    scrolls upward with `llSetTextureAnim`, animated by each viewer at
+    no cost to the region, with glow on the fin tips and particle
+    emitters in them. Overlapping alpha surfaces can draw in the wrong
+    order in Second Life, and the cone, the oculus glass and the
+    particles all overlap, so the cone stays an object of its own
+    (§10 question 21).
+  - **What it costs.** The sphere's centre is about 23 m up, so the
+    plaza looks up at it and sees more of the south. The page's camera
+    (`lat`, §7 item 7) can bring the place being shown down toward the
+    crowd. Prim spin stays off (§7 item 11).
+- **The furniture's look.** *Added later on 28 October.* Taken from
+  [`STYLE_GUIDE.md`](../STYLE_GUIDE.md) and the logo:
+  - graphite bodies and the app's dark glass (`#0d0d12`);
+  - one accent hairline per piece in the app's blue (`#4da6ff`), the
+    app's one-pixel panel border made physical;
+  - glow only where something is live or pressed, as the app highlights
+    on hover and active rather than at rest;
+  - labels in the app's uppercase, widely spaced title style;
+  - the trackball as the logo's blue sphere with its grid lines;
+  - nothing standing in front of a globe.
+
+  As meshes: the kiosk screen is its own face shaped 2:1, so a
+  2048×1024 page fills it exactly; every button is one reused mesh with
+  three faces (a body, an icon cap from one texture sheet, a ring that
+  glows); the console's labels are baked into its texture. Upload-ready
+  COLLADA with simplified distance versions and physics shapes comes
+  after the concepts, with land impact measured in-world rather than
+  estimated (§10 question 22).
+
+Order, each step usable on its own:
+1. **Free the globe script.** The owner commands move to a fifth
+   script. Nothing visible changes.
+   *Built on 28 October; not yet run in-world.* The owner script
+   (`terraviz-exhibit-owner.lsl`) hears `/9`, checks each command,
+   hands it to the globe script and words the answer, and holds the
+   help and the names `/9 show` knows. The globe script hears no chat,
+   words only what a visitor can also ask for, and reports how each
+   owner-only command went. They talk on two new link messages rather
+   than the visitors' control, so an owner script beside a globe
+   script from before the split does each command once, not twice.
+   The globe script's source is 6 KB smaller; what that frees of its
+   64 KB is for `/9 memory` in-world to say.
+2. **The kiosk, display only.** One page PR (§7 item 9, with its
+   grammar) and the kiosk script showing it. The hover text turns off
+   when a kiosk is linked. This alone answers the legend, the dated
+   hover text and the 500-character abstract.
+   *Built 28 October, and first tried in-world that day on a new cube,
+   where it showed the page and its date. Put in a sign that had shown
+   a picture of its own, it didn't, for a cause not yet established, so
+   the kiosk script now takes over the face's texture settings and any
+   list of allowed sites left on its media, the two likeliest, and says
+   which face it is on.* The page is
+   `/output/kiosk` (`src/output/kioskMain.ts`), its address the output
+   page's clock keys and no others
+   ([`EMBED_URL_GRAMMAR.md`](EMBED_URL_GRAMMAR.md), "The kiosk page").
+   The kiosk script (`terraviz-exhibit-kiosk.lsl`) is a sixth, optional
+   script, in the screen, which is linked as the build's root, since
+   the globe script turns the prim it is in and as the root would swing
+   the screen round with every tilt. It writes that address from the
+   globe's state message, which now goes to the whole object. The hover
+   text doesn't turn off entirely: it drops the date and the credit,
+   which the screen shows in full, and keeps the title, the telemetry
+   notice the privacy policy asks a measured globe to show where it
+   is, a talk, and how to touch the globe. The title stays because the
+   Section 508 review noted that a text-only viewer such as Radegast
+   shows no media, so for a resident using one, or anyone with media
+   off, the hover text and chat are the whole exhibit; About still
+   gives the abstract, credit and licence in chat for the same reason.
+   The info script asks whether a kiosk is there when it starts and
+   when a prim is linked or unlinked (`MSG_KIOSK`, 271012), the kiosk
+   answers only once its face has taken the page, and the date stops
+   being worked out every couple of seconds while one does. The kiosk
+   answers each of the globe's states as well, "here" or "away", and a
+   state unanswered for ten seconds puts the date and the credit back,
+   so a kiosk script that stops can't leave them missing beside a screen
+   that no longer follows the globe (from Copilot's review of #507).
+3. **The console's tap buttons.** No page change.
+4. **Motion.** One page PR (§7 item 10, with its grammar), then the hold
+   buttons and the seat, under the sphere and inside it. The Phase 2
+   tilt comes out.
+5. **Touch on the kiosk.** The catalog grid replaces the visitor menu.
+6. **The copy script** (§7 item 11): the inside of a hollow sphere and
+   a flat map panel. Independent of the rest, so it can come at any
+   time once the flip is checked in-world (§10 question 17).
+7. **Orbit**: its body, flight, states and attending, with no chat. Its
+   own object, so it can come any time after step 1; the card waits for
+   step 2.
+8. **The building**: the stem stand, the rotunda, the field and the
+   25 m sphere as meshes. The inside of the sphere needs step 6.
+9. **The optional controls**, if the buttons turn out coarse.
+
+Reviewers: the TerraViz Federation Reviewer for each grammar change,
+the Internationalization Engineer and the Section 508 Accessibility
+Specialist for the kiosk page, the Science Communicator for its text,
+the Code Reviewer for the scripts, the Privacy Engineer for Orbit,
+since it reads where a person is, and the analytics reviewer if the
+kiosk ever reports anything. The presenter remote in Phase 4 is not
+replaced: it is the way to steer from outside the world, and the seat
+is the way to steer from inside it.
 
 Options B and D only if a host needs what they uniquely offer: phones
 or no-browser exhibits for B, a self-hosted world for D.
@@ -2441,6 +2922,62 @@ Numbering is kept from the first version, so a reference like
     has. Firestorm may differ. §7 item 4 says why the clock keeps a
     field in step anyway.
 
+Questions 14–22 come from §9 Phase 5 (28 October; 20–22 from its
+later additions). Each is one
+in-world check, and each decides a design choice rather than whether
+the phase works.
+
+14. **Does a left-click on a face showing media reach a script?** The
+    viewer's source says it goes to the media, and only right-click →
+    Touch reaches the script (§7 item 4's controller notes). Phase 2's
+    checklist carries the test. If left-clicks do arrive on
+    non-interactive media, the kiosk needs no clear prim over it and a
+    trackball can wear a live mini-globe.
+15. **How often does `touch` fire during a drag?** It decides whether a
+    trackball follows the hand or steps behind it, and how long a held
+    button can go unheard before the console decides its release was
+    lost.
+16. **Does a seat hand over the arrow keys as expected**, in mouselook
+    as well as out of it, and on the official viewer as well as
+    Firestorm?
+17. **Does media follow a negative horizontal repeat on a hollow
+    sphere's inside face?** If not, the inside needs a `mirror` key on
+    the page (§7 item 11). The same session finds the inside face's
+    number, by a touch script reporting `llDetectedTouchFace`.
+18. **Does a visitor inside a hollow sphere also run the outside's
+    page?** The outside is drawn from one side and can't be seen from
+    in there, but whether the viewer ranks it as hidden (question 13)
+    or keeps it running decides whether being inside costs a visitor
+    one browser or two.
+19. **Can a 25 m phantom sphere be linked to a kiosk in the room below
+    it?** Second Life limits how far apart linked prims can be by their
+    sizes. If it can't, the kiosk talks to the globe by region chat
+    (§9 Phase 5, "Linked or separate") sooner than planned.
+20. **Does keyframed motion carry Orbit smoothly to a visitor**,
+    through the phantom shell to one inside the sphere, and does it
+    look smooth from 1.5 m away, where the region's updates are easiest
+    to see? The same session asks whether visitors welcome an object
+    that comes to them; if not, Orbit attends only someone using the
+    controls (§9 Phase 5, "Orbit comes to you").
+21. **Do the field's cone, the oculus glass and the particles draw in
+    the right order** on the official viewer and Firestorm, at night and
+    in daylight? Alpha surfaces that overlap are where Second Life's
+    drawing order most often goes wrong.
+22. **What do the rotunda, the field and the 25 m sphere cost in land
+    impact**, and does a sphere whose centre is 23 m up fit the
+    parcel's budget? Measured on upload, not estimated.
+    *First readings, 28 October 2026, from the first furniture, not the
+    building:* the uploader took all four pieces, at land impact 8
+    (the plinth, with the stem's Low file in its Low slot by mistake),
+    6 (the stem), 6 (the console) and 1 (each key). Nearly all of it
+    was the lowest levels, which a metre-sized piece shows from about
+    25 m and a key from about 2 m. Rebuilt with plainer lower levels,
+    they estimate at about 3, 3, 2 and 0.6, and fifteen keys linked
+    into the console at about 9 rather than 21
+    (`scripts/second-life-exhibit/mesh/README.md`, "Land impact"). The
+    lesson for the building: a piece's lowest level sets its cost, and
+    `build-meshes.ts --weights` estimates it before an upload.
+
 ---
 
 ## 11. Evidence
@@ -2483,7 +3020,12 @@ Numbering is kept from the first version, so a reference like
 **Constraints**
 - [secondlife/viewer#5189](https://github.com/secondlife/viewer/issues/5189) — the WebGL crash; filed by a Linden Lab developer 28 Dec 2025; `SLPlugin.exe` access violation in `libcef.dll`; CEF 139.0.7258.139, Dullahan 1.24.0; reproduced with the WebGL Aquarium; still open and unassigned as of 23 Oct 2026, stale-labelled Feb 2026
 - [Project Valhalla, 2015](https://modemworld.me/2015/10/08/vallhalla-cef-comes-to-second-life/) — Chrome comes to Second Life's shared media, with a WebGL promise
-- [`llSetPrimMediaParams`](https://wiki.secondlife.com/wiki/LlSetPrimMediaParams) — size parameters, whitelist cap, one-face-per-call, permissions
+- [`llSetPrimMediaParams`](https://wiki.secondlife.com/wiki/LlSetPrimMediaParams) — size parameters, whitelist cap, one-face-per-call, permissions, and a one-second script sleep per call
+- [`llDialog`](https://wiki.secondlife.com/wiki/LlDialog) — at most 12 buttons, each label at most 24 bytes
+- [`llDetectedTouchST`](https://wiki.secondlife.com/wiki/LlDetectedTouchST), [`llDetectedTouchPos`](https://wiki.secondlife.com/wiki/LlDetectedTouchPos), [`llDetectedTouchFace`](https://wiki.secondlife.com/wiki/LlDetectedTouchFace) and the [`touch`](https://wiki.secondlife.com/wiki/Touch) event — where on a face a touch landed, and a `touch` event repeated for as long as the button is held
+- [`llTakeControls`](https://wiki.secondlife.com/wiki/LlTakeControls) and [`llRequestPermissions`](https://wiki.secondlife.com/wiki/LlRequestPermissions) — an avatar sitting on the object grants `PERMISSION_TAKE_CONTROLS` without a dialog; the `control` event reports held keys
+- [`changed`](https://wiki.secondlife.com/wiki/Changed) — `CHANGED_MEDIA` when media on the prim is added, changed or removed
+- [`llScaleTexture`](https://wiki.secondlife.com/wiki/LlScaleTexture) — repeats per face; a negative repeat flips the texture
 - [`llHTTPRequest`](https://wiki.secondlife.com/wiki/LlHTTPRequest) — reply and request size limits, rate limits, timeout, header rules
 - [`llJsonGetValue`](https://wiki.secondlife.com/wiki/LlJsonGetValue) — native JSON parsing in LSL since 20 May 2013 (server 13.05.20)
 - [`llSetContentType`](https://wiki.secondlife.com/wiki/LlSetContentType) and [`llHTTPResponse`](https://wiki.secondlife.com/wiki/LlHTTPResponse) — a script-served page renders as HTML only for the object's owner, in their viewer, in the same region; no size limit beyond script memory; 25 seconds to answer

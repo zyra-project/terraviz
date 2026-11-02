@@ -10,7 +10,7 @@
 //   The source:  https://github.com/zyra-project/terraviz
 //
 // WHAT THIS SCRIPT DOES
-// It is one of the exhibit's four scripts, and the one that deals with
+// It is one of the exhibit's five scripts, and the one that deals with
 // people. terraviz-exhibit.lsl decides what the globe shows, and this one
 // decides who may change it:
 // - A touch opens a menu for whoever touched. "About" is always there.
@@ -61,13 +61,13 @@
 // anyone with a menu open by key, for up to five minutes.
 //
 // The owner may always act, and has two commands on channel 9 beside the
-// globe script's: /9 talk (whether one is on; "/9 talk start" and "/9 talk
+// owner script's: /9 talk (whether one is on; "/9 talk start" and "/9 talk
 // end" start and end one) and /9 presenters (what the notecards gave).
 
 integer CHAN = 9;
 
-// The link messages the three scripts in the sphere share. exhibit.test.ts
-// holds the numbers to the globe script's.
+// The link messages this script and the globe and info scripts share.
+// exhibit.test.ts holds the numbers to the globe script's.
 integer MSG_STATE   = 271001;  // globe to all: what the globe shows, as JSON
 integer MSG_CONTROL = 271002;  // visitors or info to globe: a control, for the key who asked
 integer MSG_HELLO   = 271003;  // any to globe: say the state again (a script reset)

@@ -6,9 +6,12 @@ import { describe, expect, it } from 'vitest'
 import { scenes, pointClearOfPanel } from './scenes'
 
 describe('screenshot scene manifest', () => {
-  it('covers the high-traffic surface (~15–30 scenes)', () => {
+  it('covers the high-traffic surface without sprawling', () => {
+    // A ceiling, so the manifest stays one scene per surface rather than
+    // one per state. Raised to 45 with the exhibit's kiosk page, the 41st,
+    // a surface of its own that CLAUDE.md asks a scene for.
     expect(scenes.length).toBeGreaterThanOrEqual(15)
-    expect(scenes.length).toBeLessThanOrEqual(40)
+    expect(scenes.length).toBeLessThanOrEqual(45)
   })
 
   it('every scene has a unique name', () => {

@@ -13,7 +13,9 @@
  * `docs/CSS_ARCHITECTURE_PLAN.md` §RTL safety. The gradient itself is
  * deliberately physical `to right`: it is a data axis whose low end is
  * pinned to the tick labels, and mirroring it in RTL would put the
- * numbers on the wrong end of the ramp.
+ * numbers on the wrong end of the ramp. The tick axis is held to the
+ * same direction with `dir="ltr"`; mirrored on its own, as it once was,
+ * it labelled the low end with the high value.
  */
 
 /* Positioned to match `.panel-legend` in base.css exactly — same
@@ -91,6 +93,9 @@ button.panel-colorbar:focus-visible {
   block-size: 0.875rem;
 }
 
+/* The axis is `dir="ltr"` in every language (colorbarUI.ts), like the
+   ramp above it, so a tick's inline start is its left and the same
+   centring holds under a right-to-left page. */
 .panel-colorbar-tick {
   position: absolute;
   inset-block-start: 0;
@@ -98,10 +103,6 @@ button.panel-colorbar:focus-visible {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
   opacity: 0.82;
-}
-
-:root[dir='rtl'] .panel-colorbar-tick {
-  transform: translateX(50%);
 }
 
 .panel-colorbar-units {

@@ -166,6 +166,11 @@ settles for Orbit.
 **Effort:** a plan section first, then one endpoint and the
 controller's "Ask Orbit" menu entry. It waits on Phase 2, whose touch,
 presenter and hold rules it uses.
+**Body:** since 28 October that plan's Phase 5 ("Orbit comes to you")
+gives Orbit a body in the world, which flies to whoever holds the
+controls and needs no model at all. This entry would be its voice, and
+"Ask Orbit" could then be a touch on Orbit itself rather than a menu
+entry. The body does not depend on this entry.
 
 ## Sequencing lean
 

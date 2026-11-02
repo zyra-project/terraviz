@@ -94,8 +94,14 @@ export function renderColorbar(options: ColorbarOptions): HTMLElement {
   // exists for, and the reason this indirection is worth having.
   gradient.style.setProperty('--colorbar-ramp', `linear-gradient(to right, ${stops})`)
 
+  // The axis runs the way the ramp does, left to right in every language:
+  // its ticks are placed from its inline start, and under a right-to-left
+  // page that start is the right, which put the high value over the low
+  // colour (found in review of the exhibit kiosk, the first page to show
+  // the bar under `?lang=ar`).
   const axis = document.createElement('div')
   axis.className = 'panel-colorbar-axis'
+  axis.dir = 'ltr'
   for (const tick of colorbarTicks(scale, display, 4)) {
     const mark = document.createElement('span')
     mark.className = 'panel-colorbar-tick'
@@ -122,6 +128,9 @@ export function renderColorbar(options: ColorbarOptions): HTMLElement {
     ? t('colorbar.ariaWithTitle', { title, min: lo, max: hi })
     : t('colorbar.aria', { min: lo, max: hi })
   el.setAttribute('aria-label', onOpen ? t('colorbar.ariaAdjust', { name }) : name)
+  // A bare `div` may not be named, so assistive technology drops the
+  // label and reads the ticks; as an image, the label is what is read.
+  if (!onOpen) el.setAttribute('role', 'img')
   if (onOpen) {
     el.title = t('colorbar.tapToAdjust')
     el.addEventListener('click', (ev) => {

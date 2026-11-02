@@ -1831,13 +1831,15 @@ describe('vite entry list', () => {
     // `rollupOptions.input` instead of adding to the existing object
     // silently drops the other pages, and the build stays green while
     // /orbit 404s in production.
-    for (const entry of ['main:', 'orbit:', 'output:']) {
+    for (const entry of ['main:', 'orbit:', 'output:', 'kiosk:']) {
       expect(config).toContain(entry)
     }
   })
 
-  it('points the output entry at a page under src/, as root: ./src requires', () => {
+  it('points the output entries at pages under src/, as root: ./src requires', () => {
     expect(config).toContain("'src/output/output.html'")
+    // The exhibit's kiosk, served beside the globe's page as /output/kiosk.
+    expect(config).toContain("'src/output/kiosk.html'")
   })
 })
 

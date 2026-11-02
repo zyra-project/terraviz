@@ -288,6 +288,105 @@ https://terraviz.zyra-project.org/output/output?dataset=<id>&fit=fill&width=2048
 
 ---
 
+## The kiosk page — what a globe shows, to read
+
+A screen beside an output-page globe, saying what the globe shows
+([`SECOND_LIFE_COMPAT.md`](SECOND_LIFE_COMPAT.md) §7 item 9), at a base
+URL of its own:
+
+```
+https://<terraviz-node>/output/kiosk#<params>
+```
+
+The path is exactly `/output/kiosk`. It shows the dataset's title, the
+date the globe shows and whether it is playing, its full abstract as
+plain text, its thumbnail, its legend (the dataset's legend image, or
+for a data-encoded dataset its colour bar), and its credit and licence.
+In a window at least 2048×1024, the largest media face Second Life
+gives and the one the exhibit's kiosk script asks for, it is a fixed
+page of that size, scaled to fit and centred; in a smaller window, an
+ordinary browser, it is a page that reflows and scrolls. Layout is not
+part of this contract. It is display only: nothing on it can be
+clicked. It plays no video, runs no WebGL and reports no telemetry.
+A node older than this page has no `/output/kiosk`, and a path the site
+doesn't recognise serves the main app, which reports Essential
+telemetry by default; check the node serves the kiosk before putting
+its address on a screen.
+
+**It reads the output page's keys, through the output page's own
+reader**, so a kiosk and a globe given the same keys can't read them
+differently. It acts on five of them, and accepts and ignores the rest,
+so a composer may hand it the globe's own fragment:
+
+| Parameter | Effect on the kiosk |
+|---|---|
+| `dataset` | The dataset to describe, read from the node (below). Absent, an empty `dataset=`, or a value the output page would refuse is the live Earth, dated now, as it is on the globe. The empty form lets a composer keep a `#` in the address on the live Earth. |
+| `t`, `at`, `rate`, `paused` | The globe's clock, exactly as the output page reads it, defaults included. The kiosk shows the date the globe is at: where the clip is, placed on the dataset's span at the cadence its frames step, the instant the main app's time label would show. |
+
+- **Give the kiosk the globe's `at`.** With it, both pages count from the
+  same moment and show the same date. Without it, each page counts from
+  when it read its address, and two pages loaded a second apart are a
+  second apart for good, which on a fast clip is hours of the dataset.
+  The exhibit's scripts always write `at` while a clip plays.
+- **The date is in UTC**, unlike the main app's time label, which uses
+  the viewer's zone. Every visitor at a screen runs their own copy, and
+  a presenter pointing at "12:00" needs every copy to say the same. It
+  follows the app's rules for when there is a date and when it has a
+  time of day: a video is dated only when the dataset gives both ends
+  of its span, with the time when its stated period is under a day (or,
+  with no period, when its frames step faster than one); a picture shows
+  its date, with the time only when its period is under a day, and
+  where it gives a second date the kiosk shows the span, where the app
+  shows the first. While a clip plays too fast for its date to be read,
+  the kiosk writes a coarser one, the day, the month or the year, so it
+  changes at most about once a second; paused, it is exact.
+- **The clip's length is the node's.** The kiosk plays no video, so it
+  takes the length the globe's copies loop on from the node's exhibit
+  card (`/api/exhibit/v1/datasets/:id`, its `exactDuration`). While the
+  node is still reading it from the stream's playlists, the kiosk shows
+  the dataset's whole span rather than a date from a guessed length,
+  and reads the card again when it says to, four times at its interval
+  and then every 5 minutes for as long as the dataset is shown. For a
+  video the node has no playlist for, a single file, the card never
+  gives a length, so the kiosk shows the span for as long as it is up.
+- **It describes only what the globe can show.** A dataset the card
+  says the globe can't show (`showable: false`: a tour, or a format the
+  output page doesn't draw) is the live Earth on the kiosk, as on the
+  globe. One the node hasn't got says so, and is not asked for again.
+- **What it reads:** the exhibit card, for the length, whether the
+  globe can show it, the credit and the licence, and the record
+  (`GET /api/v1/datasets/:id`), for the title, full abstract, thumbnail,
+  legend and colour scale, and for the whole of a credit or licence
+  statement the card cut short. Only the node's own 404
+  (`{ "error": "not_found" }`) means it hasn't got the dataset. Any
+  other read that fails, or takes longer than 20 seconds, is retried
+  after 5 s, 30 s and 2 minutes, then every 5 minutes, while the address
+  still asks for that dataset. A read that lands after the address moved
+  on is dropped, a failure included.
+- **The query and the fragment are one parameter set**, as on the
+  output page: keep a `#` for the whole session, so a change never
+  reloads the page.
+- **Labels are in the viewer's language** where the app has a
+  translation, as the main app chooses it: a language chosen in the
+  main app on the same site, then a `lang` in the query, then the
+  browser's. `lang` is the app's own switch rather than a key of this
+  page, and read only before the `#`, so in Second Life it would set the
+  language for every visitor at the screen; the exhibit's scripts write
+  none. The dataset's own text is as the node holds it.
+
+```text
+# The live Earth
+https://terraviz.zyra-project.org/output/kiosk#dataset=
+
+# A dataset paused at 61.2 s, the same fragment its globe was given
+https://terraviz.zyra-project.org/output/kiosk#dataset=<id>&t=61.2&paused=1
+
+# The same dataset playing from 100 s at twice its speed, as of 17:00 UTC on 24 October 2026
+https://terraviz.zyra-project.org/output/kiosk#dataset=<id>&t=100&at=1792861200&rate=2
+```
+
+---
+
 ## Composition examples
 
 These are the exact shapes the WordPress blocks (and the poster)
@@ -344,6 +443,7 @@ https://terraviz.zyra-project.org/?dataset=INTERNAL_SOS_123&embed=1&layout=4
 | v1 | 2026-10-25 | Additive, with one behavior change. The output page gains `lat`, the latitude at the picture's centre, and `zoom`, which magnifies it, through the desktop output's follow turn; a zoom past what the picture can magnify (about 5.67) reads as that most. `rotation` keeps its meaning and draws the same picture at rest as before; at a pole it names the meridian the centre sits on. The behavior change: the three keys name the view the picture comes to rest on, and a change to any of them after the `#` now sets the picture moving, coasting to a stop on the new view like a spun globe on its bearing, instead of jumping there. The first reading of an address, and every view for a viewer whose browser reports reduced motion, still jump. Kept in v1 by the maintainer's decision of 25 October 2026, recorded in #501: the section was a day old, and every known composer writes at most once a second, the Second Life limit. **Migration:** a composer that animated `rotation` by writing it faster than once a second now sees the picture trail by about 0.8 s, and its swings shrink to about 40% at 0.5 Hz; write the view the picture should come to rest on, at most once a second. No main-app parameter changes. |
 | v1 | 2026-10-26 | One behavior change. The output page's clock (`t`, `at`, `rate`, `paused`) wraps on the clip's playlist total, the `#EXTINF`s summed from the first rendition a copy loads, rather than on the video element's `duration`. That `duration` was the same number until a stream had buffered to its end and then the latest end of every track: measured in Chromium, 21 to 40 ms longer on the node's bundles with a sound track. So a copy changed its period partway through, copies on different engines looped on different periods, and the gap grew with every loop since `at`. A copy with no playlist to read a length from (a single file, or a browser playing HLS itself) still wraps on the video's own length. No key, type or range changes. Kept in v1 by the maintainer's decision of 26 October 2026, recorded in #502: the section was two days old, and the old period was never stable even on one copy. **Migration:** nothing for a composer, which writes the same keys. A copy opened before the change keeps the old period until it reloads, so on a bundle with a sound track it can show a different point of the loop from a new copy; any change before the `#` reloads every copy. No main-app parameter changes. The same day, "Paused is exact; playing is close" was reworded to state its limit, which was already so: each pass round the clip restarts the video, so how close playing copies stay depends on the clip's length and the rate, and on a short clip at a high rate they don't settle. No behavior changes with that. |
 | v1 | 2026-10-27 | Additive. The output page gains `sound=1`, which plays a video's sound track. It is muted by default and fails toward muted like `telemetry`, so every address without `sound=1` stays silent; a browser that refuses to play aloud without a click leaves that copy muted until it reloads. A copy loaded before a node deploys this ignores `sound` and stays muted until it reloads, which a `#` change doesn't do, so during a rollout visitors at one globe can hear different things. No main-app parameter changes. |
+| v1 | 2026-10-28 | Additive. A new page, the kiosk (`/output/kiosk`), reads the output page's `dataset` and clock keys (`t`, `at`, `rate`, `paused`) through the output page's own reader and describes what the globe shows, with its date in UTC; it accepts and ignores the output page's other keys. No output-page or main-app parameter changes. |
 
 ---
 
@@ -356,6 +456,7 @@ https://terraviz.zyra-project.org/?dataset=INTERNAL_SOS_123&embed=1&layout=4
 - `src/services/deepLinkService.ts` — `/dataset/:id` path form and native `zyra://` links
 - `src/styles/embed.css` — the chrome-hiding rules `embed=1` switches on
 - `src/output/webMode.ts` — the output page's reader; `webOutput.ts` — how it is applied; `webDataset.ts` — the dataset fetch; `webClock.ts` — the shared clock; `webCamera.ts` — the camera and its glide
+- `src/output/kioskMain.ts` — the kiosk page, which reads its address with `webMode.ts`; `kioskPage.ts` — how a reading is applied; `kioskModel.ts` — what it reads from the node and how it dates the globe
 - `scripts/second-life-probe/terraviz-globe.lsl` — an in-world composer of output-page addresses, and of a main-app `/?dataset=` link for visitors. Its `globe.test.ts` fails if a key it writes is renamed or removed, or stops accepting a value the script writes; a change in what a value does is not caught there
 - `scripts/second-life-exhibit/terraviz-exhibit.lsl` — the exhibit's globe script, composing the same output-page addresses, with `sound=1` besides, from a copy of the smoke-test script's code, held to the page by the same `globe.test.ts`, which likewise doesn't catch a change in what a value does. Unlike the smoke-test script it writes `t` within the clip's loop once it knows the clip's length, from the exhibit card. Its `terraviz-exhibit-info.lsl` gives visitors a main-app `/dataset/<slug>` link, or `/dataset/<id>` for a slug `src/utils/datasetUrl.ts` wouldn't emit
 - [`SECOND_LIFE_COMPAT.md`](SECOND_LIFE_COMPAT.md) §7 — why the output page takes these parameters
