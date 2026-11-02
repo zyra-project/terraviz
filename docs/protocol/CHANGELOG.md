@@ -11,6 +11,25 @@ Additive changes (new optional field, new enum value) stay under the
 current major and get an entry here. Breaking changes mint a new
 major (`/schema/v2/`) and an entry with a migration note.
 
+## v1 (behaviour change, no schema change) — 2026-11-02
+
+- **The feed serves `federated` rows, not only `public`.** `federated`
+  is a settable dataset visibility — it has been in `dataset.schema.json`'s
+  enum all along — that means "share with subscribed peers, withhold
+  from the public catalog." Until now no serve path read it: the public
+  catalog and the federation feed both scanned `visibility = 'public'`
+  alone, so a `federated` dataset reached no one. The feed now scans
+  `visibility IN ('public', 'federated')` and sorts a full page row from
+  a tombstone by the same broadened predicate, so a live `federated` row
+  is a full row and a retracted one a tombstone, exactly as a `public`
+  row is. The public catalog is unchanged and stays public-only — the
+  two predicates now differ by exactly the `federated` visibility. **No
+  wire shape changes:** `feed.schema.json` is byte-for-byte the same, a
+  subscriber already accepts every `visibility` the enum allows, and a
+  feed gated off (the on-merge default) serves nothing either way. A
+  reader that mirrored a node's feed before this sees that node's
+  `federated` rows appear at its next pull.
+
 ## v1 (additive, plus one behaviour change) — 2026-10-27
 
 - **Review corrections:** signed feeds authenticate received bytes

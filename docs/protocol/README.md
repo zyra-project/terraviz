@@ -138,9 +138,12 @@ SCHEMA_BASE_URL=https://terraviz.example.org/schema/v1 npm run gen:protocol-sche
 
 ## The federation feed
 
-`GET /api/v1/federation/feed` serves a node's **public** catalog to
-other nodes, one page at a time. The schema pins the body; the rest of
-the contract is here, because a schema cannot carry it.
+`GET /api/v1/federation/feed` serves a node's **federated catalog** —
+its `public` and `federated` datasets — to other nodes, one page at a
+time. A `federated` dataset is shared with subscribed peers but
+withheld from the node's own public catalog; `restricted` and `private`
+are never served. The schema pins the body; the rest of the contract is
+here, because a schema cannot carry it.
 
 - **Off unless the node turns it on.** The route answers 404
   `{"error":"not_found"}` unless `FEDERATION_ENABLED` is exactly
@@ -197,13 +200,14 @@ the contract is here, because a schema cannot carry it.
   a database snapshot or a commit-order cursor. Keep
   asking while `has_more` is true; after that, ask again later with
   the last cursor.
-- **Tombstones are ids only.** A public, non-hidden row that is retracted
-  arrives as its id in `tombstones[]`, and a reader drops its copy.
-  Hidden rows never enter the scan, including rows hidden before
-  their first publication. A hidden row, hard delete or move away
-  from public visibility leaves no tombstone. To withdraw a dataset
-  from subscribers promptly, retract it while it is still public and
-  not hidden: a tombstone is the only withdrawal an incremental pull
+- **Tombstones are ids only.** A feed-visible (`public` or `federated`),
+  non-hidden row that is retracted arrives as its id in `tombstones[]`,
+  and a reader drops its copy. Hidden rows never enter the scan,
+  including rows hidden before their first publication. A hidden row,
+  hard delete or move away from feed visibility (to `restricted` or
+  `private`) leaves no tombstone. To withdraw a dataset
+  from subscribers promptly, retract it while it is still feed-visible
+  and not hidden: a tombstone is the only withdrawal an incremental pull
   carries, and it reaches the first pull made after the 30 s settle
   window. Hide it, if at all, only after peers have pulled. To withdraw
   many datasets at once, retract them too: a sweep that drops most of a

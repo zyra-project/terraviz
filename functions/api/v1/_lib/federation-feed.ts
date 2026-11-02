@@ -8,13 +8,16 @@
  * The D1 implementation is `federation-feed-d1.ts`; the route wires the
  * two together and signs the result with `federation-signature.ts`.
  *
- * **What a page is.** Published, public-visibility, non-hidden rows
- * in (updated_at, id) order. Visible rows are full datasets; retracted
- * rows are tombstones. Hidden rows and their ids never enter the feed.
+ * **What a page is.** Published, feed-visible (`public` or `federated`),
+ * non-hidden rows in (updated_at, id) order. Feed-visible rows are full
+ * datasets; retracted rows are tombstones. Hidden rows and their ids
+ * never enter the feed. A `federated` row is served here but withheld
+ * from the public catalog — the feed and the catalog differ by exactly
+ * that visibility (`federation-feed-d1.ts`).
  *
  * **What a subscriber does with it.** Apply pages in order. A completed
  * full sync schedules a deferred sweep of rows not seen in the run. This
- * covers hard deletes, hidden rows and changes away from public visibility.
+ * covers hard deletes, hidden rows and changes away from feed visibility.
  *
  * **Why a settle watermark.** `updated_at` is stamped by the writer,
  * not by commit order, so a write that commits after a page was read
@@ -66,9 +69,9 @@ export interface FederationFeedBody {
   /** More rows are already waiting below the watermark; pull again now. */
   has_more: boolean
   datasets: WireDataset[]
-  /** Ids of public, non-hidden rows that were retracted. */
+  /** Ids of feed-visible (public or federated), non-hidden rows that were retracted. */
   tombstones: string[]
-  /** Ids of public, non-hidden rows on this page that this node could
+  /** Ids of feed-visible (public or federated), non-hidden rows on this page that this node could
    *  not serialize. Present only when there is one. A subscriber keeps
    *  its copy of each, unchanged and safe from a sweep. The cursor moves
    *  past them, so a repair reaches it only if it moves the row's
@@ -84,8 +87,9 @@ export interface FeedPosition {
 
 export interface FederatedRow {
   row: DatasetRow
-  /** Whether the row is public right now (`PUBLIC_DATASET_PREDICATE`);
-   *  `false` means it goes out as a tombstone. */
+  /** Whether the row is feed-visible right now (`FEED_VISIBLE_PREDICATE`:
+   *  public or federated, non-hidden, not retracted); `false` means it
+   *  goes out as a tombstone. */
   visible: boolean
 }
 
@@ -96,9 +100,9 @@ export interface FederatedRow {
  */
 export interface FederationFeedStore {
   getNodeIdentity(): Promise<NodeIdentityRow | null>
-  /** Published, non-hidden, local-origin, `visibility = 'public'` rows strictly after `after`
-   *  (or from the start), with `updated_at <= until`, ordered by
-   *  `updated_at` then `id`, at most `limit` of them. */
+  /** Published, non-hidden, local-origin, `visibility IN ('public', 'federated')` rows
+   *  strictly after `after` (or from the start), with `updated_at <= until`,
+   *  ordered by `updated_at` then `id`, at most `limit` of them. */
   listFederatedRows(query: {
     nodeId: string
     after: FeedPosition | null

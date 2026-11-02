@@ -150,6 +150,39 @@ describe('federation conformance: feed route ↔ subscriber engine', () => {
     expect(mirrored().map(r => r.remote_id)).toEqual(await feedIds())
   })
 
+  it('serves a federated row over the feed as a full row a subscriber mirrors', async () => {
+    // A `federated` dataset is withheld from the public catalog but
+    // shared with subscribed peers. It must ride the feed as a *full*
+    // row, never a tombstone — the whole point of the visibility. If
+    // the feed judged visibility by the public-only predicate it would
+    // ship this id under `tombstones` and the subscriber would never
+    // mirror it.
+    publisher.prepare("UPDATE datasets SET visibility = 'federated' WHERE id = ?").run(idOf(2))
+    await addPeer()
+
+    const res = await onRequestGet(makeCtx({ url: `${ORIGIN}/api/v1/federation/feed?limit=250`, env: publisherEnv }))
+    const body = (await res.json()) as { datasets: Array<{ id: string }>; tombstones: string[] }
+    expect(body.datasets.map(d => d.id)).toContain(idOf(2))
+    expect(body.tombstones).not.toContain(idOf(2))
+
+    expect(await pull({ pageLimit: 250 })).toMatchObject({ ok: true, full: true, complete: true })
+    expect(mirrored().map(r => r.remote_id)).toContain(idOf(2))
+  })
+
+  it('ships a retracted federated row as a tombstone', async () => {
+    publisher.prepare("UPDATE datasets SET visibility = 'federated' WHERE id = ?").run(idOf(3))
+    await addPeer()
+    expect((await pull()).ok).toBe(true)
+    expect(mirrored().map(r => r.remote_id)).toContain(idOf(3))
+
+    vi.setSystemTime(new Date('2026-02-02T00:00:00.000Z'))
+    publisher
+      .prepare("UPDATE datasets SET retracted_at = '2026-02-01T12:00:00.000Z', updated_at = '2026-02-01T12:00:00.000Z' WHERE id = ?")
+      .run(idOf(3))
+    expect(await pull()).toMatchObject({ ok: true, full: false, tombstoned: 1 })
+    expect(mirrored().map(r => r.remote_id)).not.toContain(idOf(3))
+  })
+
   it('hiding discloses no tombstone and removes the mirror only after a full scan and deferred sweep', async () => {
     await addPeer()
     expect((await pull()).ok).toBe(true)

@@ -10,7 +10,7 @@ schema referenced from
 > secret, request signing, signed Catalog responses, per-row digests,
 > key rotation and version negotiation proposed below are not built.
 > What is implemented is an
-> open feed of public rows, each page signed with the node's Ed25519
+> open feed of public and federated rows, each page signed with the node's Ed25519
 > key and pulled by a subscriber that pinned that key out of band —
 > see [`protocol/README.md`](protocol/README.md) §The federation feed
 > and [`metadata/PHASE5_IMPLEMENTATION.md`](metadata/PHASE5_IMPLEMENTATION.md).
