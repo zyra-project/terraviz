@@ -654,7 +654,11 @@ export const TROUBLESHOOTING = [
   },
   {
     symptom: '401 "Invalid or expired Access assertion"',
-    fix: "Your AUD does not match the application that issued the JWT. Re-copy it from the application's Overview tab. A token minted for a different application in the same team is rejected by design.",
+    fix: "Your AUD does not match the application that issued the JWT. Re-copy it from the application's Additional settings, or its Overview tab on an older dashboard. A token minted for a different application in the same team is rejected by design.",
+  },
+  {
+    symptom: 'Feedback exports return 401 "Unauthorized"',
+    fix: 'The feedback admin routes refused the Access token, and no `FEEDBACK_ADMIN_TOKEN` bearer matched. The portal\'s Export buttons need an Access app covering `/api/feedback-admin`; without one, only the bearer works. `ACCESS_TEAM_DOMAIN` must be set, or every Access header is refused. `ACCESS_FEEDBACK_AUD` must be that app\'s AUD, or your publisher AUD if the publisher app covers the path; `none` refuses every token. Redeploy after changing either.',
   },
   {
     symptom: 'Publisher API returns 403 cross_origin_request or origin_required',
@@ -782,7 +786,7 @@ export const WORKSHEET: WorksheetField[] = [
   { id: 'W10', label: 'Pages project name', phase: 5, token: '‹pages-project›', placeholder: 'terraviz', origin: 'asked', fromTool: 'pagesProject', validator: 'projectName', consumedBy: [6, 8, 10], minTier: 1 },
   { id: 'W11', label: 'CLOUDFLARE_API_TOKEN', phase: 5, token: '‹api-token›', placeholder: 'token value', note: 'Minimum scope: Account → Cloudflare Pages → Edit.', secret: true, origin: 'generated', consumedBy: [10, 13], minTier: 1 },
   { id: 'W12', label: 'Access team domain', phase: 6, token: '‹team›.cloudflareaccess.com', placeholder: 'your-org.cloudflareaccess.com', note: 'Team domain only, no https://. The tool discovers this for you.', origin: 'discovered', consumedBy: [8], minTier: 2 },
-  { id: 'W13', label: 'Access AUD (publisher app)', phase: 6, token: '‹access-aud›', placeholder: '64-char hex', note: 'Application → Overview → Application Audience Tag.', validator: 'aud', origin: 'discovered', consumedBy: [8], minTier: 2 },
+  { id: 'W13', label: 'Access AUD (publisher app)', phase: 6, token: '‹access-aud›', placeholder: '64-char hex', note: 'Application → Additional settings → Application Audience (AUD) Tag. Older dashboards show it on the Overview tab.', validator: 'aud', origin: 'discovered', consumedBy: [8], minTier: 2 },
   { id: 'W14', label: 'CF_ACCESS_CLIENT_ID', phase: 6, token: '‹client-id›', placeholder: '….access', secret: true, origin: 'shown-once', consumedBy: [9, 10, 12, 13], minTier: 2 },
   { id: 'W15', label: 'CF_ACCESS_CLIENT_SECRET', phase: 6, token: '‹client-secret›', placeholder: 'shown once', note: 'Cloudflare shows this exactly once. Save it before closing the dialog.', secret: true, origin: 'shown-once', consumedBy: [9, 10, 12, 13], minTier: 2 },
   { id: 'W16', label: 'NODE_ID_PRIVATE_KEY_PEM', phase: 7, token: '‹node-private-key›', placeholder: 'from .dev.vars', note: 'Back this up. Regenerating it means re-provisioning your identity.', secret: true, origin: 'generated', consumedBy: [8], minTier: 2 },

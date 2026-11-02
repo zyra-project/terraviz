@@ -1078,9 +1078,10 @@ Self-hosted**:
 > exact match against one address and is the single most common
 > Access misconfiguration.
 
-After saving, open the application's **Overview** tab and copy the
-**Application Audience (AUD) Tag** — a 64-char hex string.
-**Record it as `W13`.**
+After saving, copy the application's **Application Audience (AUD)
+Tag**, a 64-character hex string. The current dashboard shows it under
+the application's **Additional settings**; older ones showed it on the
+**Overview** tab. **Record it as `W13`.**
 
 **Why the cookie settings.** Access keeps a publisher signed in with
 a `CF_Authorization` cookie, and that cookie is what authorises every
@@ -1251,8 +1252,38 @@ cookie, so one left at Cloudflare's defaults can undo the others.
 
 **Admin dashboard.** One app, name `Terraviz Admin`, destination
 `api/feedback-admin` on both hostnames, one Allow policy on your
-email domain. Without it, those endpoints fall back to a
-`FEEDBACK_ADMIN_TOKEN` bearer.
+email domain. The portal's **Export** buttons use that path, so a
+browser can export only through an app covering it. Without one, the
+buttons don't work, because a link can't carry a bearer. Exports then
+go through a script that sends the `FEEDBACK_ADMIN_TOKEN` bearer.
+
+Then set the plaintext variable `ACCESS_FEEDBACK_AUD` in both
+Production and Preview, and redeploy. `npm run setup` writes it only
+if you export it, and then rewrites that value on every later run. To
+change it, export the new value rather than editing the dashboard.
+- **With this app:** its AUD, from the same place as `W13` (6.2).
+- **If your publisher app covers this path instead:** `W13`.
+- **With no app on this path:** `none`. The routes then refuse every
+  Access token and take only the bearer.
+
+The feedback admin routes check that an Access token was signed by
+your team, which needs `ACCESS_TEAM_DOMAIN`. Without that variable,
+they refuse every Access header and take only the bearer. Once
+`ACCESS_FEEDBACK_AUD` is set, the token must be for that app.
+
+Until it is set, a token for any of your team's applications is
+accepted. Anyone any of those apps admits can then read feedback by
+sending their own sign-in cookie as the header. A later release
+will refuse such tokens, so set the variable now.
+
+On these routes the Access policy decides who reads feedback, not
+the portal's Users tab. With `W13`, a publisher you suspend there
+keeps their Access sign-in, and with it these routes. That is why
+`none`, not `W13`, is the value for a node with no app on this path.
+
+The older direct routes, such as `/api/feedback-export`, stay
+outside the app. They take the bearer, or an Access token that a
+caller sends itself.
 
 **Telemetry staff-tagging.** Lets dashboards filter staff dogfood
 out of metrics. Destinations `<W2>/api/ingest` and
@@ -1348,6 +1379,7 @@ Everything referenced below now exists. Pages → your project →
 |---|---|---|
 | `ACCESS_TEAM_DOMAIN` | `W12` — team domain only, no `https://` | |
 | `ACCESS_AUD` | `W13` | |
+| `ACCESS_FEEDBACK_AUD` | 6.4's admin app AUD, `W13`, or `none` (see 6.4) | |
 | `TRUSTED_PUBLISHER_DOMAINS` | `your-org.org` (comma-separated, optional) | |
 
 ## 8.3 Secrets (encrypted)
@@ -2387,6 +2419,10 @@ there at that path.
 - **New manual steps.** `npm run setup -- --manual` reprints the
   current pre-flight sheet, including any step added since you
   installed. Turning on Analytics Engine arrived this way.
+- **Security notes.** Read [`CHANGELOG.md`](../CHANGELOG.md) for every
+  release since yours. The feedback admin entry asks you to set
+  `ACCESS_FEEDBACK_AUD`, and to protect or delete old deployments,
+  which keep running the code they were built with.
 
 ---
 
@@ -2407,6 +2443,7 @@ is [`scripts/lib/expected-bindings.ts`](../scripts/lib/expected-bindings.ts).
 | `CATALOG_VECTORIZE` | Vectorize | 8 | Semantic search |
 | `ACCESS_TEAM_DOMAIN` | plaintext | 8 | Publisher API |
 | `ACCESS_AUD` | plaintext | 8 | Publisher API |
+| `ACCESS_FEEDBACK_AUD` | plaintext | 6.4 | Feedback admin routes' Access check |
 | `TRUSTED_PUBLISHER_DOMAINS` | plaintext | 8 | Skip approval queue (→ `reviewer`, read-only) |
 | `NODE_ID_PRIVATE_KEY_PEM` | secret | 8 | Federation signing |
 | `PREVIEW_SIGNING_KEY` | secret | 8 | `terraviz preview` |
@@ -2621,6 +2658,26 @@ causes:
   `Sec-Fetch-Site` nor `Origin`. That happens with an old browser, or a
   client using a copied cookie. Send the node's `Origin`.
 
+### Feedback exports return 401 "Unauthorized"
+The feedback admin routes refused the Access token, and no
+`FEEDBACK_ADMIN_TOKEN` bearer matched. Check, in order:
+
+1. **An Access app covers `/api/feedback-admin`** (6.4). The portal's
+   Export buttons use that path. Without such an app, a browser sends
+   no token, and only the bearer works.
+2. **`ACCESS_TEAM_DOMAIN` is set** in the same environment. Without
+   it, every Access header is refused.
+3. **`ACCESS_FEEDBACK_AUD` is that app's AUD**, or `W13` if your
+   publisher app covers the path. Once it is set, a token for any
+   other app is refused, and `none` refuses every token.
+4. **You redeployed** after changing either variable.
+
+Until `ACCESS_FEEDBACK_AUD` is set, a token for another of your
+team's apps is let in. Each one logs "feedback admin: accepted an
+Access token for an application this node does not name", with its
+audience. `wrangler pages deployment tail` shows these lines. Set the
+variable to refuse such tokens.
+
 ### Publisher API returns 503 `access_unconfigured`
 `ACCESS_TEAM_DOMAIN` or `ACCESS_AUD` is missing — most often set on
 Production but not Preview. Confirm with
@@ -2631,7 +2688,8 @@ Production but not Preview. Confirm with
 Access signs every request with a JSON Web Token (JWT), and the `aud`
 claim inside it names the application. `ACCESS_AUD` has to be that
 same audience tag.
-Re-copy `W13` from the application's Overview tab. A token minted
+Re-copy `W13` from the application's Additional settings (or its
+Overview tab, on an older dashboard). A token minted
 for a *different* application of the same team is rejected by
 design. On a node with two applications, `W13` is the API
 application's AUD (6.2, rule 1).

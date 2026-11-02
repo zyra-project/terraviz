@@ -24,12 +24,19 @@
  *      token JWTs.
  *   3. Validating `aud` (must include the configured Application
  *      AUD), `iss` (must equal `https://<team>.cloudflareaccess.com`),
- *      and `exp` (must be in the future).
+ *      and `exp` (must be in the future). `verifyAccessJwtAnyAudience`
+ *      skips the audience step and hands the audiences to its caller.
  *
- * Service tokens are distinguished from user logins by the `type`
- * claim Cloudflare emits — `"app"` for service tokens. Users always
- * carry an `email` claim; service tokens may not, so the verifier
- * synthesises `<sub>@service.local` for the publisher-store JIT row.
+ * Every malformed input returns `null` rather than throwing. Callers
+ * outside Access (the feedback admin routes) pass attacker-chosen
+ * strings here, and a throw would skip their bearer fall-through.
+ *
+ * Service tokens are told from user logins by their claims (an empty
+ * `sub` with a `common_name`), not by `type`: that marks an application
+ * token (`"app"`) or the team-wide session token (`"org"`), and both
+ * kinds of login carry it. Users always carry an `email` claim;
+ * service tokens may not, so the verifier synthesises
+ * `<sub>@service.local` for the publisher-store JIT row.
  *
  * The verifier returns a small `AccessIdentity` rather than raw
  * claims so callers don't have to re-validate the JWT shape; if it
@@ -79,7 +86,7 @@ const JWKS_KV_PREFIX = 'access:jwks:'
  * one turns the whole publisher API into a blanket 401 that looks
  * like an expired login rather than a stray byte in a config value.
  */
-export function accessConfig(env: CatalogEnv): {
+export function accessConfig(env: Pick<CatalogEnv, 'ACCESS_TEAM_DOMAIN' | 'ACCESS_AUD'>): {
   teamDomain?: string
   aud?: string
 } {
@@ -106,20 +113,36 @@ function decodeUtf8(bytes: Uint8Array): string {
   return new TextDecoder().decode(bytes)
 }
 
+/** What verifying a token reads from the environment. */
+type VerifyEnv = Pick<CatalogEnv, 'ACCESS_TEAM_DOMAIN' | 'ACCESS_AUD' | 'CATALOG_KV'>
+
 async function fetchJwks(
-  env: CatalogEnv,
+  env: VerifyEnv,
   fetchImpl: typeof fetch,
 ): Promise<Jwks | null> {
   const { teamDomain } = accessConfig(env)
   if (!teamDomain) return null
   const cacheKey = jwksKey(teamDomain)
+  // A cache or network failure is no key set, not an exception: the
+  // feedback admin routes fall through to their bearer on null, and a
+  // throw here would answer 500 during a certs outage instead.
   if (env.CATALOG_KV) {
-    const cached = (await env.CATALOG_KV.get(cacheKey, 'json')) as Jwks | null
-    if (cached) return cached
+    try {
+      const cached = (await env.CATALOG_KV.get(cacheKey, 'json')) as Jwks | null
+      if (cached && Array.isArray(cached.keys)) return cached
+    } catch {
+      // A cache that can't be read is a cache miss: ask the network.
+    }
   }
-  const res = await fetchImpl(`https://${teamDomain}/cdn-cgi/access/certs`)
-  if (!res.ok) return null
-  const jwks = (await res.json()) as Jwks
+  let jwks: Jwks
+  try {
+    const res = await fetchImpl(`https://${teamDomain}/cdn-cgi/access/certs`)
+    if (!res.ok) return null
+    jwks = (await res.json()) as Jwks
+  } catch {
+    return null
+  }
+  if (!jwks || !Array.isArray(jwks.keys)) return null
   if (env.CATALOG_KV) {
     // Best-effort: a KV write failure shouldn't fail the request.
     try {
@@ -139,20 +162,26 @@ async function verifySignature(
   signatureB64: string,
   jwk: JwkPublic,
 ): Promise<boolean> {
-  const key = await crypto.subtle.importKey(
-    'jwk',
-    jwk as unknown as JsonWebKey,
-    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-    false,
-    ['verify'],
-  )
-  const data = new TextEncoder().encode(`${headerB64}.${payloadB64}`)
-  const sig = base64urlDecode(signatureB64)
-  // TS 5.7+ distinguishes ArrayBuffer from ArrayBufferLike; the
-  // workers-types `crypto.subtle.verify` signature wants a strict
-  // BufferSource. Casting the Uint8Array (whose internal buffer is
-  // ArrayBufferLike) is safe — runtime accepts both.
-  return crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, sig as BufferSource, data as BufferSource)
+  try {
+    const key = await crypto.subtle.importKey(
+      'jwk',
+      jwk as unknown as JsonWebKey,
+      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+      false,
+      ['verify'],
+    )
+    const data = new TextEncoder().encode(`${headerB64}.${payloadB64}`)
+    // Throws on a signature segment that is not base64url. Kids are
+    // public, so a caller can reach here with any signature it likes.
+    const sig = base64urlDecode(signatureB64)
+    // TS 5.7+ distinguishes ArrayBuffer from ArrayBufferLike; the
+    // workers-types `crypto.subtle.verify` signature wants a strict
+    // BufferSource. Casting the Uint8Array (whose internal buffer is
+    // ArrayBufferLike) is safe — runtime accepts both.
+    return await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, sig as BufferSource, data as BufferSource)
+  } catch {
+    return false
+  }
 }
 
 interface JwtClaims {
@@ -178,11 +207,36 @@ interface JwtClaims {
  */
 export async function verifyAccessJwt(
   token: string,
-  env: CatalogEnv,
+  env: VerifyEnv,
   options: VerifyOptions = {},
 ): Promise<AccessIdentity | null> {
   const { teamDomain, aud: expectedAud } = accessConfig(env)
   if (!teamDomain || !expectedAud) return null
+  const verified = await verifyAccessJwtAnyAudience(token, env, options)
+  if (!verified || !verified.audiences.includes(expectedAud)) return null
+  return verified.identity
+}
+
+/**
+ * Everything `verifyAccessJwt` checks except the audience: the
+ * signature against the team's keys, the issuer, the expiry and the
+ * identity claims. Returns the token's audiences beside the
+ * identity, and **the caller must check them**. A token that passes
+ * here was minted by this node's Access team, for *some* application
+ * or, with `tokenType` `org`, for the team as a whole. It is not
+ * necessarily for one that covers the route reading it.
+ *
+ * It exists for the feedback admin routes (`functions/api/_feedback-auth.ts`),
+ * which may sit behind an Access application of their own, so a token
+ * there carries that application's AUD rather than `ACCESS_AUD`.
+ */
+export async function verifyAccessJwtAnyAudience(
+  token: string,
+  env: VerifyEnv,
+  options: VerifyOptions = {},
+): Promise<{ identity: AccessIdentity; audiences: string[]; tokenType: string | null } | null> {
+  const { teamDomain } = accessConfig(env)
+  if (!teamDomain) return null
   const fetchImpl = options.fetchImpl ?? fetch
   const now = options.now ?? Math.floor(Date.now() / 1000)
 
@@ -201,6 +255,8 @@ export async function verifyAccessJwt(
   } catch {
     return null
   }
+  // `null`, a number or an array parses as JSON too.
+  if (!isPlainObject(header) || !isPlainObject(claims)) return null
   if (header.alg !== 'RS256') return null
   if (!header.kid) return null
 
@@ -215,8 +271,8 @@ export async function verifyAccessJwt(
   if (typeof claims.exp !== 'number' || claims.exp <= now) return null
   const expectedIss = `https://${teamDomain}`
   if (claims.iss !== expectedIss) return null
-  const aud = Array.isArray(claims.aud) ? claims.aud : claims.aud ? [claims.aud] : []
-  if (!aud.includes(expectedAud)) return null
+  const audiences = (Array.isArray(claims.aud) ? claims.aud : claims.aud ? [claims.aud] : [])
+    .filter((a): a is string => typeof a === 'string')
 
   // Distinguish service tokens from user logins.
   //
@@ -264,5 +320,15 @@ export async function verifyAccessJwt(
     : (claims.email ?? null)
   if (!email) return null
 
-  return { email, sub: subject, type: isService ? 'service' : 'user' }
+  return {
+    identity: { email, sub: subject, type: isService ? 'service' : 'user' },
+    audiences,
+    // `app` for an application token, `org` for the team-wide session
+    // token. Not the user/service split, which the claims above decide.
+    tokenType: typeof claims.type === 'string' ? claims.type : null,
+  }
+}
+
+function isPlainObject(value: unknown): boolean {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

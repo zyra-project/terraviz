@@ -12,7 +12,7 @@
  * unchanged: they're the scripting surface (CSV/JSONL exports,
  * dashboards-as-JSON) with the bearer-token fallback that forks
  * without Cloudflare Access rely on, and the portal links out to
- * the export actions.
+ * the export actions. Who may call them is `_feedback-auth.ts`'s.
  *
  *   GET /api/feedback-admin                            → 302 → /publish/feedback
  *   GET /api/feedback-admin?action=ai-dashboard        → JSON
@@ -22,7 +22,7 @@
  *   GET /api/feedback-admin?action=screenshot&id=N     → JSON
  */
 
-import { isInternalRequest } from './ingest'
+import { authenticateFeedbackAdmin, type FeedbackAdminEnv } from './_feedback-auth'
 import {
   fetchAiDashboard,
   fetchGeneralDashboard,
@@ -31,24 +31,7 @@ import {
   streamGeneralExport,
 } from './_feedback-helpers'
 
-interface Env {
-  FEEDBACK_DB?: D1Database
-  FEEDBACK_ADMIN_TOKEN?: string
-}
-
-function authenticate(request: Request, token?: string): boolean {
-  if (isInternalRequest(request)) return true
-  // Both sides trimmed. A FEEDBACK_ADMIN_TOKEN stored with a
-  // trailing newline can never match a correctly-sent header, and
-  // the failure is a flat 401 with nothing to distinguish it from
-  // a wrong token. A whitespace-only secret counts as unset.
-  const expected = token?.trim()
-  if (!expected) return false
-  const auth = request.headers.get('Authorization')
-  if (!auth) return false
-  const bearer = auth.replace(/^Bearer\s+/i, '').trim()
-  return bearer === expected
-}
+type Env = FeedbackAdminEnv
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' }
 
@@ -82,7 +65,7 @@ async function handleAction(
   action: string,
   url: URL,
 ): Promise<Response> {
-  if (!authenticate(context.request, context.env.FEEDBACK_ADMIN_TOKEN)) {
+  if (!(await authenticateFeedbackAdmin(context.request, context.env))) {
     return jsonError('Unauthorized', 401)
   }
 

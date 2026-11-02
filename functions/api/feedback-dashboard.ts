@@ -6,9 +6,12 @@
  *
  * Admin endpoint for viewing AI feedback summary stats.
  *
- * Auth: Cloudflare Access at the edge (preferred); legacy
- * `FEEDBACK_ADMIN_TOKEN` bearer-token path kept as a fallback
- * for `wrangler dev` and break-glass.
+ * Auth: `_feedback-auth.ts`. A Cloudflare Access token verified
+ * against the team's keys (preferred), else the legacy
+ * `FEEDBACK_ADMIN_TOKEN` bearer, kept for `wrangler dev`, scripts
+ * and break-glass. §6.4's Access application covers only
+ * `/api/feedback-admin`, so on such a node this path takes the
+ * bearer or a token the caller sends itself.
  *
  * The web admin UI no longer calls this path directly — the
  * dashboard at `/api/feedback-admin` proxies the same data via
@@ -22,13 +25,10 @@
  *   ?recent=50  — number of recent entries (default 50, max 200)
  */
 
-import { isInternalRequest } from './ingest'
+import { authenticateFeedbackAdmin, type FeedbackAdminEnv } from './_feedback-auth'
 import { fetchAiDashboard } from './_feedback-helpers'
 
-interface Env {
-  FEEDBACK_DB?: D1Database
-  FEEDBACK_ADMIN_TOKEN?: string
-}
+type Env = FeedbackAdminEnv
 
 const ALLOWED_ORIGINS = new Set([
   'http://localhost:5173',
@@ -58,18 +58,6 @@ function corsHeaders(origin?: string | null): Record<string, string> {
   return headers
 }
 
-function authenticate(request: Request, token?: string): boolean {
-  if (isInternalRequest(request)) return true
-  // Both sides trimmed — see feedback-admin.ts. A secret stored
-  // with a trailing newline would otherwise 401 every caller.
-  const expected = token?.trim()
-  if (!expected) return false
-  const auth = request.headers.get('Authorization')
-  if (!auth) return false
-  const bearer = auth.replace(/^Bearer\s+/i, '').trim()
-  return bearer === expected
-}
-
 export const onRequestOptions: PagesFunction<Env> = async (context) => {
   const origin = context.request.headers.get('Origin')
   if (!isAllowedOrigin(origin, context.request.url)) {
@@ -84,7 +72,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   const cors = corsHeaders(allowedOrigin)
   const jsonHeaders = { ...cors, 'Content-Type': 'application/json' }
 
-  if (!authenticate(context.request, context.env.FEEDBACK_ADMIN_TOKEN)) {
+  if (!(await authenticateFeedbackAdmin(context.request, context.env))) {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), {
       status: 401,
       headers: jsonHeaders,

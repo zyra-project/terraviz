@@ -9,7 +9,7 @@ import {
   OPTIONAL_EXTRAS,
   planBindings,
 } from './bindings-plan'
-import { defaultState, type SetupState } from './state'
+import { applyEnvOverrides, defaultState, type SetupState } from './state'
 
 function provisionedState(): SetupState {
   return {
@@ -81,6 +81,17 @@ describe('planBindings', () => {
   it('treats TRUSTED_PUBLISHER_DOMAINS as optional, not audit-required', () => {
     expect(EXPECTED_BINDINGS.some(b => b.name === 'TRUSTED_PUBLISHER_DOMAINS')).toBe(false)
     expect(OPTIONAL_EXTRAS.some(b => b.name === 'TRUSTED_PUBLISHER_DOMAINS')).toBe(true)
+  })
+
+  // Setup cannot know which Access app covers the feedback admin
+  // paths, so the value comes from the operator or not at all.
+  it('writes ACCESS_FEEDBACK_AUD only from the operator, never a guess', () => {
+    expect(EXPECTED_BINDINGS.some(b => b.name === 'ACCESS_FEEDBACK_AUD')).toBe(false)
+    const find = (state: ReturnType<typeof provisionedState>) =>
+      planBindings(state).resolutions.find(r => r.name === 'ACCESS_FEEDBACK_AUD')
+    expect(find(provisionedState())?.status).toBe('skipped')
+    const exported = applyEnvOverrides(provisionedState(), { ACCESS_FEEDBACK_AUD: '  none\n' })
+    expect(find(exported)).toMatchObject({ status: 'resolved', payload: { type: 'plain_text', value: 'none' } })
   })
 })
 
