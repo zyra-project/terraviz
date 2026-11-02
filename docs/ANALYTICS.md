@@ -88,7 +88,9 @@ the source the tab reads; full design in
 - **Endpoint.** `/api/ingest` (Cloudflare Pages Function). Server-side
   it stamps `event_type`, `environment`, `country` (from
   `CF-IPCountry`) and `internal` (Cloudflare Access presence check)
-  into `blob1..blob4`. Clients cannot influence these positions.
+  into `blob1..blob4`. No event field can land in these positions,
+  but a client can set `internal`: it sends the header itself
+  (see `isInternalRequest()` and `PRIVACY_ANALYSIS.md` §9l).
 - **Storage.** Workers Analytics Engine — a columnar time-series
   store. Schema is positional (`blob1..blob20`, `double1..double20`,
   `index1` = session id) and clients place fields by alphabetical
@@ -249,6 +251,8 @@ shifts every later position. Rules to keep dashboards stable:
   (`event_type`, `environment`, `country`, `internal`) are stamped
   by the Pages function. Filter on these for trustworthy slicing —
   client-supplied values are never trusted for tier or environment.
+  `internal` is a label rather than proof: a client can set it by
+  sending a Cloudflare Access header (`PRIVACY_ANALYSIS.md` §9l).
 - **Bump the schema version when fields change semantics.** Adding a
   field is non-breaking; renaming, narrowing a type, or changing a
   bucket boundary is. The semver in `TELEMETRY_SCHEMA_VERSION`

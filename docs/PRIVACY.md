@@ -73,15 +73,14 @@ Small, anonymous events about the health of the app:
   sessions can be excluded from public dashboards without us
   needing to know your network address), and a `true`/`false`
   flag recording whether the request carried an internal-staff
-  single-sign-on header, which we use to keep staff testing out
-  of public dashboards. Cloudflare's edge adds that header when a
-  Zyra-Project staff member is signed in via our internal auth
-  layer. We check only that the header is present, not that it
-  is genuine, so a request can carry it without coming from
-  staff. The flag is a label for sorting dashboards, never proof
-  of who you are, and we never use it to grant access to
-  anything. The authenticated email itself is **never** stored —
-  only the boolean
+  single-sign-on header. Cloudflare's edge adds that header for a
+  Zyra-Project staff member signed in via our internal auth
+  layer, on the parts of the service that layer covers. We check
+  only that the header is present, not that it is genuine, so a
+  request can carry it without coming from staff. The flag is a
+  label for sorting dashboards, never proof of who you are, and
+  we never use it to grant access to anything. The authenticated
+  email itself is **never** stored — only the boolean
 - That a data layer was loaded — which layer, whether it came from the
   network or a local cache, how long it took
 - That a data layer was unloaded — which layer, how long you viewed it

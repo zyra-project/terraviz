@@ -253,14 +253,17 @@ export const CF_ACCESS_HEADERS = [
  * showed `Cf-Access-Jwt-Assertion: x` reaching a function on a live
  * deployment. A node built by `npm run setup` covers only the
  * publisher paths, not `/api/ingest`, so any client can mark its own
- * events `internal=true`.
+ * events `internal=true`. On such a node no genuine staff request
+ * sets it either: Cloudflare adds the header to `/api/ingest` only
+ * where an operator has put an Access application in front of it.
  *
  * That is acceptable for the one thing this is for: tagging
  * telemetry. A forged `true` moves only the sender's own rows out of
- * the public dashboards' default `blob4 = 'false'` slice and into
- * the staff slice. It reads nothing and unlocks nothing. Verifying
- * the token here was considered and declined: it would put a KV read
- * and a signature check on the ingest path to stop a client
+ * the public dashboards' default `blob4 = 'false'` slice, and out of
+ * the D1 rollups, which keep `internal = 0` only. The flag reads
+ * nothing and unlocks nothing. Verifying the token here was
+ * considered and declined: it would put a KV read and a signature
+ * check on every ingest batch carrying the header, to stop a client
  * mislabelling its own rows.
  *
  * Never use this for authorisation. To know that a signed-in user

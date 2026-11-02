@@ -95,7 +95,7 @@ All three dashboards expect:
 | Variable | Default | Description |
 |---|---|---|
 | `$environment` | `production` | Filters `blob2 = $environment`. Switch to `preview` to verify staging. |
-| `$internal` | `false` | Filters `blob4 = $internal` (set to `true` to see staff sessions). Tier B dashboard hard-codes `false` since Research mode is opt-in by external users only. |
+| `$internal` | `false` | Filters `blob4 = $internal` (set to `true` to see rows tagged internal: staff sessions where an Access application covers `/api/ingest`, plus any client that sent an Access header itself; see `docs/PRIVACY_ANALYSIS.md` §9l). Tier B dashboard hard-codes `false` since Research mode is opt-in by external users only. |
 | `$timeRange` | dashboard-specific | Built-in Grafana time range, applied to `WHERE timestamp > toDateTime(intDiv($__from, 1000))`. |
 
 > ⚠️ **AE timestamp comparison gotcha.** Grafana's `$__from` macro

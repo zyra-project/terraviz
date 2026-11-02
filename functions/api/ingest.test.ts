@@ -270,11 +270,15 @@ describe('isInternalRequest', () => {
     expect(isInternalRequest(req)).toBe(true)
   })
 
-  // Pins the property the docstring, docs/PRIVACY.md and
-  // docs/PRIVACY_ANALYSIS.md §8 describe: presence only, no
-  // verification, so any client can set the flag on its own rows.
-  // If this starts failing because the check now verifies the
-  // token, update those three descriptions in the same change.
+  // Pins the property isInternalRequest's docstring and the docs
+  // describe: presence only, no verification, so any client can set
+  // the flag on its own rows. If this starts failing because the
+  // check now verifies the token, update every description of the
+  // flag in the same change: docs/PRIVACY.md (then
+  // `npm run build:privacy-page`), docs/PRIVACY_ANALYSIS.md (§1b,
+  // §3d, §8, §8a, §8b, §9f, §9l), docs/ANALYTICS.md,
+  // docs/ANALYTICS_QUERIES.md, docs/ANALYTICS_CONTRIBUTING.md and
+  // grafana/README.md.
   it('returns true for a token that is not a JWT at all (presence only)', () => {
     const req = fakeRequest({ 'Cf-Access-Jwt-Assertion': 'x' })
     expect(isInternalRequest(req)).toBe(true)

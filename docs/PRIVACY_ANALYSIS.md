@@ -137,7 +137,7 @@ Per-field budget:
 | `app_version` | ~5–10 active | ~2.5 | ~2.0 | session.ts:121 |
 | `schema_version` | 1–2 active | ~1.0 | ~0.2 | session.ts:66 |
 | **server-stamped `country`** | 250 ISO codes | ~7.96 | ~5.5 (US/EU skew) | ingest.ts:206 |
-| **server-stamped `internal`** | 2 | 1.0 | ~0.05 (rare) | ingest.ts:232 |
+| **server-stamped `internal`** | 2 | 1.0 | ~0.05 (rare) | ingest.ts `isInternalRequest()` |
 | **server-stamped `environment`** | 3 | 1.58 | ~0.0 (filtered to prod) | ingest.ts:195 |
 
 **Sum, effective.** ≈ **20.8 bits** for a typical session.
@@ -355,15 +355,17 @@ post-hoc filtering at the query layer (see §10).
 Cloudflare Access SSO header; `isInternalRequest()` in
 `ingest.ts`) is a *very* small subset of traffic. A query
 filtered to `blob4='true'` gives the dogfood slice. Requests
-from members of the Zyra-Project team land there, and so does
-any request whose client sent the header itself, because
-nothing checks that it is genuine (§8, §9l). Keeping internal
-usage out of public dashboards is intentional, but it also
-means the staff rows in "the internal slice" are highly
-re-identifiable to anyone who knows the team's roster. We
-accept this: staff dogfood implicitly consents to being
-identifiable to the team. A row in this slice is not proof
-that staff sent it, though.
+from members of the Zyra-Project team land there only where an
+Access application covers `/api/ingest`. A node built by
+`npm run setup` has none, so there staff traffic lands in the
+public slice. Any request whose client sent the header itself
+lands in the dogfood slice too, because nothing checks that it
+is genuine (§8, §9l). Keeping internal usage out of public
+dashboards is intentional, but it also means the staff rows in
+"the internal slice" are highly re-identifiable to anyone who
+knows the team's roster. We accept this: staff dogfood
+implicitly consents to being identifiable to the team. A row in
+this slice is not proof that staff sent it, though.
 
 ---
 
@@ -712,7 +714,7 @@ from the client:
 
 | Field | Position | Source | Rationale |
 |---|---|---|---|
-| `event_type` | `blob1` | client → re-emitted at `toDataPoint()` | Strictly speaking the client supplies it, but it is validated against `KNOWN_EVENT_TYPES` (`ingest.ts:65–76`) — unknown types are rejected before write. |
+| `event_type` | `blob1` | client → re-emitted at `toDataPoint()` | Strictly speaking the client supplies it, but it is validated against `KNOWN_EVENT_TYPES` (`ingest.ts`) — unknown types are rejected before write. |
 | `environment` | `blob2` | `environmentOf(env)` reads `CF_PAGES_BRANCH` | A client cannot impersonate `production` to flood prod dashboards. |
 | `country` | `blob3` | `CF-IPCountry` header from Cloudflare edge | A client cannot supply a forged country. The raw IP is read for rate-limiting and immediately discarded; `CF-IPCountry` is the only geo-derived field that lands in storage. |
 | `internal` | `blob4` | `isInternalRequest()` checks only that a Cloudflare Access SSO header is *present* | Strictly speaking the client controls it. Cloudflare adds these headers only on a path an Access application covers, and passes a client-sent copy through unchanged on any other path (zyra-project/terraviz#513). `/api/ingest` is not covered on a node built by `npm run setup`, so a client can label its own rows staff (§8a, §9l). The flag must never gate access to anything. The email itself (`cf-access-authenticated-user-email`) is read for *presence only* — we never write its value (`isInternalRequest()` in `ingest.ts`). |
@@ -750,10 +752,11 @@ zyra-project/terraviz#513 showed a client-sent
 `Cf-Access-Jwt-Assertion` reaching a function unchanged on a
 live deployment. So a client can stamp `blob4='true'` on its
 own rows. That moves those rows *out of* every public-facing
-query, since the default filter keeps `blob4='false'`, so
-forging the flag cannot inflate a public dashboard. What it
-can do is pollute the staff slice that `$internal = true`
-shows (§9l).
+query, since the default filter keeps `blob4='false'`, and out
+of the D1 rollups behind `/publish/analytics` for good, since
+the export keeps `internal = 0` only. So forging the flag cannot
+inflate a public dashboard. What it can do is pollute the staff
+slice that `$internal = true` shows (§9l).
 
 ### 8b. Trust boundary for the integrity argument
 
@@ -839,7 +842,9 @@ behavioural analysis.
 ### 9f. Cloudflare is a trusted party
 
 §1b. We rely on Cloudflare's edge to honestly strip forged
-headers, geolocate IPs, gatekeep Access SSO, and not log
+headers, geolocate IPs, gatekeep Access SSO on the paths an
+Access application covers (not `/api/ingest` by default; §8b),
+and not log
 analytics traffic in ways that would re-link IP to session.
 A Cloudflare compromise — at the edge or at the AE storage
 layer — defeats all of our privacy properties simultaneously.
@@ -946,21 +951,29 @@ disclose in-world is the visitor's only notice.
 ### 9l. The `internal` flag is a label anyone can set
 
 `isInternalRequest()` checks only that a Cloudflare Access header
-is present (§8). Any client can send one, so the staff slice
-(`blob4='true'`) holds staff dogfood plus whatever a client chose to
-label staff, and a batch carrying the header drops its own rows out
-of the public dashboards. **Severity: low.** A forger mislabels only
-its own rows. It adds nothing to a public-facing query, reads
-nothing and unlocks nothing. The cost falls on staff-only views,
-whose counts a forger can inflate, and on §3d, where a row in the
-slice is no longer proof of staff.
+is present (§8). Any client can send one. So the staff slice
+(`blob4='true'`) holds staff dogfood, where an Access application
+covers `/api/ingest`, plus whatever a client chose to label staff.
+On a node built by `npm run setup` nothing covers it, and the slice
+holds only the second kind. A batch carrying the header drops its
+own rows out of the public dashboards and the D1 rollups.
+**Severity: low.** A forger mislabels only its own rows. It adds
+nothing to a public-facing query, reads nothing and unlocks nothing.
+The cost falls on staff-only views, whose counts a forger can
+inflate, and on §3d, where a row in the slice is no longer proof of
+staff. A forger also makes itself easier to single out, since its
+rows join a slice that is small by design (§2a).
 
 The maintainer considered verifying the token and declined, on
 2026-11-02. Verification would put a KV read for the Access signing
 keys and a signature check on every ingest batch carrying the
 header. It would also tie the ingest path to Access configuration it
 does not otherwise need, all to stop a client mislabelling its own
-rows. A surface that has to know a request came from staff verifies
+rows. And it would not make the tag work by itself: `verifyAccessJwt`
+checks one audience, `ACCESS_AUD`, which is the publisher
+application's, so a token from an application covering
+`/api/ingest` would fail it. A surface that has to know a request
+came from staff verifies
 the JWT instead: `verifyAccessJwt` in
 `functions/api/v1/_lib/access-auth.ts`, or
 `functions/api/_feedback-auth.ts` for the feedback admin routes. The

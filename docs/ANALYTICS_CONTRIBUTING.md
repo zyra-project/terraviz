@@ -133,14 +133,19 @@ re-identification primitive.
 ### 7. Server stamping is immutable
 
 `blob1..blob4` (`event_type`, `environment`, `country`, `internal`)
-are stamped by the Pages Function in `functions/api/ingest.ts:toDataPoint()`.
-Clients cannot influence them. Filter on these for trustworthy
-slicing in dashboards.
+are stamped by the Pages Function in `functions/api/ingest.ts:toDataPoint()`,
+always in those four positions, so no event field can land there.
+Clients cannot influence `environment` or `country`. Filter on
+these for trustworthy slicing in dashboards.
 
-If you find yourself wanting to send `internal: true` from the
-client, you've misunderstood the model. Internal-vs-external is
-proven via Cloudflare Access SSO at the edge, not declared by the
-client.
+`internal` is the exception: a client can set it. It records only
+that a Cloudflare Access header was *present*
+(`isInternalRequest()`), and on a path no Access application
+covers, Cloudflare passes a client-sent copy through unchanged
+(zyra-project/terraviz#513). Treat it as a label, never as proof
+of staff, and never gate anything on it. If you find yourself
+wanting to send `internal: true` as an event field, you've
+misunderstood the model: it would land after `blob4`, not in it.
 
 ### 8. Schema additions are append-only
 
@@ -346,8 +351,10 @@ confirm any item, leave a comment requesting clarification.
       sessions.
 - [ ] No client-stamped `internal` / `environment` / `country` /
       `event_type` (those are server-stamped at
-      `functions/api/ingest.ts:toDataPoint()`; the function
-      strips client-supplied versions).
+      `functions/api/ingest.ts:toDataPoint()` into `blob1..blob4`.
+      An `internal`, `environment` or `country` event field is not
+      stripped: it lands after `blob4` and shifts every later
+      position of that event).
 
 ### Throttling
 

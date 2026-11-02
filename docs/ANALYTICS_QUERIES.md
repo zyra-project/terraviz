@@ -32,7 +32,8 @@ on every request.
 
 Every datapoint written by `toDataPoint()` lands with the same
 positional schema. The first four `blobs[]` are server-stamped
-(client cannot influence); event-specific fields follow in
+(no event field can land there, though a client can set `internal`;
+see `blob4` below); event-specific fields follow in
 **alphabetical order** of the field name.
 
 | Position | Field | Type | Notes |
@@ -41,7 +42,7 @@ positional schema. The first four `blobs[]` are server-stamped
 | `blob1` | `event_type` | enum | One of the 30+ event types — see catalog below |
 | `blob2` | `environment` | enum | `production` / `preview` / `local` (set from `CF_PAGES_BRANCH`) |
 | `blob3` | `country` | string | 2-letter ISO from `CF-IPCountry`; `XX` when unknown / Tor |
-| `blob4` | `internal` | string | `true` / `false` — Cloudflare Access staff identity present |
+| `blob4` | `internal` | string | `true` / `false` — a Cloudflare Access header present on the request (client-forgeable; a label, not proof of staff) |
 | `blob5+` | event-specific strings | string | Alphabetical by field name |
 | `double1+` | event-specific numbers | float | Alphabetical by field name; includes `client_offset_ms` when stamped |
 | `timestamp` | server-stamped | DateTime | When AE received the datapoint |
@@ -1078,7 +1079,9 @@ ORDER BY responses DESC
   schema changes when queries return unexpected types.
 - **Server-side blobs are immutable.** `blob1..blob4`
   (`event_type` / `environment` / `country` / `internal`) are
-  stamped by the Pages function and clients cannot influence them.
-  Filter on these for trustworthy slicing.
+  stamped by the Pages function, and no event field can land in
+  them. Filter on these for trustworthy slicing, except that a
+  client can set `internal` by sending a Cloudflare Access header
+  itself (`PRIVACY_ANALYSIS.md` §9l).
 - **Country `XX`.** Treat as missing data (Tor, unknown geo, local
   dev). Excluded from production country dashboards by default.
