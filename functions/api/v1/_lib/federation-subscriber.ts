@@ -29,8 +29,8 @@
  * **Full sync.** A pull with no stored cursor, or one asked for as
  * full, starts from the beginning of the feed and is authoritative
  * once its last page arrives. That is the only way a subscriber learns
- * of a hard delete or a row leaving `public` visibility, which the
- * feed cannot tombstone. A full sync larger than one pull's page cap
+ * of a hard delete or a row leaving feed visibility (to `restricted`
+ * or `private`), which the feed cannot tombstone. A full sync larger than one pull's page cap
  * is carried across pulls under one run id (`full_sync_run`); a pull
  * that stops on a cap or an error never reconciles, since a partial
  * view would drop rows the peer still has.

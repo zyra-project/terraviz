@@ -26,9 +26,12 @@ major (`/schema/v2/`) and an entry with a migration note.
   two predicates now differ by exactly the `federated` visibility. **No
   wire shape changes:** `feed.schema.json` is byte-for-byte the same, a
   subscriber already accepts every `visibility` the enum allows, and a
-  feed gated off (the on-merge default) serves nothing either way. A
-  reader that mirrored a node's feed before this sees that node's
-  `federated` rows appear at its next pull.
+  feed gated off (the on-merge default) serves nothing either way. No
+  feed has gone live yet, so there are no subscribers to carry this to:
+  a first subscription is a full sync and mirrors every federated row.
+  (A pre-existing incremental subscriber would pick up a federated row
+  whose `updated_at` predates this only at its next full sync — serving
+  an already-present row does not move its `updated_at`.)
 
 ## v1 (additive, plus one behaviour change) — 2026-10-27
 

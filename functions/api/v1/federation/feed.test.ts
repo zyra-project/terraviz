@@ -270,12 +270,17 @@ describe('GET /api/v1/federation/feed — pages', () => {
     await verified(res)
   })
 
-  it('leaves out drafts, non-public and hidden rows, and tombstones retracted ones', async () => {
-    const { sqlite, env } = setup(6)
+  it('leaves out drafts, private, restricted and hidden rows, and tombstones retracted ones', async () => {
+    const { sqlite, env } = setup(7)
     sqlite.prepare('UPDATE datasets SET published_at = NULL WHERE id = ?').run(idOf(0))
     sqlite.prepare("UPDATE datasets SET visibility = 'private' WHERE id = ?").run(idOf(1))
     sqlite.prepare('UPDATE datasets SET is_hidden = 1 WHERE id = ?').run(idOf(2))
     sqlite.prepare("UPDATE datasets SET retracted_at = '2026-01-20T00:00:00.000Z' WHERE id = ?").run(idOf(3))
+    // `restricted` is withheld from both the public catalog and the feed,
+    // unlike `federated`, which the feed serves (conformance.test.ts). A
+    // mutation widening the feed's visibility tuple to admit it would be a
+    // real leak, so pin that it reaches neither datasets nor tombstones.
+    sqlite.prepare("UPDATE datasets SET visibility = 'restricted' WHERE id = ?").run(idOf(6))
     const body = await verified(await get(env))
     expect(body.datasets.map(d => d.id)).toEqual([idOf(4), idOf(5)])
     expect(body.tombstones).toEqual([idOf(3)])
@@ -283,6 +288,7 @@ describe('GET /api/v1/federation/feed — pages', () => {
     expect(text).not.toContain(idOf(0))
     expect(text).not.toContain(idOf(1))
     expect(text).not.toContain(idOf(2))
+    expect(text).not.toContain(idOf(6))
   })
 
   it.each(['{"x":1e999}', '['.repeat(70) + '0' + ']'.repeat(70), '{"__proto__":{"a":1}}'])(
