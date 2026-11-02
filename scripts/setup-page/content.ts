@@ -303,7 +303,9 @@ wrangler d1 migrations apply FEEDBACK_DB --remote   # migrations/`,
     ],
     automated: { code: 'npm run setup -- --apply --only=access' },
     automatedNote: [
-      'Discovers your team domain, creates the publisher application with all six destinations, creates both policies, mints the service token and attaches it. It records the AUD and prints the token pair **once** — have somewhere to put it.',
+      'Discovers your team domain, creates the publisher application with all six destinations, creates both policies, mints the service token and attaches it. The application\'s login cookie is set to HTTP Only and SameSite Lax. It records the AUD and prints the token pair **once** — have somewhere to put it.',
+      'If an application named `Terraviz Publisher` (or `TERRAVIZ_ACCESS_APP_NAME`) already exists, the run adopts it and leaves its settings alone. If its cookie settings fall short, the run says so, and you change them in the dashboard.',
+      'Running separate portal and API applications? Set `TERRAVIZ_ACCESS_APP_NAME` to the API application\'s name first, or the run adopts or creates the wrong one.',
     ],
     gate: "The AUD is copied, the token pair is in your password manager, and the token appears in the Automation policy's include list.",
     gateShort: 'Staff sign-in works, and the token pair is saved somewhere safe.',
@@ -655,6 +657,10 @@ export const TROUBLESHOOTING = [
     fix: "Your AUD does not match the application that issued the JWT. Re-copy it from the application's Overview tab. A token minted for a different application in the same team is rejected by design.",
   },
   {
+    symptom: 'Publisher API returns 403 cross_origin_request or origin_required',
+    fix: "The publish routes refuse a request that a page on another origin started, and the message names the header they refused. A script or proxy that sends its own `Origin` must send your node's origin (`https://` and your hostname, no path), or none. `origin_required` means a signed-in user's change carried neither `Origin` nor `Sec-Fetch-Site`, as from an old browser or an extension that strips both.",
+  },
+  {
     symptom: 'Access blocks your own staff account',
     fix: 'The policy uses **Emails** (exact match against one address) instead of **Emails ending in** (suffix match). See Phase 6.',
   },
@@ -676,7 +682,7 @@ export const TROUBLESHOOTING = [
   },
   {
     symptom: 'Portal shows "Your session has expired"',
-    fix: 'Expected before your Access application covers the publish paths. Cloudflare answers with a cross-origin redirect the portal can detect but cannot follow. The Refresh button is the escape hatch — refreshing triggers Access at top-level navigation, you sign in, and the next fetch succeeds.',
+    fix: 'Expected before your Access application covers the publish paths. Cloudflare answers with a cross-origin redirect the portal can detect but cannot follow. The card\'s Sign in button is the escape hatch — it signs you in through a top-level navigation, and the next fetch succeeds.',
   },
   {
     symptom: 'Zip download shows "size unknown"',

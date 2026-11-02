@@ -504,7 +504,12 @@ by WordPress — which does not exist today. Concretely, one of:
   instead of a service token. This attributes actions to the real
   user with no main-repo change — but it constrains the WP
   deployment to live behind the same Access team, which most NOAA
-  sites will not.
+  sites will not. Forward that one header only, never the
+  browser's request headers as a whole. A user's write must also
+  carry an `Origin` naming the node, or the publish middleware
+  refuses it (403 `origin_required`; see
+  [`CATALOG_PUBLISHING_TOOLS.md`](CATALOG_PUBLISHING_TOOLS.md)
+  §Authentication).
 
 **Recommendation:** do *not* build Option 2 speculatively. Ship
 Option 1, and let the publisher-CLI pilot (federation §8 decision

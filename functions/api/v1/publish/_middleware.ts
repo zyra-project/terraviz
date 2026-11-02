@@ -4,8 +4,10 @@
 /**
  * Auth middleware for /api/v1/publish/**.
  *
- * Wraps every publisher-API route. Three jobs:
+ * Wraps every publisher-API route. Its jobs:
  *
+ *   0. Refuse a request that a page on another origin started
+ *      ({@link crossOriginRefusal}), before anything else runs.
  *   1. Verify the caller's identity. In production that means a
  *      Cloudflare Access JWT delivered via `Cf-Access-Jwt-Assertion`
  *      (browser cookie or service-token client). In dev — when
@@ -26,6 +28,13 @@
  *      the middleware owns *feature* availability.
  *
  * Failure modes (typed envelopes, same shape as the rest of the API):
+ *   - 403 `cross_origin_request` — a write, or a read other than a
+ *     top-level visit, that a page on another origin started. Checked
+ *     first, so such a request authenticates nothing and provisions no
+ *     publisher row. The message names the header and value refused.
+ *   - 403 `origin_required` — a write the Access cookie authenticated
+ *     that carries neither `Sec-Fetch-Site` nor `Origin`. Checked after
+ *     identity and before provisioning.
  *   - 503 `binding_missing` — CATALOG_DB not bound.
  *   - 503 `access_unconfigured` — neither Access env vars nor
  *     `DEV_BYPASS_ACCESS=true` are set; the middleware fails closed
@@ -65,6 +74,97 @@ function jsonError(status: number, error: string, message: string): Response {
     status,
     headers: { 'Content-Type': CONTENT_TYPE },
   })
+}
+
+const SAFE_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD', 'OPTIONS'])
+/** How much of a header value a refusal message quotes back. */
+const QUOTED_MAX = 120
+
+function quoted(value: string): string {
+  return JSON.stringify(value.length > QUOTED_MAX ? `${value.slice(0, QUOTED_MAX)}…` : value)
+}
+
+/**
+ * Why a request that a page on another origin started is refused, or
+ * `null` when it is not.
+ *
+ * **Why check.** The browser's Access cookie (`CF_Authorization`) is
+ * what authenticates the portal, and a browser attaches it to requests
+ * other pages start. `SameSite=Lax` (`docs/SELF_HOSTING.md` §6.2) keeps
+ * it off cross-site writes but not off **same-site**
+ * requests: sibling hosts under the node's registrable domain, and the
+ * project's own `pages.dev` branch previews. A node whose cookie is
+ * still Cloudflare's default (`SameSite=None`) sends it cross-site too,
+ * and there this check is the only defence. Either way, any of those
+ * pages could otherwise act as the signed-in publisher, since the
+ * routes parse JSON whatever the `Content-Type`.
+ *
+ * **Writes** (any method but GET, HEAD and OPTIONS, so a catch-all
+ * handler added later is covered):
+ * - `Sec-Fetch-Site`, which a browser sets and a page cannot, is read
+ *   first, and anything but `same-origin` is refused. That includes
+ *   `same-site`, and `none`, which no portal flow sends but an extension
+ *   can. (Go's `CrossOriginProtection` and the usual Fetch Metadata
+ *   policies allow `none`; nothing here needs it.) It comes first because
+ *   the Vite dev server's proxy forwards a page's `Origin` to its target
+ *   while the browser reports the request as same-origin.
+ * - Without it, `Origin` must equal this request's own origin. An opaque
+ *   origin (`null`, from a sandboxed frame or a file) never does.
+ * - With neither header, the caller is not a page this check can judge.
+ *   The CLI, the GitHub Actions jobs and server-side callers such as the
+ *   WordPress plugin send neither by default, and authenticate with
+ *   Access service-token headers. A write with neither that the cookie
+ *   authenticated is refused later, once the identity is known
+ *   ({@link cookieWriteWithoutOrigin}).
+ *
+ * **Reads.** A GET writes nothing a caller chooses: route handlers fill
+ * only a cache, and the provisioning below only enrols the caller's own
+ * Access identity, as visiting the portal does. But some reads spend
+ * something outside this node, such as YouTube quota and an outbound
+ * fetch of a feed URL. So a read another site starts is refused too,
+ * unless it is a top-level visit (`Sec-Fetch-Mode: navigate` with
+ * `Sec-Fetch-Dest: document`). The Access sign-in returns to the portal
+ * that way. A read with no `Sec-Fetch-Site` is not judged.
+ *
+ * The portal is assumed to share the API's origin. A node that serves
+ * the portal from a different origin would need an allowlist here.
+ */
+export function crossOriginRefusal(request: Request): string | null {
+  const own = new URL(request.url).origin
+  const site = request.headers.get('Sec-Fetch-Site')?.toLowerCase() ?? null
+  // No case fold: fetch already upper-cases the safe methods, and any
+  // other spelling is then treated as a write, which is checked.
+  if (SAFE_METHODS.has(request.method)) {
+    if (site !== 'same-site' && site !== 'cross-site') return null
+    const mode = request.headers.get('Sec-Fetch-Mode')?.toLowerCase()
+    const dest = request.headers.get('Sec-Fetch-Dest')?.toLowerCase()
+    if (mode === 'navigate' && dest === 'document') return null
+    return `A ${site} page cannot read this API (Sec-Fetch-Site: ${site}); only a visit to it can.`
+  }
+  if (site !== null) {
+    if (site === 'same-origin') return null
+    return `Sec-Fetch-Site is ${quoted(site)}: this API accepts changes only from ${own}.`
+  }
+  const origin = request.headers.get('Origin')
+  if (origin === null || origin === own) return null
+  return `Origin ${quoted(origin)} is not this API's origin, ${own}. Send that origin, or no Origin header.`
+}
+
+/**
+ * Whether a write is one the Access **cookie** authenticated and that
+ * carries neither `Sec-Fetch-Site` nor `Origin`. Every current browser
+ * sends one of them on a write; an old one (Firefox before 70 on a form
+ * post, IE11), or a proxy or extension that strips both, does not, and
+ * {@link crossOriginRefusal} cannot judge it. A service token is not a
+ * cookie, so its callers are unaffected, and the loopback dev bypass is
+ * exempt so the CLI works against `wrangler pages dev`. A non-browser
+ * client acting as a user (a copied cookie, `cloudflared access`) sends
+ * the node's `Origin` to pass.
+ */
+export function cookieWriteWithoutOrigin(request: Request, identity: AccessIdentity, devBypass: boolean): boolean {
+  if (devBypass || identity.type !== 'user') return false
+  if (SAFE_METHODS.has(request.method)) return false
+  return request.headers.get('Sec-Fetch-Site') === null && request.headers.get('Origin') === null
 }
 
 /**
@@ -173,6 +273,9 @@ async function nextOrCaught(context: Parameters<PagesFunction<CatalogEnv>>[0]): 
 }
 
 export const onRequest: PagesFunction<CatalogEnv> = async context => {
+  const refusal = crossOriginRefusal(context.request)
+  if (refusal !== null) return jsonError(403, 'cross_origin_request', refusal)
+
   if (!context.env.CATALOG_DB) {
     return jsonError(
       503,
@@ -223,6 +326,15 @@ export const onRequest: PagesFunction<CatalogEnv> = async context => {
     if (!identity) {
       return jsonError(401, 'unauthenticated', 'Invalid or expired Access assertion.')
     }
+  }
+
+  // Before provisioning, so a refused write enrols no one.
+  if (cookieWriteWithoutOrigin(context.request, identity, devBypass)) {
+    return jsonError(
+      403,
+      'origin_required',
+      "A signed-in user's change must carry an Origin header naming this API's origin.",
+    )
   }
 
   const trustedDomains = parseTrustedDomains(context.env.TRUSTED_PUBLISHER_DOMAINS)
