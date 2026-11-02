@@ -657,6 +657,10 @@ export const TROUBLESHOOTING = [
     fix: "Your AUD does not match the application that issued the JWT. Re-copy it from the application's Overview tab. A token minted for a different application in the same team is rejected by design.",
   },
   {
+    symptom: 'Publisher API returns 403 cross_origin_request or origin_required',
+    fix: "The publish routes refuse a request that a page on another origin started, and the message names the header they refused. A script or proxy that sends its own `Origin` must send your node's origin (`https://` and your hostname, no path), or none. `origin_required` means a signed-in user's change carried neither `Origin` nor `Sec-Fetch-Site`, as from an old browser or an extension that strips both.",
+  },
+  {
     symptom: 'Access blocks your own staff account',
     fix: 'The policy uses **Emails** (exact match against one address) instead of **Emails ending in** (suffix match). See Phase 6.',
   },

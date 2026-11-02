@@ -1101,11 +1101,13 @@ a large organisation's domain, that is every host the organisation
 runs. Each `pages.dev` project is a site of its own, but a branch
 preview such as `<branch>.<W10>.pages.dev` shares a site with
 `<W10>.pages.dev`. Lax closes the door to other websites, not to your
-own hosts. The publish routes don't yet check where a request came
-from. Until they do, a page on another host under your domain, or on
-a branch preview, can send POST requests as a publisher who is signed
-in. A publisher who signs in only at `<W2>` is not exposed to
-`pages.dev` previews, which are a different site.
+own hosts. So the publish routes also check where a request came
+from, using headers the browser sets and a page cannot. They refuse
+a change that a page on any other origin started, including one on
+another host under your domain or on a branch preview. They also
+refuse a read such a page starts, unless it is a visit to the page.
+If a legitimate client is refused, see
+[Publisher API returns 403 `cross_origin_request` or `origin_required`](#publisher-api-returns-403-cross_origin_request-or-origin_required).
 
 Verified on the project's own node (`terraviz.zyra-project.org`) on
 2026-10-30. Before the change, its cookie went out with SameSite None
@@ -2605,6 +2607,19 @@ The cross-origin (CORS) gate rejected it, for one of two reasons.
    doesn't, unless you pass `-H "Origin: …"`.
 2. The origin isn't in the allowlist, doesn't match the request URL,
    and doesn't end with `.pages.dev`.
+
+### Publisher API returns 403 `cross_origin_request` or `origin_required`
+The publisher API refuses a request that a page on another origin
+started, and the message names the header and value it refused. Likely
+causes:
+- A script or proxy that sets or forwards an `Origin` header. Send your
+  node's own origin (`https://` + `W2`, no path), or no `Origin` at all.
+- A reverse proxy in front of the node that rewrites the host, seen by a
+  browser that sends no `Sec-Fetch-Site` (Safari before 16.4).
+- A browser extension that sends `Sec-Fetch-Site: none` with its requests.
+- `origin_required`: a signed-in user's change arrived with neither
+  `Sec-Fetch-Site` nor `Origin`. That happens with an old browser, or a
+  client using a copied cookie. Send the node's `Origin`.
 
 ### Publisher API returns 503 `access_unconfigured`
 `ACCESS_TEAM_DOMAIN` or `ACCESS_AUD` is missing — most often set on
