@@ -437,8 +437,12 @@ or deliberately restarting a full sync. Per-peer storage quotas and a
 scheduler remain deferred. On Cloudflare, runtime egress restrictions
 complement hostname validation; an off-Cloudflare adapter must add
 DNS/address validation and connection pinning to prevent private-IP
-resolution and rebinding. Deployment-specific Access cookie/CSRF
-behavior still requires verification before enabling admin federation.
+resolution and rebinding. The admin routes sit behind the publish
+middleware, which refuses a request that a page on another origin
+started ([`CATALOG_PUBLISHING_TOOLS.md`](../CATALOG_PUBLISHING_TOOLS.md)
+§Authentication). The Access cookie is HttpOnly and SameSite=Lax
+([`SELF_HOSTING.md`](../SELF_HOSTING.md) §6.2). Confirm both on the
+deployment before enabling admin federation.
 
 ### Showing Mirrored Rows
 

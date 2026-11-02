@@ -299,6 +299,8 @@ it, re-validate the payload, restrict URL schemes, and resolve relative
   windows can temporarily disappear and return on a later pull;
   repeated full syncs alone never run the deferred sweep. A cancelled
   invocation may hold its five-minute lease. Oversized or invalid-id
-  rows stop a page. Edge/WAF rate limits, per-peer quotas, Access
-  cookie/CSRF behavior and off-Cloudflare DNS/address pinning need
-  deployment review before enabling the feature.
+  rows stop a page. Edge/WAF rate limits, per-peer quotas and
+  off-Cloudflare DNS/address pinning need deployment review before
+  enabling the feature. Cross-site requests to the admin routes are
+  now refused by the publish middleware's origin check, which still
+  wants confirming on the deployment.
