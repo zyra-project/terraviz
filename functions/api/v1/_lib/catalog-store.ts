@@ -464,8 +464,15 @@ export async function getDecorations(
       name: string
       affiliation_url: string | null
     }>(
+      // Ordered explicitly because the order is on the wire: the
+      // `datasetDevelopers` / `visDevelopers` arrays list producers by
+      // name, and the singular fields keep the last of them. The table
+      // stores no credit order to sort by. Without this the order was
+      // the query plan's: primary-key order with no planner statistics,
+      // insertion order once `ANALYZE` had run and the plan became a
+      // scan. This pins the first.
       ph =>
-        `SELECT dataset_id, role, name, affiliation_url FROM dataset_developers WHERE dataset_id IN (${ph})`,
+        `SELECT dataset_id, role, name, affiliation_url FROM dataset_developers WHERE dataset_id IN (${ph}) ORDER BY dataset_id, role, name`,
     ),
     chunkedSelect<{ dataset_id: string; related_title: string; related_url: string }>(
       ph =>

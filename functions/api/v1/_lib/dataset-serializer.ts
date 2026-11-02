@@ -64,7 +64,9 @@ export interface WireDataset {
     keywords?: string[]
     relatedDatasets?: Array<{ title: string; url: string }>
     datasetDeveloper?: { name: string; affiliationUrl?: string }
+    datasetDevelopers?: Array<{ name: string; affiliationUrl?: string }>
     visDeveloper?: { name: string; affiliationUrl?: string }
+    visDevelopers?: Array<{ name: string; affiliationUrl?: string }>
   }
   // Phase-1a additive fields (always present).
   originNode: string
@@ -97,6 +99,8 @@ export interface WireDataset {
   /** Probing metadata recovered from the SOS snapshot — pixel
    * coords on the color table image mapped to data values. Wire
    * type is the parsed JSON object (not the raw string D1 stores).
+   * Absent when the row has none, or when what it stores cannot be
+   * signed: a non-finite number, or nesting deeper than 60 levels.
    * Phase 3b. */
   probingInfo?: unknown
   /** Geographic bounding box (NSWE in degrees) for the dataset's
@@ -273,13 +277,23 @@ function resolveAsset(
  * Parse a JSON-stringified text column into its object form for
  * the wire. Empty / null / unparseable values become `undefined`
  * so the field is omitted from the serialized row. Used for
- * Phase 3b's `probing_info` — validated on write, so a parse
- * failure here only happens if the row was edited out-of-band.
+ * Phase 3b's `probing_info`. A value is also omitted when it holds a
+ * non-finite number (`1e999` parses to `Infinity`) or nests deeper
+ * than 60 levels, which the signed feed cannot carry. The write
+ * validator accepts both today, so this is not only out-of-band edits.
  */
 function parseJsonField(v: string | null | undefined): unknown {
   if (v == null || v.length === 0) return undefined
   try {
-    return JSON.parse(v) as unknown
+    const parsed: unknown = JSON.parse(v)
+    const valid = (value: unknown, depth: number): boolean => {
+      if (depth > 60) return false
+      if (typeof value === 'number') return Number.isFinite(value)
+      if (Array.isArray(value)) return value.every(member => valid(member, depth + 1))
+      if (value && typeof value === 'object') return Object.values(value).every(member => valid(member, depth + 1))
+      return true
+    }
+    return valid(parsed, 0) ? parsed : undefined
   } catch {
     return undefined
   }
@@ -524,6 +538,8 @@ export function serializeDataset(
       name: dev.name,
       affiliationUrl: dev.affiliation_url ?? undefined,
     }
+    const listTarget = dev.role === 'data' ? 'datasetDevelopers' : 'visDevelopers'
+    ;(enriched[listTarget] ??= []).push(enriched[target]!)
   }
   if (Object.keys(enriched).length) wire.enriched = enriched
 
