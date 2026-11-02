@@ -61,6 +61,18 @@ export const OPTIONAL_EXTRAS: ExpectedBinding[] = [
       'Comma-separated email domains whose Access logins skip the approval ' +
       'queue. Provisions them as reviewer/active — read-only, NOT admin.',
   },
+  {
+    // Listed so a run names it among the bindings left unset. Never
+    // written: setup cannot know which application covers the
+    // feedback admin paths, and a guess written over an operator's
+    // own value would lock their exports out.
+    name: 'ACCESS_FEEDBACK_AUD',
+    type: 'plaintext',
+    environments: ['production', 'preview'],
+    hint:
+      'AUD of the Access application covering /api/feedback-admin ' +
+      '(SELF_HOSTING.md 6.4), or ACCESS_AUD\'s value if none does. Set by hand.',
+  },
 ]
 
 /** Cloudflare's per-binding payload shapes, keyed by binding type. */

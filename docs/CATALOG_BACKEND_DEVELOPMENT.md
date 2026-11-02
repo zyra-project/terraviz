@@ -623,8 +623,9 @@ Access app, the middleware refuses with `503 access_unconfigured`.
 5. **Service Auth → Service Tokens → Create Service Token** named
    `terraviz-cli`. Copy the Client ID + Client Secret immediately
    — the secret is shown once.
-6. From the Access app's Overview tab, copy the **Application
-   Audience (AUD) Tag** (64-char hex).
+6. From the Access app's **Additional settings** (its Overview tab on
+   an older dashboard), copy the **Application Audience (AUD) Tag**
+   (64-char hex).
 
 #### Step 4 — Set Pages env vars and bindings (Production AND Preview)
 

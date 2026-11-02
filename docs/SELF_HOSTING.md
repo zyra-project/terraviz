@@ -1252,22 +1252,33 @@ cookie, so one left at Cloudflare's defaults can undo the others.
 
 **Admin dashboard.** One app, name `Terraviz Admin`, destination
 `api/feedback-admin` on both hostnames, one Allow policy on your
-email domain. Copy its AUD, found where 6.2 found `W13`. Set it as
-the plaintext variable `ACCESS_FEEDBACK_AUD` in both Production and
-Preview. Without the app, these endpoints take a
-`FEEDBACK_ADMIN_TOKEN` bearer.
+email domain. The portal's **Export** buttons use that path, so a
+browser can export only through an app covering it. Without one,
+exports take a `FEEDBACK_ADMIN_TOKEN` bearer.
+
+Then set the plaintext variable `ACCESS_FEEDBACK_AUD` by hand, in
+both Production and Preview, and redeploy. `npm run setup` lists it
+as unset but never writes it.
+- **With this app:** its AUD, from the same place as `W13` (6.2).
+- **Without it, or if your publisher app covers this path:** `W13`.
 
 The feedback admin routes check that an Access token was signed by
-your team. With `ACCESS_FEEDBACK_AUD` set, the token must also be
-for this app or the publisher app. Without the variable, a token
-from any of your team's applications is accepted and logged. A
-later release will refuse it, so set the variable now. If you skip
-this app, set `ACCESS_FEEDBACK_AUD` to `W13`. Only the publisher
-app's tokens are then accepted.
+your team, which needs `ACCESS_TEAM_DOMAIN`. Without that variable,
+they refuse every Access header and take only the bearer. Once
+`ACCESS_FEEDBACK_AUD` is set, the token must be for that app.
 
-The app covers `/api/feedback-admin` only. The older direct routes,
-such as `/api/feedback-export`, stay outside it, so they need the
-bearer.
+Until it is set, a token for any of your team's applications is
+accepted. Anyone any of those apps admits can then read feedback by
+sending their own sign-in cookie as the header. A later release
+will refuse such tokens, so set the variable now.
+
+On these routes the Access policy decides who reads feedback, not
+the portal's Users tab. With `W13`, a publisher you suspend there
+keeps their Access sign-in, and with it these routes.
+
+The older direct routes, such as `/api/feedback-export`, stay
+outside the app. They take the bearer, or an Access token that a
+caller sends itself.
 
 **Telemetry staff-tagging.** Lets dashboards filter staff dogfood
 out of metrics. Destinations `<W2>/api/ingest` and
@@ -1363,7 +1374,7 @@ Everything referenced below now exists. Pages → your project →
 |---|---|---|
 | `ACCESS_TEAM_DOMAIN` | `W12` — team domain only, no `https://` | |
 | `ACCESS_AUD` | `W13` | |
-| `ACCESS_FEEDBACK_AUD` | 6.4's admin app AUD, or `W13` without one (optional) | |
+| `ACCESS_FEEDBACK_AUD` | 6.4's admin app AUD, or `W13` without one (set by hand) | |
 | `TRUSTED_PUBLISHER_DOMAINS` | `your-org.org` (comma-separated, optional) | |
 
 ## 8.3 Secrets (encrypted)
@@ -2642,19 +2653,21 @@ causes:
 The feedback admin routes refused the Access token, and no
 `FEEDBACK_ADMIN_TOKEN` bearer matched. Check, in order:
 
-1. **`ACCESS_FEEDBACK_AUD` is the AUD of the app covering
-   `/api/feedback-admin`** (6.4). If your publisher app covers it,
-   use `W13`.
+1. **An Access app covers `/api/feedback-admin`** (6.4). The portal's
+   Export buttons use that path. Without such an app, a browser sends
+   no token, and only the bearer works.
 2. **`ACCESS_TEAM_DOMAIN` is set** in the same environment. Without
-   it, no token can be checked, and setting `ACCESS_FEEDBACK_AUD`
-   makes every token fail.
-3. **The path is behind Access.** 6.4's app covers
-   `/api/feedback-admin` only. The older direct routes, such as
-   `/api/feedback-export`, take the bearer.
+   it, every Access header is refused.
+3. **`ACCESS_FEEDBACK_AUD` is that app's AUD**, or `W13` if your
+   publisher app covers the path. Once it is set, a token for any
+   other app is refused.
+4. **You redeployed** after changing either variable.
 
-Before `ACCESS_FEEDBACK_AUD` is set, Workers logs show "feedback
-admin: accepted an Access token without checking its audience". That
-line means the route let a request in. Set the variable to stop it.
+Until `ACCESS_FEEDBACK_AUD` is set, a token for another of your
+team's apps is let in. Each one logs "feedback admin: accepted an
+Access token for an application this node does not name", with its
+audience. `wrangler pages deployment tail` shows these lines. Set the
+variable to refuse such tokens.
 
 ### Publisher API returns 503 `access_unconfigured`
 `ACCESS_TEAM_DOMAIN` or `ACCESS_AUD` is missing — most often set on
