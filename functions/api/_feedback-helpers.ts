@@ -15,8 +15,8 @@
  *   - /api/general-feedback-export
  *   - /api/general-feedback-screenshot
  *
- * Auth lives in the route files. These helpers assume the caller
- * has already gated the request.
+ * Auth is `_feedback-auth.ts`, which each route calls first. These
+ * helpers assume the caller has already gated the request.
  */
 
 export interface AiDashboardResponse {

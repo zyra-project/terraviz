@@ -24,7 +24,12 @@
  *      token JWTs.
  *   3. Validating `aud` (must include the configured Application
  *      AUD), `iss` (must equal `https://<team>.cloudflareaccess.com`),
- *      and `exp` (must be in the future).
+ *      and `exp` (must be in the future). `verifyAccessJwtAnyAudience`
+ *      skips the audience step and hands the audiences to its caller.
+ *
+ * Every malformed input returns `null` rather than throwing. Callers
+ * outside Access (the feedback admin routes) pass attacker-chosen
+ * strings here, and a throw would skip their bearer fall-through.
  *
  * Service tokens are distinguished from user logins by the `type`
  * claim Cloudflare emits — `"app"` for service tokens. Users always
@@ -142,20 +147,26 @@ async function verifySignature(
   signatureB64: string,
   jwk: JwkPublic,
 ): Promise<boolean> {
-  const key = await crypto.subtle.importKey(
-    'jwk',
-    jwk as unknown as JsonWebKey,
-    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-    false,
-    ['verify'],
-  )
-  const data = new TextEncoder().encode(`${headerB64}.${payloadB64}`)
-  const sig = base64urlDecode(signatureB64)
-  // TS 5.7+ distinguishes ArrayBuffer from ArrayBufferLike; the
-  // workers-types `crypto.subtle.verify` signature wants a strict
-  // BufferSource. Casting the Uint8Array (whose internal buffer is
-  // ArrayBufferLike) is safe — runtime accepts both.
-  return crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, sig as BufferSource, data as BufferSource)
+  try {
+    const key = await crypto.subtle.importKey(
+      'jwk',
+      jwk as unknown as JsonWebKey,
+      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+      false,
+      ['verify'],
+    )
+    const data = new TextEncoder().encode(`${headerB64}.${payloadB64}`)
+    // Throws on a signature segment that is not base64url. Kids are
+    // public, so a caller can reach here with any signature it likes.
+    const sig = base64urlDecode(signatureB64)
+    // TS 5.7+ distinguishes ArrayBuffer from ArrayBufferLike; the
+    // workers-types `crypto.subtle.verify` signature wants a strict
+    // BufferSource. Casting the Uint8Array (whose internal buffer is
+    // ArrayBufferLike) is safe — runtime accepts both.
+    return await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, sig as BufferSource, data as BufferSource)
+  } catch {
+    return false
+  }
 }
 
 interface JwtClaims {
@@ -207,7 +218,7 @@ export async function verifyAccessJwtAnyAudience(
   token: string,
   env: VerifyEnv,
   options: VerifyOptions = {},
-): Promise<{ identity: AccessIdentity; audiences: string[] } | null> {
+): Promise<{ identity: AccessIdentity; audiences: string[]; tokenType: string | null } | null> {
   const { teamDomain } = accessConfig(env)
   if (!teamDomain) return null
   const fetchImpl = options.fetchImpl ?? fetch
@@ -228,6 +239,8 @@ export async function verifyAccessJwtAnyAudience(
   } catch {
     return null
   }
+  // `null`, a number or an array parses as JSON too.
+  if (!isPlainObject(header) || !isPlainObject(claims)) return null
   if (header.alg !== 'RS256') return null
   if (!header.kid) return null
 
@@ -291,5 +304,15 @@ export async function verifyAccessJwtAnyAudience(
     : (claims.email ?? null)
   if (!email) return null
 
-  return { identity: { email, sub: subject, type: isService ? 'service' : 'user' }, audiences }
+  return {
+    identity: { email, sub: subject, type: isService ? 'service' : 'user' },
+    audiences,
+    // `app` for an application token, `org` for the team-wide session
+    // token. Not the user/service split, which the claims above decide.
+    tokenType: typeof claims.type === 'string' ? claims.type : null,
+  }
+}
+
+function isPlainObject(value: unknown): boolean {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
