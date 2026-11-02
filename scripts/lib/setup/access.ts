@@ -415,7 +415,8 @@ export async function ensureAccessApplication(
   if (!app.aud) {
     throw new Error(
       `Created Access application "${opts.name}" but the response carried no AUD. ` +
-        'Read it from the application\'s Overview tab and set ACCESS_AUD by hand.',
+        'Read it from the application\'s Additional settings (Overview tab on older ' +
+        'dashboards) and set ACCESS_AUD by hand.',
     )
   }
   return { app, created: true }

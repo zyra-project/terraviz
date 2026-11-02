@@ -106,6 +106,13 @@ export interface SetupState {
   /** Comma-separated email domains for `TRUSTED_PUBLISHER_DOMAINS`. */
   trustedPublisherDomains?: string
 
+  /**
+   * `ACCESS_FEEDBACK_AUD` (SELF_HOSTING.md 6.4), only ever from the
+   * operator's own export: setup cannot tell which Access app covers
+   * the feedback admin paths.
+   */
+  accessFeedbackAud?: string
+
   /** Public origin for the R2 bucket (`R2_PUBLIC_BASE`, W19). */
   r2PublicBase?: string
 
@@ -177,6 +184,7 @@ export function hydrateState(raw: unknown): SetupState {
     serviceTokenName: str('serviceTokenName'),
     serviceTokenClientId: str('serviceTokenClientId'),
     trustedPublisherDomains: str('trustedPublisherDomains'),
+    accessFeedbackAud: str('accessFeedbackAud'),
     r2PublicBase: str('r2PublicBase'),
     githubOwner: str('githubOwner'),
     githubRepo: str('githubRepo'),
@@ -204,6 +212,7 @@ export interface SetupEnv {
   TERRAVIZ_ACCESS_APP_NAME?: string
   TERRAVIZ_SERVICE_TOKEN_NAME?: string
   TRUSTED_PUBLISHER_DOMAINS?: string
+  ACCESS_FEEDBACK_AUD?: string
   R2_PUBLIC_BASE?: string
   GITHUB_OWNER?: string
   GITHUB_REPO?: string
@@ -260,6 +269,7 @@ export function applyEnvOverrides(state: SetupState, rawEnv: SetupEnv): SetupSta
   if (env.TERRAVIZ_ACCESS_APP_NAME) next.accessAppName = env.TERRAVIZ_ACCESS_APP_NAME
   if (env.TERRAVIZ_SERVICE_TOKEN_NAME) next.serviceTokenName = env.TERRAVIZ_SERVICE_TOKEN_NAME
   if (env.TRUSTED_PUBLISHER_DOMAINS) next.trustedPublisherDomains = env.TRUSTED_PUBLISHER_DOMAINS
+  if (env.ACCESS_FEEDBACK_AUD) next.accessFeedbackAud = env.ACCESS_FEEDBACK_AUD
   if (env.R2_PUBLIC_BASE) next.r2PublicBase = env.R2_PUBLIC_BASE
   if (env.GITHUB_OWNER) next.githubOwner = env.GITHUB_OWNER
   if (env.GITHUB_REPO) next.githubRepo = env.GITHUB_REPO

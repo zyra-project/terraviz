@@ -325,7 +325,7 @@ Environment
                                  applications, the API application's name.
   TERRAVIZ_SERVICE_TOKEN_NAME    Defaults to "terraviz-cli".
   ACCESS_TEAM_DOMAIN, ACCESS_AUD, TRUSTED_PUBLISHER_DOMAINS,
-  R2_PUBLIC_BASE, GITHUB_OWNER, GITHUB_REPO
+  ACCESS_FEEDBACK_AUD, R2_PUBLIC_BASE, GITHUB_OWNER, GITHUB_REPO
                                  Optional; set the matching binding when present.
                                  The access step discovers the first two.
 

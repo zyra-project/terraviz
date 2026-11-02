@@ -205,6 +205,61 @@ const searchReachable: VerifyCheck = {
   },
 }
 
+// The feedback admin routes carry no service token, so their check
+// lives with the public surface: it sends a deliberately invalid
+// Access header and asserts the node does not read feedback for it.
+// `/api/general-feedback-export` is one of the direct routes that
+// §6.4's optional Access application does not cover, so it is the
+// most widely exposed, and a GET that needs no body.
+const feedbackGuarded: VerifyCheck = {
+  name: 'feedback-guarded',
+  description:
+    'GET /api/general-feedback-export with a forged Access header — must be refused, not read',
+  async run({ serverUrl, fetchImpl }) {
+    try {
+      const res = await fetchImpl(`${serverUrl}/api/general-feedback-export`, {
+        headers: { 'Cf-Access-Jwt-Assertion': 'not-a-real-token' },
+        redirect: 'manual',
+      })
+      const status = res.status
+      // An Access application in front of the path challenges the
+      // forged header (3xx to the login), and the fixed code refuses
+      // it (401/403). Either is safe. A 200 means the header was
+      // accepted and feedback came back. A 503 ("Database not
+      // configured") means the auth gate passed the forged header and
+      // only a missing binding stopped the read — the pre-fix
+      // presence check, still deployed.
+      if (status === 200) {
+        return {
+          status: 'fail',
+          detail:
+            'a forged Cf-Access-Jwt-Assertion read the feedback export (HTTP 200). Deploy the ' +
+            'Access-token fix, and put the feedback routes behind Access on every hostname, ' +
+            '*.pages.dev included.',
+        }
+      }
+      if (status === 503) {
+        return {
+          status: 'fail',
+          detail:
+            'a forged Cf-Access-Jwt-Assertion passed the auth gate (HTTP 503, no feedback ' +
+            'database) — the pre-fix presence check is still deployed. Deploy the Access-token ' +
+            'fix. (A transient upstream 503 reads the same; re-run to confirm.)',
+        }
+      }
+      if (status === 0 || status === 401 || status === 403 || (status >= 300 && status < 400)) {
+        return { status: 'pass', detail: `forged header refused (HTTP ${status || 'redirect'})` }
+      }
+      return {
+        status: 'fail',
+        detail: `unexpected status ${status} — could not confirm the forged header is refused`,
+      }
+    } catch (e) {
+      return { status: 'fail', detail: networkError(e) }
+    }
+  },
+}
+
 // ── Auth-gated checks ────────────────────────────────────────────
 
 const accessResponsive: VerifyCheck = {
@@ -282,6 +337,7 @@ export const VERIFY_CHECKS: VerifyCheck[] = [
   catalogReachable,
   catalogPopulated,
   searchReachable,
+  feedbackGuarded,
   accessResponsive,
   publisherListReadable,
 ]

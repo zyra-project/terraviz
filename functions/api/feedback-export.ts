@@ -6,9 +6,12 @@
  *
  * Streams feedback as JSONL for RLHF training data extraction.
  *
- * Auth: Cloudflare Access at the edge (preferred); legacy
- * `FEEDBACK_ADMIN_TOKEN` bearer-token path kept as a fallback
- * for `wrangler dev` and break-glass.
+ * Auth: `_feedback-auth.ts`. A Cloudflare Access token verified
+ * against the team's keys (preferred), else the legacy
+ * `FEEDBACK_ADMIN_TOKEN` bearer, kept for `wrangler dev`, scripts
+ * and break-glass. §6.4's Access application covers only
+ * `/api/feedback-admin`, so on such a node this path takes the
+ * bearer or a token the caller sends itself.
  *
  * The web admin UI no longer calls this path directly — the
  * dashboard at `/api/feedback-admin` proxies the same export
@@ -23,28 +26,13 @@
  *   ?include_prompt=true  — include full system prompt (default false, saves bandwidth)
  */
 
-import { isInternalRequest } from './ingest'
+import { authenticateFeedbackAdmin, type FeedbackAdminEnv } from './_feedback-auth'
 import { streamAiExport } from './_feedback-helpers'
 
-interface Env {
-  FEEDBACK_DB?: D1Database
-  FEEDBACK_ADMIN_TOKEN?: string
-}
-
-function authenticate(request: Request, token?: string): boolean {
-  if (isInternalRequest(request)) return true
-  // Both sides trimmed — see feedback-admin.ts. A secret stored
-  // with a trailing newline would otherwise 401 every caller.
-  const expected = token?.trim()
-  if (!expected) return false
-  const auth = request.headers.get('Authorization')
-  if (!auth) return false
-  const bearer = auth.replace(/^Bearer\s+/i, '').trim()
-  return bearer === expected
-}
+type Env = FeedbackAdminEnv
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
-  if (!authenticate(context.request, context.env.FEEDBACK_ADMIN_TOKEN)) {
+  if (!(await authenticateFeedbackAdmin(context.request, context.env))) {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), {
       status: 401,
       headers: { 'Content-Type': 'application/json' },
