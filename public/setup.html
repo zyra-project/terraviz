@@ -316,7 +316,7 @@ code{overflow-wrap:anywhere}
 <!--
   GENERATED FILE — do not edit.
 
-  Produced by scripts/build-setup-page.ts on 2026-10-30.
+  Produced by scripts/build-setup-page.ts on 2026-11-02.
   Prose lives in scripts/setup-page/content.ts; every binding,
   prerequisite and validator is imported from the modules the setup
   tool itself uses, so this page cannot disagree with `npm run setup`.
@@ -2068,6 +2068,10 @@ npm run terraviz -- import-snapshot \
     <div style="background:var(--tv-surface-2);border:1px solid var(--tv-border);border-radius:8px;padding:16px 18px">
       <div style="font:500 14px/1.4 var(--tv-font-mono);color:var(--tv-error);margin:0 0 6px">401 &quot;Invalid or expired Access assertion&quot;</div>
       <p style="margin:0;font-size:13.5px;line-height:1.55;color:var(--tv-text-muted);text-wrap:pretty">Your AUD does not match the application that issued the JWT. Re-copy it from the application's Overview tab. A token minted for a different application in the same team is rejected by design.</p>
+    </div>
+    <div style="background:var(--tv-surface-2);border:1px solid var(--tv-border);border-radius:8px;padding:16px 18px">
+      <div style="font:500 14px/1.4 var(--tv-font-mono);color:var(--tv-error);margin:0 0 6px">Publisher API returns 403 cross_origin_request or origin_required</div>
+      <p style="margin:0;font-size:13.5px;line-height:1.55;color:var(--tv-text-muted);text-wrap:pretty">The publish routes refuse a request that a page on another origin started, and the message names the header they refused. A script or proxy that sends its own <code style="font-family:var(--tv-font-mono);font-size:.92em;background:var(--tv-surface-3);padding:1px 5px;border-radius:3px">Origin</code> must send your node's origin (<code style="font-family:var(--tv-font-mono);font-size:.92em;background:var(--tv-surface-3);padding:1px 5px;border-radius:3px">https://</code> and your hostname, no path), or none. <code style="font-family:var(--tv-font-mono);font-size:.92em;background:var(--tv-surface-3);padding:1px 5px;border-radius:3px">origin_required</code> means a signed-in user's change carried neither <code style="font-family:var(--tv-font-mono);font-size:.92em;background:var(--tv-surface-3);padding:1px 5px;border-radius:3px">Origin</code> nor <code style="font-family:var(--tv-font-mono);font-size:.92em;background:var(--tv-surface-3);padding:1px 5px;border-radius:3px">Sec-Fetch-Site</code>, as from an old browser or an extension that strips both.</p>
     </div>
     <div style="background:var(--tv-surface-2);border:1px solid var(--tv-border);border-radius:8px;padding:16px 18px">
       <div style="font:500 14px/1.4 var(--tv-font-mono);color:var(--tv-error);margin:0 0 6px">Access blocks your own staff account</div>
