@@ -1285,6 +1285,12 @@ The older direct routes, such as `/api/feedback-export`, stay
 outside the app. They take the bearer, or an Access token that a
 caller sends itself.
 
+To confirm it, `terraviz verify-deploy` runs a `feedback-guarded`
+check: it sends a forged Access header to the feedback export and
+fails if it reads data. Point `--server` at each deployment's own
+`*.pages.dev` hostname as well, since those are not covered by an
+app listing only your node's hostnames.
+
 **Telemetry staff-tagging.** Lets dashboards filter staff dogfood
 out of metrics. Destinations `<W2>/api/ingest` and
 `<W10>.pages.dev/api/ingest`, and **two policies in this exact
@@ -1824,11 +1830,11 @@ TERRAVIZ_ACCESS_CLIENT_SECRET=<W15> \
 npm run terraviz -- verify-deploy --server https://<W2>
 ```
 
-`verify-deploy` runs six checks: node identity advertised, catalog
-reachable, catalog populated, search responsive, Access service
-token round-trips, publisher list reads cleanly. Without a service
-token the last two SKIP rather than fail, so it's useful before
-Phase 6 too.
+`verify-deploy` runs seven checks: node identity advertised, catalog
+reachable, catalog populated, search responsive, the feedback export
+refuses a forged Access header, Access service token round-trips,
+publisher list reads cleanly. Without a service token the last two
+SKIP rather than fail, so it's useful before Phase 6 too.
 
 **Expected results at this point:**
 
@@ -1838,6 +1844,7 @@ Phase 6 too.
 | `catalog-reachable` | PASS |
 | `catalog-populated` | **FAIL** until Phase 12 — the catalog is genuinely empty |
 | `search-reachable` | PASS |
+| `feedback-guarded` | PASS once the node has an Access team domain; see §6.4 |
 | `access-me` | PASS |
 | `publisher-list` | PASS |
 
@@ -1929,7 +1936,7 @@ published. Takes a few minutes; embedding jobs backfill Vectorize
 asynchronously over the following ~10 minutes.
 
 **Gate:** re-run `verify-deploy`. `catalog-populated` now PASSes,
-and all six checks are green. **That's a complete Tier 2 node.**
+and all seven checks are green. **That's a complete Tier 2 node.**
 
 ---
 
