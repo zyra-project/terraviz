@@ -86,7 +86,7 @@ export const validators = {
   aud(value: string): string | null {
     return /^[0-9a-f]{64}$/i.test(value.trim())
       ? null
-      : 'expected 64 hex characters from the application\'s Overview tab'
+      : 'expected 64 hex characters: the application\'s AUD tag, under Additional settings'
   },
 
   /**

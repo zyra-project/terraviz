@@ -61,6 +61,19 @@ export const OPTIONAL_EXTRAS: ExpectedBinding[] = [
       'Comma-separated email domains whose Access logins skip the approval ' +
       'queue. Provisions them as reviewer/active — read-only, NOT admin.',
   },
+  {
+    // Written only from the operator's own export. Setup cannot know
+    // which application covers the feedback admin paths, and a guess
+    // written over an operator's own value would lock their exports
+    // out. Unexported, a run lists it among the bindings left unset.
+    name: 'ACCESS_FEEDBACK_AUD',
+    type: 'plaintext',
+    environments: ['production', 'preview'],
+    hint:
+      'AUD of the Access application covering /api/feedback-admin, ' +
+      'ACCESS_AUD\'s value if the publisher app covers it, or none if ' +
+      'no app does (SELF_HOSTING.md 6.4). Export it, or set it in the dashboard.',
+  },
 ]
 
 /** Cloudflare's per-binding payload shapes, keyed by binding type. */
@@ -172,6 +185,8 @@ function plaintextValue(name: string, state: SetupState): string | undefined {
       return state.accessAud
     case 'TRUSTED_PUBLISHER_DOMAINS':
       return state.trustedPublisherDomains
+    case 'ACCESS_FEEDBACK_AUD':
+      return state.accessFeedbackAud
     case 'R2_PUBLIC_BASE':
       return state.r2PublicBase
     case 'GITHUB_OWNER':

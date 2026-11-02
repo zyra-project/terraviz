@@ -167,6 +167,59 @@ describe('search-reachable check', () => {
   })
 })
 
+describe('feedback-guarded check', () => {
+  const check = findCheck('feedback-guarded')
+
+  function capturing(status: number) {
+    const seen: { url: string; init?: RequestInit } = { url: '' }
+    const fetchImpl = ((input: RequestInfo | URL, init?: RequestInit) => {
+      seen.url = typeof input === 'string' ? input : input.toString()
+      seen.init = init
+      return Promise.resolve(new Response(status === 0 ? '' : 'x', { status: status || 200 }))
+    }) as typeof fetch
+    return { fetchImpl, seen }
+  }
+
+  it('sends a forged header to the direct route and does not follow redirects', async () => {
+    const { fetchImpl, seen } = capturing(401)
+    await check.run({ ...baseDeps, fetchImpl })
+    expect(seen.url).toContain('/api/general-feedback-export')
+    const headers = new Headers(seen.init?.headers)
+    expect(headers.get('cf-access-jwt-assertion')).toBe('not-a-real-token')
+    expect(seen.init?.redirect).toBe('manual')
+  })
+
+  it('fails on 200, naming the leak', async () => {
+    const { fetchImpl } = capturing(200)
+    const out = await check.run({ ...baseDeps, fetchImpl })
+    expect(out.status).toBe('fail')
+    expect(out.detail).toContain('read the feedback export')
+  })
+
+  it('fails on 503, naming the pre-fix presence check', async () => {
+    const { fetchImpl } = capturing(503)
+    const out = await check.run({ ...baseDeps, fetchImpl })
+    expect(out.status).toBe('fail')
+    expect(out.detail).toContain('presence check')
+  })
+
+  it('passes when the forged header is refused or challenged', async () => {
+    for (const status of [401, 403, 302, 307]) {
+      const { fetchImpl } = capturing(status)
+      expect((await check.run({ ...baseDeps, fetchImpl })).status, `HTTP ${status}`).toBe('pass')
+    }
+  })
+
+  it('fails an unexpected status rather than assuming safety', async () => {
+    const { fetchImpl } = capturing(418)
+    expect((await check.run({ ...baseDeps, fetchImpl })).status).toBe('fail')
+  })
+
+  it('needs no service token', () => {
+    expect(check.requires).toBeUndefined()
+  })
+})
+
 describe('access-me check', () => {
   it('passes when /api/v1/publish/me returns the publisher row', async () => {
     const fetchImpl = makeRouter({
@@ -208,6 +261,7 @@ describe('runChecks', () => {
         mkResponse(200, { node_id: 'X', public_key: 'ed25519:AA' }),
       '/api/v1/catalog': () => mkResponse(200, { datasets: [{ id: 'X' }] }),
       '/api/v1/search': () => mkResponse(200, { datasets: [] }),
+      '/api/general-feedback-export': () => mkResponse(401, { error: 'Unauthorized' }),
     })
     const rows = await runChecks(VERIFY_CHECKS, {
       serverUrl: 'https://example.test',
@@ -229,6 +283,7 @@ describe('runChecks', () => {
         mkResponse(200, { node_id: 'X', public_key: 'ed25519:AA' }),
       '/api/v1/catalog': () => mkResponse(200, { datasets: [{ id: 'X' }] }),
       '/api/v1/search': () => mkResponse(200, { datasets: [] }),
+      '/api/general-feedback-export': () => mkResponse(401, { error: 'Unauthorized' }),
       '/api/v1/publish/me': () =>
         mkResponse(200, { email: 'a@b', role: 'service' }),
       '/api/v1/publish/datasets': () => mkResponse(200, { datasets: [] }),
@@ -288,6 +343,7 @@ describe('runVerifyDeploy', () => {
         mkResponse(200, { node_id: 'X', public_key: 'ed25519:AA' }),
       '/api/v1/catalog': () => mkResponse(200, { datasets: [{ id: 'X' }] }),
       '/api/v1/search': () => mkResponse(200, { datasets: [] }),
+      '/api/general-feedback-export': () => mkResponse(401, { error: 'Unauthorized' }),
     })
     const code = await runVerifyDeploy(ctx, {
       config: { server: 'https://example.test', insecureLocal: false },
@@ -303,6 +359,7 @@ describe('runVerifyDeploy', () => {
       '/.well-known/terraviz.json': () => mkResponse(500, 'oops'),
       '/api/v1/catalog': () => mkResponse(200, { datasets: [{ id: 'X' }] }),
       '/api/v1/search': () => mkResponse(200, { datasets: [] }),
+      '/api/general-feedback-export': () => mkResponse(401, { error: 'Unauthorized' }),
     })
     const code = await runVerifyDeploy(ctx, {
       config: { server: 'https://example.test', insecureLocal: false },
@@ -319,6 +376,7 @@ describe('runVerifyDeploy', () => {
         mkResponse(200, { node_id: 'X', public_key: 'ed25519:AA' }),
       '/api/v1/catalog': () => mkResponse(200, { datasets: [{ id: 'X' }] }),
       '/api/v1/search': () => mkResponse(200, { datasets: [] }),
+      '/api/general-feedback-export': () => mkResponse(401, { error: 'Unauthorized' }),
     })
     const code = await runVerifyDeploy(ctx, {
       config: {

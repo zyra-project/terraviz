@@ -424,6 +424,32 @@ describe('verifyAccessJwt', () => {
     ).toBeNull()
   })
 
+  // These threw rather than returning null: a header or payload that
+  // parses to something other than an object, and a signature that
+  // isn't base64url beside a real kid (kids are public).
+  it('returns null, never throws, on a well-formed but hostile token', async () => {
+    const env = makeEnv()
+    const fetchStub = makeFetchStub({ keys: [key.publicJwk] })
+    const header = base64urlString(JSON.stringify({ alg: 'RS256', kid: KID }))
+    const claims = base64urlString(JSON.stringify({ iss: `https://${TEAM}`, aud: AUD }))
+    for (const token of [
+      `${base64urlString('null')}.${claims}.x`,
+      `${base64urlString('[1]')}.${claims}.x`,
+      `${header}.${base64urlString('null')}.x`,
+      `${header}.${claims}.!!!`,
+    ]) {
+      await expect(verifyAccessJwt(token, env, { fetchImpl: fetchStub })).resolves.toBeNull()
+    }
+  })
+
+  it('fetches no keys when ACCESS_AUD is missing, even for a valid token', async () => {
+    const fetchStub = makeFetchStub({ keys: [key.publicJwk] })
+    const now = Math.floor(Date.now() / 1000)
+    const token = await signJwt({ iss: `https://${TEAM}`, aud: AUD, sub: 'u', email: 'a@example.com', exp: now + 600 })
+    expect(await verifyAccessJwt(token, { ACCESS_TEAM_DOMAIN: TEAM, CATALOG_KV: makeKV() }, { fetchImpl: fetchStub })).toBeNull()
+    expect(fetchStub).not.toHaveBeenCalled()
+  })
+
   it('returns null when the JWKS endpoint errors', async () => {
     const env = makeEnv()
     const fetchStub = vi.fn(async () => new Response('boom', { status: 500 }))

@@ -856,7 +856,7 @@ export R2_SECRET_ACCESS_KEY=...</div><p style="margin:0 0 6px;padding-inline-sta
   <div data-phase-row="12" style="display:flex;gap:10px;align-items:flex-start">
     <button data-toggle="p12" data-check="1" style="flex:none;margin-top:1px"></button>
     <div style="flex:none;width:22px;font:500 11.5px/1.5 var(--tv-font-mono);color:var(--tv-text-dim)">12</div>
-    <div style="font-size:13.5px;line-height:1.5;color:var(--tv-text-muted);text-wrap:pretty">All six checks pass. Your node is finished.</div>
+    <div style="font-size:13.5px;line-height:1.5;color:var(--tv-text-muted);text-wrap:pretty">All seven checks pass. Your node is finished.</div>
   </div>
   <div data-phase-row="13" style="display:flex;gap:10px;align-items:flex-start">
     <button data-toggle="p13" data-check="1" style="flex:none;margin-top:1px"></button>
@@ -1537,7 +1537,7 @@ wrangler d1 migrations apply FEEDBACK_DB --remote<span style="color:var(--tv-tex
     </div>
     <input data-field="W13" data-validate="aud" placeholder="64-char hex" spellcheck="false" autocomplete="off" style="width:100%;background:var(--tv-surface-3);border:1px solid var(--tv-border-strong);border-radius:6px;padding:8px 10px;font:400 13px/1.4 var(--tv-font-mono);color:var(--tv-text)"/>
     <div data-error="W13" style="display:none;font:400 11.5px/1.5 var(--tv-font-sans);color:var(--tv-error);margin-top:4px"></div>
-    <div style="font:400 11.5px/1.5 var(--tv-font-sans);color:var(--tv-text-dim);margin-top:4px">Application → Overview → Application Audience Tag.</div>
+    <div style="font:400 11.5px/1.5 var(--tv-font-sans);color:var(--tv-text-dim);margin-top:4px">Application → Additional settings → Application Audience (AUD) Tag. Older dashboards show it on the Overview tab.</div>
   </div>
       <div data-field-row="W14" data-tier="2" style="margin:0 0 14px">
     <div style="display:flex;align-items:center;gap:7px;margin:0 0 5px;flex-wrap:wrap">
@@ -1871,7 +1871,7 @@ npm run terraviz -- verify-deploy --server https://<span data-slot="W2" data-w="
 </div>
   <div style="background:var(--tv-accent-bg);border:1px solid var(--tv-accent-border);border-left:3px solid var(--tv-accent);border-radius:6px;padding:14px 16px;margin:0 0 14px">
     <div style="font:600 10.5px/1.35 var(--tv-font-sans);letter-spacing:.13em;text-transform:uppercase;color:var(--tv-accent);margin:0 0 7px">Gate</div>
-    <p style="margin:0;font-size:13.5px;line-height:1.55;color:var(--tv-text-muted);text-wrap:pretty">Bindings audit clean, and five of six deploy checks green.</p>
+    <p style="margin:0;font-size:13.5px;line-height:1.55;color:var(--tv-text-muted);text-wrap:pretty">Bindings audit clean, and six of seven deploy checks green.</p>
   </div>
   <p style="margin:0;font-size:12.5px;color:var(--tv-text-dim)"><a data-doc="#phase-10--verify" href="https://github.com/zyra-project/terraviz/blob/main/docs/SELF_HOSTING.md#phase-10--verify">Full detail in SELF_HOSTING.md ↗</a></p>
 </section>
@@ -1928,7 +1928,7 @@ npm run terraviz -- import-snapshot \
 </div>
   <div style="background:var(--tv-accent-bg);border:1px solid var(--tv-accent-border);border-left:3px solid var(--tv-accent);border-radius:6px;padding:14px 16px;margin:0 0 14px">
     <div style="font:600 10.5px/1.35 var(--tv-font-sans);letter-spacing:.13em;text-transform:uppercase;color:var(--tv-accent);margin:0 0 7px">Gate</div>
-    <p style="margin:0;font-size:13.5px;line-height:1.55;color:var(--tv-text-muted);text-wrap:pretty">Re-run <code style="font-family:var(--tv-font-mono);font-size:.92em;background:var(--tv-surface-3);padding:1px 5px;border-radius:3px">verify-deploy</code>. <code style="font-family:var(--tv-font-mono);font-size:.92em;background:var(--tv-surface-3);padding:1px 5px;border-radius:3px">catalog-populated</code> now passes and all six checks are green. That is a complete publisher node. Embedding jobs backfill semantic search asynchronously over the next ten minutes or so.</p>
+    <p style="margin:0;font-size:13.5px;line-height:1.55;color:var(--tv-text-muted);text-wrap:pretty">Re-run <code style="font-family:var(--tv-font-mono);font-size:.92em;background:var(--tv-surface-3);padding:1px 5px;border-radius:3px">verify-deploy</code>. <code style="font-family:var(--tv-font-mono);font-size:.92em;background:var(--tv-surface-3);padding:1px 5px;border-radius:3px">catalog-populated</code> now passes and all seven checks are green. That is a complete publisher node. Embedding jobs backfill semantic search asynchronously over the next ten minutes or so.</p>
   </div>
   <p style="margin:0;font-size:12.5px;color:var(--tv-text-dim)"><a data-doc="#phase-12--put-content-in" href="https://github.com/zyra-project/terraviz/blob/main/docs/SELF_HOSTING.md#phase-12--put-content-in">Full detail in SELF_HOSTING.md ↗</a></p>
 </section>
@@ -2067,7 +2067,11 @@ npm run terraviz -- import-snapshot \
     </div>
     <div style="background:var(--tv-surface-2);border:1px solid var(--tv-border);border-radius:8px;padding:16px 18px">
       <div style="font:500 14px/1.4 var(--tv-font-mono);color:var(--tv-error);margin:0 0 6px">401 &quot;Invalid or expired Access assertion&quot;</div>
-      <p style="margin:0;font-size:13.5px;line-height:1.55;color:var(--tv-text-muted);text-wrap:pretty">Your AUD does not match the application that issued the JWT. Re-copy it from the application's Overview tab. A token minted for a different application in the same team is rejected by design.</p>
+      <p style="margin:0;font-size:13.5px;line-height:1.55;color:var(--tv-text-muted);text-wrap:pretty">Your AUD does not match the application that issued the JWT. Re-copy it from the application's Additional settings, or its Overview tab on an older dashboard. A token minted for a different application in the same team is rejected by design.</p>
+    </div>
+    <div style="background:var(--tv-surface-2);border:1px solid var(--tv-border);border-radius:8px;padding:16px 18px">
+      <div style="font:500 14px/1.4 var(--tv-font-mono);color:var(--tv-error);margin:0 0 6px">Feedback exports return 401 &quot;Unauthorized&quot;</div>
+      <p style="margin:0;font-size:13.5px;line-height:1.55;color:var(--tv-text-muted);text-wrap:pretty">The feedback admin routes refused the Access token, and no <code style="font-family:var(--tv-font-mono);font-size:.92em;background:var(--tv-surface-3);padding:1px 5px;border-radius:3px">FEEDBACK_ADMIN_TOKEN</code> bearer matched. The portal's Export buttons need an Access app covering <code style="font-family:var(--tv-font-mono);font-size:.92em;background:var(--tv-surface-3);padding:1px 5px;border-radius:3px">/api/feedback-admin</code>; without one, only the bearer works. <code style="font-family:var(--tv-font-mono);font-size:.92em;background:var(--tv-surface-3);padding:1px 5px;border-radius:3px">ACCESS_TEAM_DOMAIN</code> must be set, or every Access header is refused, even on a node that does not publish but fronts these routes with Access. <code style="font-family:var(--tv-font-mono);font-size:.92em;background:var(--tv-surface-3);padding:1px 5px;border-radius:3px">ACCESS_FEEDBACK_AUD</code> must be that app's AUD, or your publisher AUD if the publisher app covers the path; <code style="font-family:var(--tv-font-mono);font-size:.92em;background:var(--tv-surface-3);padding:1px 5px;border-radius:3px">none</code> refuses every token. Redeploy after changing either.</p>
     </div>
     <div style="background:var(--tv-surface-2);border:1px solid var(--tv-border);border-radius:8px;padding:16px 18px">
       <div style="font:500 14px/1.4 var(--tv-font-mono);color:var(--tv-error);margin:0 0 6px">Publisher API returns 403 cross_origin_request or origin_required</div>
@@ -2331,7 +2335,7 @@ npm run terraviz -- import-snapshot \
     </div>
     <input data-field="W13" data-validate="aud" placeholder="64-char hex" spellcheck="false" autocomplete="off" style="width:100%;background:var(--tv-surface-3);border:1px solid var(--tv-border-strong);border-radius:6px;padding:8px 10px;font:400 13px/1.4 var(--tv-font-mono);color:var(--tv-text)"/>
     <div data-error="W13" style="display:none;font:400 11.5px/1.5 var(--tv-font-sans);color:var(--tv-error);margin-top:4px"></div>
-    <div style="font:400 11.5px/1.5 var(--tv-font-sans);color:var(--tv-text-dim);margin-top:4px">Application → Overview → Application Audience Tag.</div>
+    <div style="font:400 11.5px/1.5 var(--tv-font-sans);color:var(--tv-text-dim);margin-top:4px">Application → Additional settings → Application Audience (AUD) Tag. Older dashboards show it on the Overview tab.</div>
   </div>
       <div data-field-row="W14" data-tier="2" style="margin:0 0 14px">
     <div style="display:flex;align-items:center;gap:7px;margin:0 0 5px;flex-wrap:wrap">
