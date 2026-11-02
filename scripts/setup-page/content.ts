@@ -658,7 +658,7 @@ export const TROUBLESHOOTING = [
   },
   {
     symptom: 'Feedback exports return 401 "Unauthorized"',
-    fix: 'The feedback admin routes refused the Access token, and no `FEEDBACK_ADMIN_TOKEN` bearer matched. The portal\'s Export buttons need an Access app covering `/api/feedback-admin`; without one, only the bearer works. `ACCESS_TEAM_DOMAIN` must be set, or every Access header is refused. `ACCESS_FEEDBACK_AUD` must be that app\'s AUD, or your publisher AUD if the publisher app covers the path. Redeploy after changing either.',
+    fix: 'The feedback admin routes refused the Access token, and no `FEEDBACK_ADMIN_TOKEN` bearer matched. The portal\'s Export buttons need an Access app covering `/api/feedback-admin`; without one, only the bearer works. `ACCESS_TEAM_DOMAIN` must be set, or every Access header is refused. `ACCESS_FEEDBACK_AUD` must be that app\'s AUD, or your publisher AUD if the publisher app covers the path; `none` refuses every token. Redeploy after changing either.',
   },
   {
     symptom: 'Publisher API returns 403 cross_origin_request or origin_required',

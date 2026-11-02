@@ -1253,14 +1253,17 @@ cookie, so one left at Cloudflare's defaults can undo the others.
 **Admin dashboard.** One app, name `Terraviz Admin`, destination
 `api/feedback-admin` on both hostnames, one Allow policy on your
 email domain. The portal's **Export** buttons use that path, so a
-browser can export only through an app covering it. Without one,
-exports take a `FEEDBACK_ADMIN_TOKEN` bearer.
+browser can export only through an app covering it. Without one, the
+buttons don't work, because a link can't carry a bearer. Exports then
+go through a script that sends the `FEEDBACK_ADMIN_TOKEN` bearer.
 
-Then set the plaintext variable `ACCESS_FEEDBACK_AUD` by hand, in
-both Production and Preview, and redeploy. `npm run setup` lists it
-as unset but never writes it.
+Then set the plaintext variable `ACCESS_FEEDBACK_AUD` in both
+Production and Preview, and redeploy. `npm run setup` writes it only
+if you export it first.
 - **With this app:** its AUD, from the same place as `W13` (6.2).
-- **Without it, or if your publisher app covers this path:** `W13`.
+- **If your publisher app covers this path instead:** `W13`.
+- **With no app on this path:** `none`. The routes then refuse every
+  Access token and take only the bearer.
 
 The feedback admin routes check that an Access token was signed by
 your team, which needs `ACCESS_TEAM_DOMAIN`. Without that variable,
@@ -1274,7 +1277,8 @@ will refuse such tokens, so set the variable now.
 
 On these routes the Access policy decides who reads feedback, not
 the portal's Users tab. With `W13`, a publisher you suspend there
-keeps their Access sign-in, and with it these routes.
+keeps their Access sign-in, and with it these routes. That is why
+`none`, not `W13`, is the value for a node with no app on this path.
 
 The older direct routes, such as `/api/feedback-export`, stay
 outside the app. They take the bearer, or an Access token that a
@@ -1374,7 +1378,7 @@ Everything referenced below now exists. Pages → your project →
 |---|---|---|
 | `ACCESS_TEAM_DOMAIN` | `W12` — team domain only, no `https://` | |
 | `ACCESS_AUD` | `W13` | |
-| `ACCESS_FEEDBACK_AUD` | 6.4's admin app AUD, or `W13` without one (set by hand) | |
+| `ACCESS_FEEDBACK_AUD` | 6.4's admin app AUD, `W13`, or `none` (see 6.4) | |
 | `TRUSTED_PUBLISHER_DOMAINS` | `your-org.org` (comma-separated, optional) | |
 
 ## 8.3 Secrets (encrypted)
@@ -2414,6 +2418,10 @@ there at that path.
 - **New manual steps.** `npm run setup -- --manual` reprints the
   current pre-flight sheet, including any step added since you
   installed. Turning on Analytics Engine arrived this way.
+- **Security notes.** Read [`CHANGELOG.md`](../CHANGELOG.md) for every
+  release since yours. The feedback admin entry asks you to set
+  `ACCESS_FEEDBACK_AUD`, and to protect or delete old deployments,
+  which keep running the code they were built with.
 
 ---
 
@@ -2660,7 +2668,7 @@ The feedback admin routes refused the Access token, and no
    it, every Access header is refused.
 3. **`ACCESS_FEEDBACK_AUD` is that app's AUD**, or `W13` if your
    publisher app covers the path. Once it is set, a token for any
-   other app is refused.
+   other app is refused, and `none` refuses every token.
 4. **You redeployed** after changing either variable.
 
 Until `ACCESS_FEEDBACK_AUD` is set, a token for another of your

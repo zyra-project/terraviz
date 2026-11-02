@@ -28,10 +28,13 @@ referenced in [`README.md`](README.md).
   team. A node with no `ACCESS_TEAM_DOMAIN` refuses every Access header. The
   `FEEDBACK_ADMIN_TOKEN` bearer is unchanged.
 - **Operators:** with `ACCESS_TEAM_DOMAIN` set, set the new plaintext variable
-  `ACCESS_FEEDBACK_AUD` by hand in both Production and Preview, then redeploy
-  (`docs/SELF_HOSTING.md` §6.4). `npm run setup` does not write it.
+  `ACCESS_FEEDBACK_AUD` in both Production and Preview, then redeploy
+  (`docs/SELF_HOSTING.md` §6.4). `npm run setup` writes it only if you export
+  it first.
   - If an Access application covers `/api/feedback-admin`, use its AUD.
-  - If none does, use `ACCESS_AUD`'s value.
+  - If your publisher application covers that path, use `ACCESS_AUD`'s value.
+  - If no application does, use `none`. Every Access token is then refused,
+    and only the bearer works.
   - Once it is set, only that application's tokens are accepted.
 - **Transitional.** Until `ACCESS_FEEDBACK_AUD` is set, a token for any of the
   team's applications is accepted, and one for an application other than the
@@ -40,14 +43,20 @@ referenced in [`README.md`](README.md).
   `ACCESS_TEAM_DOMAIN` loses Access-based reads. Set `ACCESS_TEAM_DOMAIN`, or
   use the bearer.
 - **Past exposure.** Until this release, the feedback could be read without
-  credentials on every path no Access application covered. That was all six
-  routes on a node built by `npm run setup`, and the five direct routes on a
-  node with the §6.4 application. Preview and earlier deployments use the
-  production database, and each keeps running the code it was built with.
+  credentials on every path no Access application covered:
+  - all six routes on a node built by `npm run setup`;
+  - the five direct routes on a node with the §6.4 application;
+  - all six on every deployment's own `*.<project>.pages.dev` hostname, which
+    an application listing only the node's hostnames does not cover.
+
+  Preview and earlier deployments use the production database when they were
+  built by `npm run setup`, and each keeps running the code it was built with.
   - Put the six paths behind an Access application on every hostname,
     including `*.<project>.pages.dev`, or delete the old deployments.
-  - Where Cloudflare logs are retained, look for requests to the six paths.
-    Decide whether your privacy policy or the law requires telling anyone.
+  - Pages Functions keep no request logs by default, so most nodes cannot tell
+    who read what. Where Cloudflare logs are retained, look for requests to
+    the six paths on every hostname.
+  - Decide whether your privacy policy or the law requires telling anyone.
 
 ## Unreleased - Publisher API origin check
 
