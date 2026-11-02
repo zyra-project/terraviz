@@ -1268,8 +1268,9 @@ change it, export the new value rather than editing the dashboard.
 
 The feedback admin routes check that an Access token was signed by
 your team, which needs `ACCESS_TEAM_DOMAIN`. Without that variable,
-they refuse every Access header and take only the bearer. Once
-`ACCESS_FEEDBACK_AUD` is set, the token must be for that app.
+they refuse every Access header and take only the bearer, so a node
+that does not publish but fronts these routes with Access must set it
+too. Once `ACCESS_FEEDBACK_AUD` is set, the token must be for that app.
 
 Until it is set, a token for any of your team's applications is
 accepted. Anyone any of those apps admits can then read feedback by
@@ -2673,7 +2674,9 @@ The feedback admin routes refused the Access token, and no
    Export buttons use that path. Without such an app, a browser sends
    no token, and only the bearer works.
 2. **`ACCESS_TEAM_DOMAIN` is set** in the same environment. Without
-   it, every Access header is refused.
+   it, every Access header is refused. A node that does not publish,
+   but puts Access on these routes, must set it too — it is the team
+   subdomain, and setting it does not turn on publishing.
 3. **`ACCESS_FEEDBACK_AUD` is that app's AUD**, or `W13` if your
    publisher app covers the path. Once it is set, a token for any
    other app is refused, and `none` refuses every token.
