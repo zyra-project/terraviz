@@ -32,7 +32,7 @@ on every request.
 
 Every datapoint written by `toDataPoint()` lands with the same
 positional schema. The first four `blobs[]` are server-stamped
-(no event field can land there, though a client can set `internal`;
+(no other event field can land there, though a client can set `internal`;
 see `blob4` below); event-specific fields follow in
 **alphabetical order** of the field name.
 
@@ -83,7 +83,8 @@ see `blob4` below); event-specific fields follow in
 ### Default filters
 
 Every public-facing query should default to `production` traffic
-and exclude internal staff dogfood:
+and exclude rows tagged `internal` (see `blob4` below for what
+that tag does and does not prove):
 
 ```sql
 SELECT count() FROM terraviz_events
@@ -1079,8 +1080,8 @@ ORDER BY responses DESC
   schema changes when queries return unexpected types.
 - **Server-side blobs are immutable.** `blob1..blob4`
   (`event_type` / `environment` / `country` / `internal`) are
-  stamped by the Pages function, and no event field can land in
-  them. Filter on these for trustworthy slicing, except that a
+  stamped by the Pages function, and no other event field can land
+  in them. Filter on these for trustworthy slicing, except that a
   client can set `internal` by sending a Cloudflare Access header
   itself (`PRIVACY_ANALYSIS.md` §9l).
 - **Country `XX`.** Treat as missing data (Tor, unknown geo, local

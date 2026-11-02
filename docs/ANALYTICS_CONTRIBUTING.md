@@ -130,11 +130,11 @@ re-identification primitive.
 ❌ A device fingerprint
 ❌ Localstorage-stored cohort key without the user opting in
 
-### 7. Server stamping is immutable
+### 7. Server-stamped positions are fixed
 
 `blob1..blob4` (`event_type`, `environment`, `country`, `internal`)
 are stamped by the Pages Function in `functions/api/ingest.ts:toDataPoint()`,
-always in those four positions, so no event field can land there.
+always in those four positions, so no other event field can land there.
 Clients cannot influence `environment` or `country`. Filter on
 these for trustworthy slicing in dashboards.
 
@@ -145,7 +145,8 @@ covers, Cloudflare passes a client-sent copy through unchanged
 (zyra-project/terraviz#513). Treat it as a label, never as proof
 of staff, and never gate anything on it. If you find yourself
 wanting to send `internal: true` as an event field, you've
-misunderstood the model: it would land after `blob4`, not in it.
+misunderstood the model: it would land among the event's own
+fields, not in `blob4`.
 
 ### 8. Schema additions are append-only
 
@@ -353,8 +354,9 @@ confirm any item, leave a comment requesting clarification.
       `event_type` (those are server-stamped at
       `functions/api/ingest.ts:toDataPoint()` into `blob1..blob4`.
       An `internal`, `environment` or `country` event field is not
-      stripped: it lands after `blob4` and shifts every later
-      position of that event).
+      stripped: it lands among the event's own fields, after
+      `blob4` or in the doubles if numeric, and shifts every
+      later position of that event).
 
 ### Throttling
 

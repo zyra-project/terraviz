@@ -72,7 +72,7 @@ attributes (IP, geographic precision, login email).
 
 **What changes.** The `session_id ↔ IP` mapping is recoverable
 from edge logs even though we do not write IPs to AE
-(`functions/api/ingest.ts:361` reads `CF-Connecting-IP` for
+(`functions/api/ingest.ts` reads `CF-Connecting-IP` for
 rate-limiting and discards it; the rate-limit map is
 in-memory per-isolate, but Cloudflare's own access logs are
 their own product). With the IP, an insider can subpoena an
@@ -136,9 +136,9 @@ Per-field budget:
 | `build_channel` | 3 | 1.58 | ~0.05 (`public` ≫ rest) | src/types/index.ts:655 |
 | `app_version` | ~5–10 active | ~2.5 | ~2.0 | session.ts:121 |
 | `schema_version` | 1–2 active | ~1.0 | ~0.2 | session.ts:66 |
-| **server-stamped `country`** | 250 ISO codes | ~7.96 | ~5.5 (US/EU skew) | ingest.ts:206 |
+| **server-stamped `country`** | 250 ISO codes | ~7.96 | ~5.5 (US/EU skew) | ingest.ts `countryOf()` |
 | **server-stamped `internal`** | 2 | 1.0 | ~0.05 (rare) | ingest.ts `isInternalRequest()` |
-| **server-stamped `environment`** | 3 | 1.58 | ~0.0 (filtered to prod) | ingest.ts:195 |
+| **server-stamped `environment`** | 3 | 1.58 | ~0.0 (filtered to prod) | ingest.ts `environmentOf()` |
 
 **Sum, effective.** ≈ **20.8 bits** for a typical session.
 
@@ -709,8 +709,11 @@ is "studied behaviourally", Tier A is "counted operationally".
 ## 8. Server-side stamping integrity
 
 Four blob positions are stamped at the edge by
-`functions/api/ingest.ts:onRequestPost()`, never accepted
-from the client:
+`functions/api/ingest.ts:onRequestPost()`, in positions no
+other event field can occupy. That does not make all four
+independent of the client: `event_type` is what the client
+sent, validated, and `internal` reflects a header the client
+can send (see each row).
 
 | Field | Position | Source | Rationale |
 |---|---|---|---|
@@ -750,13 +753,17 @@ argument would need re-derivation.
 headers on a path no Access application covers:
 zyra-project/terraviz#513 showed a client-sent
 `Cf-Access-Jwt-Assertion` reaching a function unchanged on a
-live deployment. So a client can stamp `blob4='true'` on its
+deployed node. So a client can stamp `blob4='true'` on its
 own rows. That moves those rows *out of* every public-facing
 query, since the default filter keeps `blob4='false'`, and out
-of the D1 rollups behind `/publish/analytics` for good, since
-the export keeps `internal = 0` only. So forging the flag cannot
-inflate a public dashboard. What it can do is pollute the staff
-slice that `$internal = true` shows (§9l).
+of what `/publish/analytics` shows. The D1 export drops internal
+rows from every rollup except `analytics_daily`, which keeps
+them as `internal = 1` and is read with `internal = 0`. So
+forging the flag cannot inflate a public dashboard. What it can
+do is pollute the staff slice that `$internal = true` shows
+(§9l). The rows are still stored, in Analytics Engine, the raw
+archive and `analytics_daily`, so the flag is not a way to opt
+out of collection.
 
 ### 8b. Trust boundary for the integrity argument
 
@@ -768,9 +775,12 @@ is a deliberate scope choice. See §1b for the insider-threat
 discussion.
 
 One header family sits outside the boundary even at the edge.
-Cloudflare Access headers can be trusted only on a path an
-Access application covers, and `/api/ingest` is not one by
-default. So `internal` rests on the client's word (§8a, §9l).
+On a path no Access application covers, Cloudflare passes a
+client-sent Access header through, and `/api/ingest` is not
+covered by default. Whether a client-sent copy survives a path
+covered under a Bypass policy, as `SELF_HOSTING.md` §6.4
+suggests for `/api/ingest`, is untested. So `internal` rests on
+the client's word (§8a, §9l).
 
 ---
 
@@ -956,25 +966,31 @@ is present (§8). Any client can send one. So the staff slice
 covers `/api/ingest`, plus whatever a client chose to label staff.
 On a node built by `npm run setup` nothing covers it, and the slice
 holds only the second kind. A batch carrying the header drops its
-own rows out of the public dashboards and the D1 rollups.
+own rows out of the public dashboards and out of what
+`/publish/analytics` shows (§8a), though they are still stored.
 **Severity: low.** A forger mislabels only its own rows. It adds
-nothing to a public-facing query, reads nothing and unlocks nothing.
-The cost falls on staff-only views, whose counts a forger can
-inflate, and on §3d, where a row in the slice is no longer proof of
-staff. A forger also makes itself easier to single out, since its
-rows join a slice that is small by design (§2a).
+nothing to a public-facing query, and the flag reads nothing and
+unlocks nothing. The cost falls on staff-only views, whose counts a
+forger can inflate, and on §3d, where a row in the slice is no
+longer proof of staff. A forger also makes itself easier to single
+out: its rows join a slice that holds few others, and on a node
+built by `npm run setup`, only other forgers.
 
 The maintainer considered verifying the token and declined, on
-2026-11-02. Verification would put a KV read for the Access signing
-keys and a signature check on every ingest batch carrying the
-header. It would also tie the ingest path to Access configuration it
-does not otherwise need, all to stop a client mislabelling its own
-rows. And it would not make the tag work by itself: `verifyAccessJwt`
-checks one audience, `ACCESS_AUD`, which is the publisher
-application's, so a token from an application covering
-`/api/ingest` would fail it. A surface that has to know a request
-came from staff verifies
-the JWT instead: `verifyAccessJwt` in
+2026-11-02. Verification would add Access configuration, a
+signing-key lookup and a signature check to every ingest batch
+carrying a well-formed token, to stop a client mislabelling its own
+rows. Where nothing covers `/api/ingest`, no genuine batch carries
+the header, so that cost would fall on forgers alone, and the
+benefit would be an empty staff slice instead of one holding only
+forged rows. Verification would not make the tag work by itself
+either: `verifyAccessJwt` checks one audience, `ACCESS_AUD`, which
+is the publisher application's, so a token from an application
+covering `/api/ingest` would fail it. (zyra-project/terraviz#513
+adds a variant that accepts any of the team's audiences.)
+
+A surface that has to know a request came from staff verifies the
+JWT instead: `verifyAccessJwt` in
 `functions/api/v1/_lib/access-auth.ts`, or
 `functions/api/_feedback-auth.ts` for the feedback admin routes. The
 flag must never gate access to anything.

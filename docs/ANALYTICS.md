@@ -88,7 +88,7 @@ the source the tab reads; full design in
 - **Endpoint.** `/api/ingest` (Cloudflare Pages Function). Server-side
   it stamps `event_type`, `environment`, `country` (from
   `CF-IPCountry`) and `internal` (Cloudflare Access presence check)
-  into `blob1..blob4`. No event field can land in these positions,
+  into `blob1..blob4`. No other event field can land in these positions,
   but a client can set `internal`: it sends the header itself
   (see `isInternalRequest()` and `PRIVACY_ANALYSIS.md` §9l).
 - **Storage.** Workers Analytics Engine — a columnar time-series

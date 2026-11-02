@@ -274,11 +274,14 @@ describe('isInternalRequest', () => {
   // describe: presence only, no verification, so any client can set
   // the flag on its own rows. If this starts failing because the
   // check now verifies the token, update every description of the
-  // flag in the same change: docs/PRIVACY.md (then
+  // flag in the same change: the four in ingest.ts itself
+  // (CF_ACCESS_HEADERS, isInternalRequest, toDataPoint's blob4 line,
+  // the comment at the call site), docs/PRIVACY.md (then
   // `npm run build:privacy-page`), docs/PRIVACY_ANALYSIS.md (§1b,
-  // §3d, §8, §8a, §8b, §9f, §9l), docs/ANALYTICS.md,
-  // docs/ANALYTICS_QUERIES.md, docs/ANALYTICS_CONTRIBUTING.md and
-  // grafana/README.md.
+  // the §2a table, §3d, §8, §8a, §8b, §9f, §9l), docs/ANALYTICS.md,
+  // docs/ANALYTICS_QUERIES.md, docs/ANALYTICS_CONTRIBUTING.md,
+  // grafana/README.md, and the telemetry staff-tagging paragraph in
+  // docs/SELF_HOSTING.md §6.4.
   it('returns true for a token that is not a JWT at all (presence only)', () => {
     const req = fakeRequest({ 'Cf-Access-Jwt-Assertion': 'x' })
     expect(isInternalRequest(req)).toBe(true)
@@ -316,6 +319,16 @@ describe('toDataPoint', () => {
   it('encodes internal=true in blob 4', () => {
     const dp = toDataPoint(sessionStart(), 'sess', 'production', 'US', true)
     expect(dp.blobs![3]).toBe('true')
+  })
+
+  // docs/ANALYTICS_CONTRIBUTING.md's checklist says an event field
+  // named like a server-stamped one is not stripped: it cannot reach
+  // blob1..blob4, and lands among the event's own fields instead.
+  it('keeps a client `internal` field out of blob 4', () => {
+    const forged = { ...sessionStart(), internal: 'true' } as unknown as TelemetryEvent
+    const dp = toDataPoint(forged, 'sess', 'production', 'US', false)
+    expect(dp.blobs!.slice(0, 4)).toEqual(['session_start', 'production', 'US', 'false'])
+    expect(dp.blobs!.slice(4)).toContain('true')
   })
 
   it('puts the session_id in indexes', () => {

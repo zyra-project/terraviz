@@ -218,16 +218,15 @@ footer.site-footer {
       written to analytics storage), and which build of the app you
       ran (public, internal-staff, or canary — so internal dogfood
       sessions can be excluded from public dashboards without us
-      needing to know your network address), and a <code>true</code>/<code>false</code>
-      flag recording whether the request carried an internal-staff
-      single-sign-on header. Cloudflare&#39;s edge adds that header for a
-      Zyra-Project staff member signed in via our internal auth
-      layer, on the parts of the service that layer covers. We check
-      only that the header is present, not that it is genuine, so a
-      request can carry it without coming from staff. The flag is a
-      label for sorting dashboards, never proof of who you are, and
-      we never use it to grant access to anything. The authenticated
-      email itself is <strong>never</strong> stored — only the boolean</p>
+      needing to know your network address)</p>
+      </li>
+      <li><p>On every event, whether the request was labelled as coming from
+      our staff (<code>true</code> or <code>false</code>). For you it is <code>false</code> unless
+      something adds a particular sign-in header to your requests. We
+      only check that the header is there, not that it is real, so
+      the label is not proof that staff sent it. We use it only to
+      sort our dashboards, and we never store the email address the
+      header can carry</p>
       </li>
       <li><p>That a data layer was loaded — which layer, whether it came from the
       network or a local cache, how long it took</p>
