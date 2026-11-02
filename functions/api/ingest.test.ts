@@ -270,6 +270,16 @@ describe('isInternalRequest', () => {
     expect(isInternalRequest(req)).toBe(true)
   })
 
+  // Pins the property the docstring, docs/PRIVACY.md and
+  // docs/PRIVACY_ANALYSIS.md §8 describe: presence only, no
+  // verification, so any client can set the flag on its own rows.
+  // If this starts failing because the check now verifies the
+  // token, update those three descriptions in the same change.
+  it('returns true for a token that is not a JWT at all (presence only)', () => {
+    const req = fakeRequest({ 'Cf-Access-Jwt-Assertion': 'x' })
+    expect(isInternalRequest(req)).toBe(true)
+  })
+
   it('returns false when no Cloudflare Access header is present', () => {
     const req = fakeRequest({})
     expect(isInternalRequest(req)).toBe(false)

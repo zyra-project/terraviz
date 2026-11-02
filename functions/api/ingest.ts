@@ -230,23 +230,44 @@ export function countryOf(cfCountry: string | null): string {
   return trimmed
 }
 
-/** Names of the headers Cloudflare Access attaches to a signed-in
- * staff request. Exported so tests can reference them by name
- * instead of hard-coding strings. `cf-access-authenticated-user-
- * email` is the plaintext identity header, `cf-access-jwt-
- * assertion` is the signed JWT — either indicates a verified
- * staff session at the edge. Cloudflare strips these headers
- * from unauthenticated requests, so presence-alone is safe. */
+/** Names of the headers Cloudflare Access adds to a signed-in
+ * user's request on a path one of its applications covers:
+ * `cf-access-authenticated-user-email`, the plaintext identity,
+ * and `cf-access-jwt-assertion`, the signed JWT. Exported so tests
+ * can reference them by name instead of hard-coding strings. A
+ * client can send either one itself, so their presence proves
+ * nothing about who sent the request (see `isInternalRequest`). */
 export const CF_ACCESS_HEADERS = [
   'cf-access-authenticated-user-email',
   'cf-access-jwt-assertion',
 ] as const
 
-/** True when the request carries a Cloudflare Access identity.
- * Intentionally presence-only — we never read the email value
- * into analytics storage. The boolean derivation runs in the
- * Pages Function where the headers are trusted (Cloudflare's
- * edge guarantees unforgeable delivery). */
+/** True when the request carries a non-empty Cloudflare Access
+ * header. This checks presence only. It never reads the email into
+ * analytics storage, and it does not check the JWT's signature,
+ * issuer or audience.
+ *
+ * So the result is forgeable. Cloudflare adds these headers only on
+ * a path an Access application covers. On any other path it passes
+ * a client-sent copy through unchanged: zyra-project/terraviz#513
+ * showed `Cf-Access-Jwt-Assertion: x` reaching a function on a live
+ * deployment. A node built by `npm run setup` covers only the
+ * publisher paths, not `/api/ingest`, so any client can mark its own
+ * events `internal=true`.
+ *
+ * That is acceptable for the one thing this is for: tagging
+ * telemetry. A forged `true` moves only the sender's own rows out of
+ * the public dashboards' default `blob4 = 'false'` slice and into
+ * the staff slice. It reads nothing and unlocks nothing. Verifying
+ * the token here was considered and declined: it would put a KV read
+ * and a signature check on the ingest path to stop a client
+ * mislabelling its own rows.
+ *
+ * Never use this for authorisation. To know that a signed-in user
+ * sent a request, verify the token: `verifyAccessJwt` in
+ * `functions/api/v1/_lib/access-auth.ts`, or
+ * `functions/api/_feedback-auth.ts`, the check the feedback admin
+ * routes use. */
 export function isInternalRequest(request: Request): boolean {
   for (const name of CF_ACCESS_HEADERS) {
     const value = request.headers.get(name)
@@ -278,8 +299,9 @@ async function isKillSwitchOn(env: Env): Promise<boolean> {
  *   blob1 = `event_type`
  *   blob2 = `environment`
  *   blob3 = `country` (2-letter ISO, or `'XX'` when unknown)
- *   blob4 = `internal` (`'true'` / `'false'` — Cloudflare Access
- *           staff identity present on the request)
+ *   blob4 = `internal` (`'true'` / `'false'` — a Cloudflare Access
+ *           header present on the request; client-forgeable, see
+ *           `isInternalRequest`)
  * Subsequent blobs and doubles are the event's own string / number
  * fields in alphabetical order. Query patterns that rely on blob
  * positions live in docs/ANALYTICS_QUERIES.md.
@@ -438,12 +460,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   // header is the only geo-derived signal we store. Absent / Tor
   // requests map to `'XX'` so dashboards don't show a synthetic value.
   const country = countryOf(request.headers.get('CF-IPCountry'))
-  // Presence-only check for Cloudflare Access identity. When an
-  // Access policy sits in front of /api/ingest (mixed-mode — public
-  // traffic passes through, staff traffic carries the SSO header),
-  // this derives a `true`/`false` tag without reading the email.
-  // The email and JWT are trusted only because Cloudflare's edge
-  // strips forged versions before they hit the function.
+  // Presence-only check for a Cloudflare Access header. It derives
+  // a `true`/`false` tag without reading the email. A client can
+  // send the header itself, so the tag is a label, not proof of
+  // staff identity. See `isInternalRequest` before relying on it.
   const internal = isInternalRequest(request)
   const ae = context.env.ANALYTICS
   if (ae) {
