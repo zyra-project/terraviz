@@ -1537,7 +1537,7 @@ wrangler d1 migrations apply FEEDBACK_DB --remote<span style="color:var(--tv-tex
     </div>
     <input data-field="W13" data-validate="aud" placeholder="64-char hex" spellcheck="false" autocomplete="off" style="width:100%;background:var(--tv-surface-3);border:1px solid var(--tv-border-strong);border-radius:6px;padding:8px 10px;font:400 13px/1.4 var(--tv-font-mono);color:var(--tv-text)"/>
     <div data-error="W13" style="display:none;font:400 11.5px/1.5 var(--tv-font-sans);color:var(--tv-error);margin-top:4px"></div>
-    <div style="font:400 11.5px/1.5 var(--tv-font-sans);color:var(--tv-text-dim);margin-top:4px">Application → Overview → Application Audience Tag.</div>
+    <div style="font:400 11.5px/1.5 var(--tv-font-sans);color:var(--tv-text-dim);margin-top:4px">Application → Additional settings → Application Audience (AUD) Tag. Older dashboards show it on the Overview tab.</div>
   </div>
       <div data-field-row="W14" data-tier="2" style="margin:0 0 14px">
     <div style="display:flex;align-items:center;gap:7px;margin:0 0 5px;flex-wrap:wrap">
@@ -2067,7 +2067,11 @@ npm run terraviz -- import-snapshot \
     </div>
     <div style="background:var(--tv-surface-2);border:1px solid var(--tv-border);border-radius:8px;padding:16px 18px">
       <div style="font:500 14px/1.4 var(--tv-font-mono);color:var(--tv-error);margin:0 0 6px">401 &quot;Invalid or expired Access assertion&quot;</div>
-      <p style="margin:0;font-size:13.5px;line-height:1.55;color:var(--tv-text-muted);text-wrap:pretty">Your AUD does not match the application that issued the JWT. Re-copy it from the application's Overview tab. A token minted for a different application in the same team is rejected by design.</p>
+      <p style="margin:0;font-size:13.5px;line-height:1.55;color:var(--tv-text-muted);text-wrap:pretty">Your AUD does not match the application that issued the JWT. Re-copy it from the application's Additional settings, or its Overview tab on an older dashboard. A token minted for a different application in the same team is rejected by design.</p>
+    </div>
+    <div style="background:var(--tv-surface-2);border:1px solid var(--tv-border);border-radius:8px;padding:16px 18px">
+      <div style="font:500 14px/1.4 var(--tv-font-mono);color:var(--tv-error);margin:0 0 6px">Feedback exports return 401 &quot;Unauthorized&quot;</div>
+      <p style="margin:0;font-size:13.5px;line-height:1.55;color:var(--tv-text-muted);text-wrap:pretty">The feedback admin routes refused the Access token, and no <code style="font-family:var(--tv-font-mono);font-size:.92em;background:var(--tv-surface-3);padding:1px 5px;border-radius:3px">FEEDBACK_ADMIN_TOKEN</code> bearer matched. Check that <code style="font-family:var(--tv-font-mono);font-size:.92em;background:var(--tv-surface-3);padding:1px 5px;border-radius:3px">ACCESS_FEEDBACK_AUD</code> is the AUD of the app covering <code style="font-family:var(--tv-font-mono);font-size:.92em;background:var(--tv-surface-3);padding:1px 5px;border-radius:3px">/api/feedback-admin</code>, or your publisher AUD if the publisher app covers that path. Check that <code style="font-family:var(--tv-font-mono);font-size:.92em;background:var(--tv-surface-3);padding:1px 5px;border-radius:3px">ACCESS_TEAM_DOMAIN</code> is set in the same environment. The older direct routes, such as <code style="font-family:var(--tv-font-mono);font-size:.92em;background:var(--tv-surface-3);padding:1px 5px;border-radius:3px">/api/feedback-export</code>, sit outside that app and take the bearer.</p>
     </div>
     <div style="background:var(--tv-surface-2);border:1px solid var(--tv-border);border-radius:8px;padding:16px 18px">
       <div style="font:500 14px/1.4 var(--tv-font-mono);color:var(--tv-error);margin:0 0 6px">Publisher API returns 403 cross_origin_request or origin_required</div>
@@ -2331,7 +2335,7 @@ npm run terraviz -- import-snapshot \
     </div>
     <input data-field="W13" data-validate="aud" placeholder="64-char hex" spellcheck="false" autocomplete="off" style="width:100%;background:var(--tv-surface-3);border:1px solid var(--tv-border-strong);border-radius:6px;padding:8px 10px;font:400 13px/1.4 var(--tv-font-mono);color:var(--tv-text)"/>
     <div data-error="W13" style="display:none;font:400 11.5px/1.5 var(--tv-font-sans);color:var(--tv-error);margin-top:4px"></div>
-    <div style="font:400 11.5px/1.5 var(--tv-font-sans);color:var(--tv-text-dim);margin-top:4px">Application → Overview → Application Audience Tag.</div>
+    <div style="font:400 11.5px/1.5 var(--tv-font-sans);color:var(--tv-text-dim);margin-top:4px">Application → Additional settings → Application Audience (AUD) Tag. Older dashboards show it on the Overview tab.</div>
   </div>
       <div data-field-row="W14" data-tier="2" style="margin:0 0 14px">
     <div style="display:flex;align-items:center;gap:7px;margin:0 0 5px;flex-wrap:wrap">

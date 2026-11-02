@@ -1078,9 +1078,10 @@ Self-hosted**:
 > exact match against one address and is the single most common
 > Access misconfiguration.
 
-After saving, open the application's **Overview** tab and copy the
-**Application Audience (AUD) Tag** — a 64-char hex string.
-**Record it as `W13`.**
+After saving, copy the application's **Application Audience (AUD)
+Tag**, a 64-character hex string. The current dashboard shows it under
+the application's **Additional settings**; older ones showed it on the
+**Overview** tab. **Record it as `W13`.**
 
 **Why the cookie settings.** Access keeps a publisher signed in with
 a `CF_Authorization` cookie, and that cookie is what authorises every
@@ -1251,8 +1252,22 @@ cookie, so one left at Cloudflare's defaults can undo the others.
 
 **Admin dashboard.** One app, name `Terraviz Admin`, destination
 `api/feedback-admin` on both hostnames, one Allow policy on your
-email domain. Without it, those endpoints fall back to a
+email domain. Copy its AUD, found where 6.2 found `W13`. Set it as
+the plaintext variable `ACCESS_FEEDBACK_AUD` in both Production and
+Preview. Without the app, these endpoints take a
 `FEEDBACK_ADMIN_TOKEN` bearer.
+
+The feedback admin routes check that an Access token was signed by
+your team. With `ACCESS_FEEDBACK_AUD` set, the token must also be
+for this app or the publisher app. Without the variable, a token
+from any of your team's applications is accepted and logged. A
+later release will refuse it, so set the variable now. If you skip
+this app, set `ACCESS_FEEDBACK_AUD` to `W13`. Only the publisher
+app's tokens are then accepted.
+
+The app covers `/api/feedback-admin` only. The older direct routes,
+such as `/api/feedback-export`, stay outside it, so they need the
+bearer.
 
 **Telemetry staff-tagging.** Lets dashboards filter staff dogfood
 out of metrics. Destinations `<W2>/api/ingest` and
@@ -1348,6 +1363,7 @@ Everything referenced below now exists. Pages → your project →
 |---|---|---|
 | `ACCESS_TEAM_DOMAIN` | `W12` — team domain only, no `https://` | |
 | `ACCESS_AUD` | `W13` | |
+| `ACCESS_FEEDBACK_AUD` | 6.4's admin app AUD, or `W13` without one (optional) | |
 | `TRUSTED_PUBLISHER_DOMAINS` | `your-org.org` (comma-separated, optional) | |
 
 ## 8.3 Secrets (encrypted)
@@ -2407,6 +2423,7 @@ is [`scripts/lib/expected-bindings.ts`](../scripts/lib/expected-bindings.ts).
 | `CATALOG_VECTORIZE` | Vectorize | 8 | Semantic search |
 | `ACCESS_TEAM_DOMAIN` | plaintext | 8 | Publisher API |
 | `ACCESS_AUD` | plaintext | 8 | Publisher API |
+| `ACCESS_FEEDBACK_AUD` | plaintext | 6.4 | Feedback admin routes' Access check |
 | `TRUSTED_PUBLISHER_DOMAINS` | plaintext | 8 | Skip approval queue (→ `reviewer`, read-only) |
 | `NODE_ID_PRIVATE_KEY_PEM` | secret | 8 | Federation signing |
 | `PREVIEW_SIGNING_KEY` | secret | 8 | `terraviz preview` |
@@ -2621,6 +2638,24 @@ causes:
   `Sec-Fetch-Site` nor `Origin`. That happens with an old browser, or a
   client using a copied cookie. Send the node's `Origin`.
 
+### Feedback exports return 401 "Unauthorized"
+The feedback admin routes refused the Access token, and no
+`FEEDBACK_ADMIN_TOKEN` bearer matched. Check, in order:
+
+1. **`ACCESS_FEEDBACK_AUD` is the AUD of the app covering
+   `/api/feedback-admin`** (6.4). If your publisher app covers it,
+   use `W13`.
+2. **`ACCESS_TEAM_DOMAIN` is set** in the same environment. Without
+   it, no token can be checked, and setting `ACCESS_FEEDBACK_AUD`
+   makes every token fail.
+3. **The path is behind Access.** 6.4's app covers
+   `/api/feedback-admin` only. The older direct routes, such as
+   `/api/feedback-export`, take the bearer.
+
+Before `ACCESS_FEEDBACK_AUD` is set, Workers logs show "feedback
+admin: accepted an Access token without checking its audience". That
+line means the route let a request in. Set the variable to stop it.
+
 ### Publisher API returns 503 `access_unconfigured`
 `ACCESS_TEAM_DOMAIN` or `ACCESS_AUD` is missing — most often set on
 Production but not Preview. Confirm with
@@ -2631,7 +2666,8 @@ Production but not Preview. Confirm with
 Access signs every request with a JSON Web Token (JWT), and the `aud`
 claim inside it names the application. `ACCESS_AUD` has to be that
 same audience tag.
-Re-copy `W13` from the application's Overview tab. A token minted
+Re-copy `W13` from the application's Additional settings (or its
+Overview tab, on an older dashboard). A token minted
 for a *different* application of the same team is rejected by
 design. On a node with two applications, `W13` is the API
 application's AUD (6.2, rule 1).
