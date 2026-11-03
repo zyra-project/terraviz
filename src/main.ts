@@ -2262,7 +2262,10 @@ class InteractiveSphere {
   /** Update the loading screen status message and progress bar. */
   private setLoadingStatus(message: string, progress?: number): void {
     const statusEl = document.getElementById('loading-status')
-    if (statusEl) statusEl.textContent = message
+    // The splash's one live region. Progress callbacks resend the same
+    // message as the bar moves, and replacing the text node with the
+    // same text reads as a fresh change to some screen readers.
+    if (statusEl && statusEl.textContent !== message) statusEl.textContent = message
     if (progress !== undefined) {
       const track = document.querySelector('.loading-progress-track')
       if (track) track.setAttribute('aria-valuenow', String(Math.round(progress)))
