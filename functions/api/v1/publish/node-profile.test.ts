@@ -164,18 +164,20 @@ describe('/api/v1/publish/node-profile', () => {
 
   it('400 for a tagline that is too long, not text, not one line, or carries invisible characters', async () => {
     const { env } = setupEnv()
-    for (const tagline of [
-      'x'.repeat(PROFILE_TAGLINE_MAX_LEN + 1),
-      42,
-      'Two\nlines',
-      'Tab\there',
-      'Right\u202Eto left',
-      'Zero\u200Bwidth',
-    ]) {
+    const cases: Array<[unknown, string]> = [
+      ['x'.repeat(PROFILE_TAGLINE_MAX_LEN + 1), 'too_long'],
+      [42, 'invalid'],
+      ['Two\nlines', 'invalid_characters'],
+      ['Tab\there', 'invalid_characters'],
+      ['Right\u202Eto left', 'invalid_characters'],
+      ['Zero\u200Bwidth', 'invalid_characters'],
+      ['\u3164', 'invalid_characters'],
+    ]
+    for (const [tagline, code] of cases) {
       const res = await onRequestPut(ctx({ env, method: 'PUT', body: { orgName: 'X', tagline } }))
       expect(res.status).toBe(400)
-      const { errors } = await readJson<{ errors: Array<{ field: string }> }>(res)
-      expect(errors.map(e => e.field)).toEqual(['tagline'])
+      const { errors } = await readJson<{ errors: Array<{ field: string; code: string }> }>(res)
+      expect(errors).toEqual([expect.objectContaining({ field: 'tagline', code })])
     }
     const ok = await onRequestPut(
       ctx({ env, method: 'PUT', body: { orgName: 'X', tagline: 'x'.repeat(PROFILE_TAGLINE_MAX_LEN) } }),
@@ -193,6 +195,15 @@ describe('/api/v1/publish/node-profile', () => {
     const last = JSON.parse(rows[rows.length - 1].metadata_json) as Record<string, unknown>
     expect(last.tagline).toBe('Global Systems Laboratory')
     expect(last.previous_tagline).toBe('Gulf Coast Science')
+
+    // A save that does not name the tagline leaves it, and says so.
+    await onRequestPut(ctx({ env, method: 'PUT', body: { orgName: 'Renamed' } }))
+    const after = sqlite
+      .prepare(`SELECT metadata_json FROM audit_events WHERE action = 'node_profile.update' ORDER BY rowid DESC LIMIT 1`)
+      .get() as { metadata_json: string }
+    const kept = JSON.parse(after.metadata_json) as Record<string, unknown>
+    expect(kept.tagline).toBe('Global Systems Laboratory')
+    expect(kept.previous_tagline).toBe('Global Systems Laboratory')
   })
 
   it('on a database without migration 0060: saves without a tagline, refuses one with 409', async () => {
@@ -207,6 +218,13 @@ describe('/api/v1/publish/node-profile', () => {
     // Refused whole: nothing written.
     const none = await onRequestGet(ctx({ env, method: 'GET' }))
     expect((await readJson<{ profile: unknown }>(none)).profile).toBeNull()
+
+    // ...and nothing changed on a profile that already exists.
+    await onRequestPut(ctx({ env, method: 'PUT', body: { orgName: 'Before' } }))
+    const again = await onRequestPut(ctx({ env, method: 'PUT', body: { ...VALID_BODY, orgName: 'After' } }))
+    expect(again.status).toBe(409)
+    const kept = await readJson<{ profile: Record<string, unknown> }>(await onRequestGet(ctx({ env, method: 'GET' })))
+    expect(kept.profile.orgName).toBe('Before')
 
     for (const body of [{ ...VALID_BODY, tagline: null }, { orgName: 'Coastal Science Center' }]) {
       const saved = await onRequestPut(ctx({ env, method: 'PUT', body }))

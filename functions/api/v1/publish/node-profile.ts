@@ -15,8 +15,8 @@
  *       `defaultTone` / `links` is cleared; an omitted `tagline`, a
  *       later field, is kept (null or "" clears it), and so is the
  *       logo, which has its own route. 409 `{ errors }` with code
- *       `migration_missing` for a tagline on a database without
- *       migration 0060. 400 `{ errors }`
+ *       `migration_missing` for a non-empty tagline on a database
+ *       without migration 0060. 400 `{ errors }`
  *       for body problems (the publisher-API field-error envelope).
  *
  * Writes require a privileged caller (admin / service) and are
@@ -83,13 +83,14 @@ export const onRequestPut: PagesFunction<CatalogEnv> = async context => {
     })
   }
 
-  // Read first so the audit row can say what the tagline replaced: it
-  // is the profile's most widely shown text, so a defaced or cleared
-  // one should be traceable, and restorable, from the audit alone.
-  const previous = await getNodeProfile(context.env.CATALOG_DB)
+  // The write reports what the tagline replaced, read in the same
+  // transaction: it is the profile's most widely shown text, so a
+  // defaced or cleared one should be traceable, and restorable, from
+  // the audit alone.
   let row
+  let previousTagline: string | null
   try {
-    row = await setNodeProfile(context.env.CATALOG_DB, publisher, validation.value)
+    ;({ row, previousTagline } = await setNodeProfile(context.env.CATALOG_DB, publisher, validation.value))
   } catch (err) {
     if (!(err instanceof TaglineMigrationPendingError)) throw err
     // Field-shaped 409, as publish-while-transcoding is, so the
@@ -120,7 +121,7 @@ export const onRequestPut: PagesFunction<CatalogEnv> = async context => {
       has_mission: row.mission != null,
       has_about: row.about_md != null,
       tagline: row.tagline,
-      previous_tagline: previous?.tagline ?? null,
+      previous_tagline: previousTagline,
     }),
   })
   // The public identity read serves orgName and the splash tagline —

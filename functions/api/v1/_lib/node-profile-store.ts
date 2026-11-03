@@ -228,16 +228,23 @@ export interface ValidatedProfileInput {
  *  predates the field leaves it as it was (see
  *  {@link validateProfileInput}), and only where 0060 has been
  *  applied, so the rest of the profile still saves on a database
- *  without it ({@link getNodeProfile}). A tagline given there throws
- *  {@link TaglineMigrationPendingError} before anything is written,
- *  rather than saving the rest and dropping it. The column names are
- *  fixed strings chosen here, never input; every value is bound. */
+ *  without it ({@link getNodeProfile}). A non-empty tagline given
+ *  there throws {@link TaglineMigrationPendingError} before anything
+ *  is written, rather than saving the rest and dropping it. The column
+ *  names are fixed strings chosen here, never input; every value is
+ *  bound.
+ *
+ *  Returns the tagline the write replaced beside the new row, for the
+ *  audit trail. Where the write sets one, it is read in the same D1
+ *  batch, so in one transaction with the write: read separately, two
+ *  admins saving at once could each record the same previous value,
+ *  and the trail could not say which save replaced which. */
 export async function setNodeProfile(
   db: D1Database,
   publisher: PublisherRow,
   input: ValidatedProfileInput,
   now: string = new Date().toISOString(),
-): Promise<NodeProfileRow> {
+): Promise<{ row: NodeProfileRow; previousTagline: string | null }> {
   const named = input.tagline !== undefined
   const withTagline = named && (await hasTaglineColumn(db))
   if (named && !withTagline && input.tagline != null) throw new TaglineMigrationPendingError()
@@ -263,19 +270,26 @@ export async function setNodeProfile(
     publisher.id,
     now,
   ]
-  await db
+  const upsert = db
     .prepare(
       `INSERT INTO node_profile (id, ${columns.join(', ')})
        VALUES (1, ${columns.map(() => '?').join(', ')})
        ON CONFLICT(id) DO UPDATE SET ${columns.map(c => `${c} = excluded.${c}`).join(', ')}`,
     )
     .bind(...values)
-    .run()
+  let previousTagline: string | null = null
+  if (withTagline) {
+    const [before] = await db.batch([db.prepare('SELECT tagline FROM node_profile WHERE id = 1'), upsert])
+    previousTagline = (before.results as Array<{ tagline: string | null }> | undefined)?.[0]?.tagline ?? null
+  } else {
+    await upsert.run()
+  }
   // Re-read rather than reconstructing from input so columns the
   // upsert doesn't touch (logo_ref) come back accurate.
   const row = await getNodeProfile(db)
   if (!row) throw new Error('node_profile upsert did not persist')
-  return row
+  // A write that did not name the tagline left it as it was.
+  return { row, previousTagline: withTagline ? previousTagline : row.tagline }
 }
 
 /**
@@ -395,7 +409,7 @@ export function validateProfileInput(
   if (tagline != null && !hasOnlyTaglineChars(tagline)) {
     errors.push({
       field: 'tagline',
-      code: 'invalid_chars',
+      code: 'invalid_characters',
       message: '`tagline` must be a single line of visible text, with no tabs, line breaks or invisible characters.',
     })
   }

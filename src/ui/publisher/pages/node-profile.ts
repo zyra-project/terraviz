@@ -317,9 +317,11 @@ function renderForm(mount: HTMLElement, state: FormState): void {
       status.classList.add('publisher-nodeprofile-status-error')
       return
     }
+    // Shown back in the field, so what it reads is what is stored.
+    tagline.value = cleanTaglineInput(tagline.value)
     const body = {
       orgName: name,
-      tagline: cleanTaglineInput(tagline.value) || null,
+      tagline: tagline.value || null,
       mission: mission.value.trim() || null,
       aboutMd: about.value.trim() || null,
       regionFocus: region.value.trim() || null,

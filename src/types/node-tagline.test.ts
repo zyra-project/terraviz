@@ -20,6 +20,9 @@ describe('hasOnlyTaglineChars', () => {
       'मौसम\u200Dविज्ञान', // ZWJ, which Indic scripts need
       'می\u200Cخواهم', // ZWNJ, which Persian needs
       'abc \u200F def', // RLM, which right-to-left text uses
+      '\u061C\u0661', // ALM
+      'Lab \u{1F469}\u200D\u{1F52C}', // an emoji ZWJ sequence: astral, not lone surrogates
+      'Cafe\u0301', // a combining accent
     ]) {
       expect(hasOnlyTaglineChars(ok)).toBe(true)
     }
@@ -38,6 +41,20 @@ describe('hasOnlyTaglineChars', () => {
       'a\u2060b',
       'a\uFEFFb',
       'a\u{E0041}b',
+      // Format characters beyond the named ones, by category.
+      'a\u00ADb', // soft hyphen
+      'a\u180Eb',
+      'a\u206Ab',
+      'a\uFFF9b', // interlinear annotation anchor
+      'a\u0600b',
+      // Letters that draw as blanks.
+      '\u3164',
+      '\u115F',
+      '\uFFA0',
+      '\u2800',
+      'a\u034Fb',
+      // A lone surrogate, which a JSON body can carry.
+      'a\uD800b',
     ]) {
       expect(hasOnlyTaglineChars(bad)).toBe(false)
     }
@@ -49,6 +66,10 @@ describe('cleanTaglineInput', () => {
     expect(cleanTaglineInput('  Global\tSystems\r\nLaboratory  ')).toBe('Global Systems Laboratory')
     expect(cleanTaglineInput('Glo\u200Bbal\u202E Lab')).toBe('Global Lab')
     expect(cleanTaglineInput('a  \u2028  b')).toBe('a b')
+  })
+
+  it('empties a tagline that was only blank-looking letters', () => {
+    expect(cleanTaglineInput('\u3164 \u2800')).toBe('')
   })
 
   it('leaves what a tagline may hold alone', () => {

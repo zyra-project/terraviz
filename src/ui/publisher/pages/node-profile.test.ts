@@ -94,6 +94,8 @@ describe('renderNodeProfilePage', () => {
     Array.from(mount.querySelectorAll('button')).find(b => b.textContent === 'Save profile')!.click()
     await until(() => capture.puts.length === 1, 'the profile PUT')
     expect((capture.puts[0].body as { tagline: string }).tagline).toBe('Global Systems Laboratory')
+    // The field shows what was saved.
+    expect((mount.querySelector('#nodeprofile-tagline') as HTMLInputElement).value).toBe('Global Systems Laboratory')
   })
 
   it('mounts the markdown toolbar on About and Preview renders sanitized markdown', async () => {
