@@ -1907,7 +1907,8 @@ optionally, **Loading screen tagline**: the short line under the
 Terraviz title while the app loads, such as your organization's
 name. You can also fill in **Dataset browser subtitle**: the
 sentence under the same title in the panel the **Browse** button
-opens, shown in its card view on screens wider than a phone. Then
+opens. It shows in that panel's card view on screens wider than a
+phone. Then
 **Save profile**, and upload an **Organization logo**, which needs
 a saved profile first. The name and logo head the public blog.
 
@@ -1917,7 +1918,7 @@ Sphere", both translated into each visitor's language. The default
 subtitle says your datasets come from NOAA Science On a Sphere, so
 set your own if they do not. A line you set is shown as written in
 every language. A change reaches visitors the next time the app
-loads, within a few minutes of saving, with no redeploy; a page
+loads, within a few minutes of saving, with no redeploy. A page
 left open, such as a kiosk, keeps the old lines until it reloads.
 
 On a node upgraded from an earlier release, the tagline is stored
