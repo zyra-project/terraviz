@@ -2,28 +2,41 @@
 // Copyright 2026 The Zyra Project
 
 /**
- * The loading screen's tagline: the line under the TerraViz title,
+ * The loading screen's tagline: the line under the Terraviz title,
  * which a node sets in its profile (`node_profile.tagline`, edited at
  * /publish/node-profile) and which otherwise reads the app's own
  * translated "Science On a Sphere" (`loading.subtitle`).
  *
  * The tagline arrives with the public node profile, after the splash
  * has painted, so the subtitle starts **held back**: `index.html`
- * marks it `data-tagline="pending"`, and `loading.css` keeps it
- * invisible (its space reserved, so nothing shifts) until
+ * marks it `data-tagline="pending"`, and `loading.css` hides it
+ * (`visibility: hidden`, so a screen reader cannot read the default
+ * either, with its line's space reserved) until
  * {@link bindSplashTagline} settles it. Showing the default and then
  * swapping in the node's own line would flash the wrong name on every
- * load of a node that set one, which is the case this exists for. The
- * same CSS reveals the line on its own after a short delay, so a slow
- * read, or a page whose boot never binds it (the portal and blog
- * share this shell), never leaves it hidden. A tagline that lands
- * after that is still applied: the splash is usually up for seconds
- * more, and the operator's line is worth one late change.
+ * load of a node that set one, which is the case this exists for.
+ *
+ * Two deadlines bound the hold-back. The binder reveals the default
+ * {@link SPLASH_TAGLINE_WAIT_MS} after the read **started** (main.ts
+ * starts it before the i18n bootstrap, so a cold load's script and
+ * locale downloads do not count against it). The CSS reveals it by
+ * itself after a longer delay from first paint, a safety net for a
+ * page whose boot never binds it (the portal and blog share this
+ * shell) or a script that never runs. A tagline that lands after
+ * either is still applied: the splash is usually up for seconds more,
+ * and the operator's line is worth one late change.
  *
  * The operator's tagline is shown as written, in every locale: it is
  * usually an organization's name, which is not translated. It is set
- * through `textContent`, never markup, and `data-i18n` is dropped
- * from the element so nothing re-applies the default over it.
+ * through `textContent`, never markup, `data-i18n` is dropped so
+ * nothing re-applies the default over it, and it is marked `lang=""`
+ * (language unknown), so the page's locale does not case it — under
+ * Turkish, `text-transform: uppercase` would dot the capital I of an
+ * English name — and `dir="auto"`, so a left-to-right name ending in
+ * punctuation lays out correctly on a right-to-left page. The line is
+ * `aria-live="off"` in the markup: it is branding, not news, and its
+ * change must not be announced from inside the splash's assertive
+ * region.
  *
  * {@link splashTagline} answers the same question for the VR loading
  * scene (`vrLoading.ts`), which draws this line onto a canvas.
@@ -34,6 +47,11 @@ import { t } from '../i18n'
 /** The attribute `index.html` sets and `loading.css` holds back on. */
 export const SPLASH_TAGLINE_PENDING_ATTR = 'data-tagline'
 
+/** How long after the read starts the default is revealed if the node
+ *  has not answered. A same-origin, KV-cached read normally answers in
+ *  well under this. */
+export const SPLASH_TAGLINE_WAIT_MS = 1500
+
 /** The node's tagline, once the profile read has answered. */
 let nodeTagline: string | null = null
 
@@ -42,29 +60,48 @@ export function splashTagline(): string {
   return nodeTagline ?? t('loading.subtitle')
 }
 
+/** True when {@link splashTagline} is the node's own line rather than
+ *  the translated default — which decides whose casing rules apply. */
+export function isNodeTagline(): boolean {
+  return nodeTagline !== null
+}
+
+export interface BindSplashTaglineOptions {
+  /** Reveal the default this long after the call if `tagline` has not
+   *  settled. Omitted, only the settle (or the CSS) reveals it. */
+  revealAfterMs?: number
+}
+
 /**
  * Settle the splash subtitle `el` from the node's tagline: write it in
- * when there is one, then reveal the line either way. Resolves once
- * done; never rejects, and a rejected `tagline` reveals the default.
+ * when there is one, and reveal the line either way. Resolves once the
+ * tagline has settled; never rejects, and a rejected `tagline` reveals
+ * the default.
  */
 export async function bindSplashTagline(
   el: HTMLElement | null,
   tagline: Promise<string | null>,
+  options: BindSplashTaglineOptions = {},
 ): Promise<void> {
+  const reveal = (): void => el?.removeAttribute(SPLASH_TAGLINE_PENDING_ATTR)
+  const timer = options.revealAfterMs === undefined ? null : setTimeout(reveal, options.revealAfterMs)
+
   let value: string | null = null
   try {
     value = await tagline
   } catch {
     value = null
   }
+  if (timer !== null) clearTimeout(timer)
   const text = typeof value === 'string' ? value.trim() : ''
   nodeTagline = text.length > 0 ? text : null
-  if (!el) return
-  if (nodeTagline) {
+  if (el && nodeTagline) {
     el.removeAttribute('data-i18n')
     el.textContent = nodeTagline
+    el.lang = ''
+    el.dir = 'auto'
   }
-  el.removeAttribute(SPLASH_TAGLINE_PENDING_ATTR)
+  reveal()
 }
 
 /** Test seam: forget the node's tagline. */

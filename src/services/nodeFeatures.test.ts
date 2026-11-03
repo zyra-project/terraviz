@@ -178,6 +178,30 @@ describe('startNodeFeaturesRead().tagline', () => {
     }
   })
 
+  it('answers null when a settle deadline aborts the read', async () => {
+    const read = startNodeFeaturesRead({
+      fetchFn: (_path, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
+        }),
+    })
+    await read.settle(5)
+    expect(await read.tagline).toBeNull()
+  })
+
+  it('stays pending, without rejecting, when a fetch ignores the abort', async () => {
+    const read = startNodeFeaturesRead({ fetchFn: () => new Promise<Response>(() => {}) })
+    await read.settle(5)
+    const outcome = await Promise.race([
+      read.tagline.then(
+        () => 'settled',
+        () => 'rejected',
+      ),
+      new Promise(resolve => setTimeout(() => resolve('pending'), 20)),
+    ])
+    expect(outcome).toBe('pending')
+  })
+
   it('answers null when the read fails', async () => {
     const failing = startNodeFeaturesRead({
       fetchFn: async () => {
