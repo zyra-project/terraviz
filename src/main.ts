@@ -4366,16 +4366,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   // carries the feature toggles `initialize` waits on. Not for the
   // portal or blog, which read the profile themselves.
   const nodeFeatures = isGlobeApp ? startNodeFeaturesRead() : null
-  if (nodeFeatures) {
-    void bindSplashTagline(document.querySelector<HTMLElement>('.loading-subtitle'), nodeFeatures.tagline, {
-      revealAfterMs: SPLASH_TAGLINE_WAIT_MS,
-    })
-  }
 
   // Resolve user locale and apply data-i18n attributes before any
   // UI module renders. English is bundled inline; non-English
   // locales lazy-load here. See docs/I18N_PLAN.md.
-  await bootstrapI18n()
+  const i18nReady = bootstrapI18n()
+  if (nodeFeatures) {
+    // The default is revealed only once it is translated, so a visitor
+    // in another locale never sees the English line first; the node's
+    // own line, shown as written, does not wait.
+    void bindSplashTagline(document.querySelector<HTMLElement>('.loading-subtitle'), nodeFeatures.tagline, {
+      revealAfterMs: SPLASH_TAGLINE_WAIT_MS,
+      defaultReady: i18nReady,
+    })
+  }
+  await i18nReady
 
   // Publisher portal route gate. Visits to `/publish/*` boot a
   // separate admin UI (Cloudflare Access-protected in production)

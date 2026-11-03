@@ -70,13 +70,18 @@ export interface BindSplashTaglineOptions {
   /** Reveal the default this long after the call if `tagline` has not
    *  settled. Omitted, only the settle (or the CSS) reveals it. */
   revealAfterMs?: number
+  /** Settles once the default is in the visitor's language (the i18n
+   *  bootstrap). The default is never revealed before it, so a page
+   *  in another locale does not show the English line first; the
+   *  node's own line, shown as written, does not wait. */
+  defaultReady?: Promise<unknown>
 }
 
 /**
  * Settle the splash subtitle `el` from the node's tagline: write it in
- * when there is one, and reveal the line either way. Resolves once the
- * tagline has settled; never rejects, and a rejected `tagline` reveals
- * the default.
+ * when there is one, and reveal the line either way (the default once
+ * `defaultReady` settles). Resolves once the tagline has settled;
+ * never rejects, and a rejected `tagline` reveals the default.
  */
 export async function bindSplashTagline(
   el: HTMLElement | null,
@@ -84,7 +89,11 @@ export async function bindSplashTagline(
   options: BindSplashTaglineOptions = {},
 ): Promise<void> {
   const reveal = (): void => el?.removeAttribute(SPLASH_TAGLINE_PENDING_ATTR)
-  const timer = options.revealAfterMs === undefined ? null : setTimeout(reveal, options.revealAfterMs)
+  const ready = options.defaultReady ?? Promise.resolve()
+  const revealDefault = (): void => {
+    void ready.then(reveal, reveal)
+  }
+  const timer = options.revealAfterMs === undefined ? null : setTimeout(revealDefault, options.revealAfterMs)
 
   let value: string | null = null
   try {
@@ -100,8 +109,10 @@ export async function bindSplashTagline(
     el.textContent = nodeTagline
     el.lang = ''
     el.dir = 'auto'
+    reveal()
+  } else {
+    revealDefault()
   }
-  reveal()
 }
 
 /** Test seam: forget the node's tagline. */

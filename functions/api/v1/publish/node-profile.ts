@@ -84,8 +84,8 @@ export const onRequestPut: PagesFunction<CatalogEnv> = async context => {
   }
 
   // Read first so the audit row can say what the tagline replaced: it
-  // is the profile's most widely shown text, and a PUT that omits it
-  // clears it.
+  // is the profile's most widely shown text, so a defaced or cleared
+  // one should be traceable, and restorable, from the audit alone.
   const previous = await getNodeProfile(context.env.CATALOG_DB)
   let row
   try {

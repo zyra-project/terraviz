@@ -18,6 +18,7 @@ import {
   resetSplashTaglineForTests,
   splashTagline,
 } from './splashTagline'
+import { until } from '../test-utils'
 
 function subtitle(): HTMLElement {
   const el = document.createElement('div')
@@ -74,6 +75,22 @@ describe('bindSplashTagline', () => {
     await bindSplashTagline(el, Promise.resolve('Global Systems Laboratory'), { revealAfterMs: 1500 })
     expect(el.hasAttribute('data-tagline')).toBe(false)
     expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('reveals the default only once it is translated; the node\'s line does not wait', async () => {
+    let translated!: () => void
+    const ready = new Promise<void>(resolve => (translated = resolve))
+
+    const fallback = subtitle()
+    await bindSplashTagline(fallback, Promise.resolve(null), { defaultReady: ready })
+    expect(fallback.hasAttribute('data-tagline')).toBe(true)
+
+    const own = subtitle()
+    await bindSplashTagline(own, Promise.resolve('Global Systems Laboratory'), { defaultReady: ready })
+    expect(own.hasAttribute('data-tagline')).toBe(false)
+
+    translated()
+    await until(() => !fallback.hasAttribute('data-tagline'), 'the default revealed after translation')
   })
 
   it('keeps the default and reveals it when the node has none', async () => {

@@ -1915,9 +1915,9 @@ language. A change reaches visitors within a few minutes, with no
 redeploy.
 
 On a node upgraded from an earlier release, the tagline is stored
-by catalog migration 0060. Until that migration is applied, the
-page refuses a tagline and saves the rest with the field empty.
-See §14.3.
+by catalog migration 0060. Until that migration is applied, saving
+with a tagline filled in is refused and saves nothing; empty the
+field and save again to keep the rest. See §14.3.
 
 ---
 
