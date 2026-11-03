@@ -8,13 +8,32 @@ commit `3cff1c4`. Companion to
 [`../CATALOG_BACKEND_PLAN.md`](../CATALOG_BACKEND_PLAN.md) and
 [`../CATALOG_FEDERATION_PROTOCOL.md`](../CATALOG_FEDERATION_PROTOCOL.md).
 
-**Last reviewed:** 2026-05-04 (initial scoping interview with Eric;
-§8 decisions captured in commit `c98bfc1`).
+**Last reviewed:** 2026-11-02 (re-evaluation of the §6 sequence after
+the "Phase 4 ETA slips past two quarters" trigger fired; recorded in the
+2026-11-02 amendment below. The original 2026-05-04 scoping interview
+with Eric — §8 decisions captured in commit `c98bfc1` — remains the basis
+for every decision the later amendments did not revise.)
 
 **Decision amended:** 2026-09-04 (the §8-change revisit trigger fired;
 §7 Directive 3 and §8 decision 5 were revised by the
 [metadata and STAC audit](../metadata/README.md). This amendment reviewed
-only the STAC direction; all other §8 decisions retain the review date above.)
+only the STAC direction; all other §8 decisions retain the 2026-05-04
+review date.)
+
+**Decision amended:** 2026-11-02 (the "Phase 4 ETA slips past two quarters"
+trigger fired. In the interim the public federation feed, peer subscription
+and the sweep guard were built and landed in #491 (metadata Phase 5) — ahead
+of the §6 sequence, which put the publisher CLI and a partner pilot first.
+Maintainer decision: proceed. Land the federation code; it is gated off by
+`federationState` and the feed route returns 404 until an operator sets
+`FEDERATION_ENABLED` live, so no wire protocol is frozen in production on
+merge. Directive 5's CLI-to-npm launch and partner pilot are re-sequenced to
+precede federation going *live*, not federation *merging*; the publish API
+the pilot was meant to de-risk was independently hardened on main by #510,
+#512 and #513. Decision 6's ETA is superseded by this. The same review also revised
+decision 1 (priority cohort → NOAA OAR labs as node operators) and opened a
+new, unresolved question on canonical-node identity (recorded under decision
+1). All other §8 decisions retain the 2026-05-04 basis.)
 
 **Revisit when any of the following becomes true:**
 
@@ -880,6 +899,15 @@ That is what makes Hybrid 1 real rather than aspirational.
 
 ### Directive 5 — Ship the publisher CLI to npm before federation merges
 
+> **Revised 2026-11-02.** Federation code was built before the CLI shipped —
+> the feed, peer subscription and sweep landed in #491. The gate now reads:
+> the CLI-to-npm launch and partner pilot precede federation going *live*
+> (`FEDERATION_ENABLED` set live), not federation *merging*. Merging the
+> routes gated-off freezes no wire protocol in production (the feed is 404
+> until enabled), and the publish API this directive meant to de-risk was
+> independently hardened by #510/#512/#513. The sequence below is retained as
+> the original rationale, and still governs go-live.
+
 The two-week first step in §6 is: publish `@zyra/terraviz-cli` and
 let one real partner exercise it. The reason this comes *before*
 Phase 4 federation, not as a parallel track, is that the CLI uses
@@ -945,6 +973,37 @@ are summarised at the end of the section.
 
 ### 1. Who is federation actually for?
 
+> **Revised 2026-11-02.** Priority has shifted to **NOAA OAR (Office of
+> Oceanic and Atmospheric Research) research labs, as node operators** — each
+> lab ideally running its own TerraViz node for per-lab control of visibility
+> and licensing, with **one umbrella OAR node as an acceptable transitional
+> onboarding step** (labs publish to it via the CLI before standing up their
+> own). Museums and visitor centers remain in scope but move **off the
+> federation roadmap** — handled by the SOS team and/or a free "community
+> edition." Cohort B is **no longer** the justification for Tier 1. The
+> original A+B/focus-on-B framing below is retained as history.
+>
+> Knock-ons (decisions 2, 3, 8, 9 not otherwise changed this review):
+> - **Tier 1** (the no-Cloudflare read-only peer) loses its priority-cohort
+>   justification. It is parked — possibly the community-edition vehicle —
+>   pending the open question below, and is no longer a near-term committed
+>   Zyra deliverable.
+> - **Decision 9's escape hatch now points at cohort A:** "tighter controls
+>   for visibility and licensing per lab" may be a restricted-sharing
+>   requirement, so if an OAR lab needs to federate non-public data to
+>   siblings only, restricted federation comes forward rather than waiting
+>   for Phase 5.
+> - **Directive 5's pilot has a concrete first customer:** a NOAA OAR lab
+>   publishing to the umbrella node.
+>
+> **Open — not resolved (2026-11-02): canonical-node identity.** Whether
+> `zyra-project/terraviz` stays canonical with NOAA-GSL downstream, NOAA-GSL
+> becomes canonical with `zyra-project` downstream, or some split — in
+> discussion with GSL ITS. This blocks finalizing decision 2 (the fork
+> story), decision 3 (which implementation is *the reference*), decision 8
+> (who owns the "TerraViz" trademark), and the shape of the community
+> edition. The decisions below are unchanged pending that resolution.
+
 **A + B, focus on B.** Federation serves both partner agencies
 (NOAA, NASA, university research orgs) publishing their own data
 *and* institutional operators (science museums, planetariums,
@@ -1005,6 +1064,13 @@ it later cannot create the peer schema break that the original directive was
 designed to prevent.
 
 ### 6. Headcount and ETA for Phase 4 federation
+
+> **Superseded 2026-11-02.** The ~1-quarter estimate slipped to ~6 months,
+> firing this decision's own two-quarter trigger. Rather than bring Tier 1
+> forward (the escape hatch below), the maintainer chose to land the
+> federation code built in the interim (#491), gated off by `federationState`.
+> See the 2026-11-02 amendment at the top of this doc and the revised
+> Directive 5.
 
 **Targeting ~1 quarter out.** This keeps §6's "ship CLI now,
 Phase 4 follows naturally, Tier 1 lightweight peer is a near-term

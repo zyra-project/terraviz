@@ -60,7 +60,7 @@ export async function auditStac(options: AuditOptions): Promise<AuditReport> {
   const registerAsset = (href: unknown, type: unknown): void => {
     if (!safe(href)) { issue(typeof href === 'string' ? href : root.href, 'unsafe_or_untrusted_asset'); return }
     if (!assets.has(href) && assets.size >= (options.maxAssets ?? 1000)) { issue(root.href, 'asset_limit'); return }
-    assets.set(href, typeof type === 'string' ? type.toLowerCase() : undefined)
+    assets.set(href, typeof type === 'string' ? type.split(';')[0].trim().toLowerCase() : undefined)
   }
   const inspect = (document: JsonObject, location: string): void => {
     const isResource = ['Catalog', 'Collection', 'Feature'].includes(String(document.type))
@@ -74,7 +74,7 @@ export async function auditStac(options: AuditOptions): Promise<AuditReport> {
         if (target.origin !== root.origin || !(target.pathname === root.pathname || target.pathname.startsWith(root.pathname + '/'))) {
           issue(link.href, 'traversal_outside_root'); continue
         }
-        if (typeof link.type === 'string') expectedTypes.set(link.href, link.type)
+        if (typeof link.type === 'string') expectedTypes.set(link.href, link.type.split(';')[0].trim().toLowerCase())
         if (!visited.has(link.href) && !queue.includes(link.href)) {
           if (queue.length + visited.size >= (options.maxDocuments ?? 1000)) issue(root.href, 'document_limit')
           else queue.push(link.href)

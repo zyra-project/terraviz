@@ -27,6 +27,8 @@ export function stacResolvers(node: StacNodeContext, assets: Map<string, StacRes
   const base = stacBaseUrl(node.identity.base_url)
   return {
     resource: (kind, id) => kind === 'catalog' ? base
+      : kind === 'discovery' ? `${node.identity.base_url.replace(/\/$/, '')}/.well-known/terraviz.json`
+      : kind === 'dataset' ? `${node.identity.base_url.replace(/\/$/, '')}/api/v1/datasets/${encodeURIComponent(id)}`
       : kind === 'manifest' ? `${node.identity.base_url.replace(/\/$/, '')}/api/v1/datasets/${encodeURIComponent(id)}/manifest`
         : `${base}/${kind === 'collection' ? 'collections' : 'items'}/${encodeURIComponent(id)}`,
     listing: (kind, collectionId) => collectionId ? `${base}/collections/${encodeURIComponent(collectionId)}/items` : `${base}/${kind}`,
@@ -50,7 +52,7 @@ export async function readStacPublication(env: CatalogEnv, options: { operatorRe
   if (!model.node) throw new Error('Missing node identity')
   const branding = model.branding
   if (branding) model.node.publicOrgName = branding.org_name
-  const seed = JSON.stringify({ version: 9, operatorReport: options.operatorReport === true, model, r2: env.R2_PUBLIC_BASE ?? null, origins: env.STAC_ASSET_ORIGINS ?? null })
+  const seed = JSON.stringify({ version: 11, operatorReport: options.operatorReport === true, model, r2: env.R2_PUBLIC_BASE ?? null, origins: env.STAC_ASSET_ORIGINS ?? null })
   const key = `stac:publication:v1:${(await computeEtag(seed)).replace(/"/g, '')}`
   if (env.CATALOG_KV && !options.operatorReport) {
     try {

@@ -211,6 +211,45 @@ describe('listPublicDatasets / getPublicDataset — published_at filter', () => 
     expect(rows).toHaveLength(0)
   })
 
+  it('listPublicDatasets excludes a federated row (served over the feed, withheld from the public catalog)', async () => {
+    // A `federated` row is shared with subscribed peers over the
+    // federation feed but must never surface in the public catalog.
+    // The feed composes its own visibility predicate
+    // (`federation-feed-d1.ts`); `PUBLIC_DATASET_PREDICATE` here stays
+    // public-only, and this pins that the two differ by exactly the
+    // `federated` visibility.
+    const sqlite = seedFixtures({ count: 0 })
+    const insert = sqlite.prepare(`
+      INSERT INTO datasets (
+        id, slug, origin_node, title, format, data_ref, weight,
+        visibility, is_hidden, schema_version, created_at, updated_at,
+        published_at
+      ) VALUES (?, ?, 'NODE000', ?, 'video/mp4', 'vimeo:1', 0,
+        ?, 0, 1, ?, ?, ?)
+    `)
+    insert.run(
+      'DS004' + 'A'.repeat(21),
+      'public-row',
+      'Public',
+      'public',
+      '2026-01-01T00:00:00.000Z',
+      '2026-01-01T00:00:00.000Z',
+      '2026-01-01T00:00:00.000Z',
+    )
+    insert.run(
+      'DS005' + 'A'.repeat(21),
+      'federated-row',
+      'Federated-only',
+      'federated',
+      '2026-01-01T00:00:00.000Z',
+      '2026-01-01T00:00:00.000Z',
+      '2026-01-01T00:00:00.000Z',
+    )
+
+    const rows = await listPublicDatasets(asD1(sqlite))
+    expect(rows.map(r => r.slug)).toEqual(['public-row'])
+  })
+
   it('getPublicDataset returns NULL for a draft, the row for a published dataset', async () => {
     const sqlite = seedFixtures({ count: 0 })
     const publishedId = 'DS010' + 'A'.repeat(21)

@@ -91,6 +91,10 @@ export type AuditAction =
   | 'blog.publish'
   | 'blog.unpublish'
   | 'blog.generate'
+  | 'federation_peer.add'
+  | 'federation_peer.remove'
+  | 'federation_peer.sync'
+  | 'federation_peer.sweep_accept'
 
 export interface AuditEventInput {
   actor_kind: AuditActorKind

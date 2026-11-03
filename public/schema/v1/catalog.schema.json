@@ -137,6 +137,23 @@
                   "name"
                 ]
               },
+              "datasetDevelopers": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "affiliationUrl": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ]
+                }
+              },
               "visDeveloper": {
                 "type": "object",
                 "properties": {
@@ -150,6 +167,23 @@
                 "required": [
                   "name"
                 ]
+              },
+              "visDevelopers": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "affiliationUrl": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ]
+                }
               }
             }
           },

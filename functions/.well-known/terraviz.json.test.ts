@@ -14,6 +14,7 @@
  *   - 304 with matching `If-None-Match`.
  */
 
+import { generateKeyPairSync } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { onRequestGet } from './terraviz.json'
 import {
@@ -36,6 +37,8 @@ interface WellKnownBody {
     max_request_rate_per_minute: number
   }
   contact: string | null
+  abuse_contact?: string | null
+  federation?: { feed: boolean }
 }
 
 async function readJson<T>(res: Response): Promise<T> {
@@ -91,6 +94,65 @@ describe('GET /.well-known/terraviz.json', () => {
       auto_approve: false,
       max_request_rate_per_minute: 600,
     })
+    // Federation is off by default, and there is no abuse address.
+    expect(body.federation).toEqual({ feed: false })
+    expect(body.abuse_contact).toBeNull()
+  })
+
+  it.each([
+    ['switched on with an abuse contact', 'true', ' abuse@node.test ', true, 'abuse@node.test'],
+    ['switched on without one', 'true', undefined, false, null],
+    ['switched on with an unusable one', 'true', 'Abuse <abuse@node.test>', false, null],
+    ['switched off with an abuse contact', 'false', 'abuse@node.test', false, 'abuse@node.test'],
+  ])('advertises the feed as the feed route serves it: %s', async (_name, flag, contact, feed, abuse) => {
+    const sqlite = seedFixtures({ count: 0 })
+    try {
+      const { privateKey, publicKey } = generateKeyPairSync('ed25519')
+      const publicDer = publicKey.export({ format: 'der', type: 'spki' })
+      sqlite.prepare('UPDATE node_identity SET public_key = ?').run(`ed25519:${publicDer.subarray(-32).toString('base64')}`)
+      const env = {
+        CATALOG_DB: asD1(sqlite),
+        CATALOG_KV: makeKV(),
+        FEDERATION_ENABLED: flag,
+        FEDERATION_ABUSE_CONTACT: contact,
+        NODE_ID_PRIVATE_KEY_PEM: privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64'),
+      }
+      const body = await readJson<WellKnownBody>(await onRequestGet(makeCtx({ env })))
+      expect(body.federation).toEqual({ feed })
+      expect(body.abuse_contact).toBe(abuse)
+      // The paths are where things live, not whether they answer.
+      expect(body.endpoints.feed).toBe('/api/v1/federation/feed')
+    } finally {
+      sqlite.close()
+    }
+  })
+
+  it.each([undefined, 'not-a-key'])('does not advertise a feed with signing secret %j', async secret => {
+    const sqlite = seedFixtures({ count: 0 })
+    try {
+      const env = { CATALOG_DB: asD1(sqlite), FEDERATION_ENABLED: 'true',
+        FEDERATION_ABUSE_CONTACT: 'abuse@node.test', NODE_ID_PRIVATE_KEY_PEM: secret }
+      const body = await readJson<WellKnownBody>(await onRequestGet(makeCtx({ env })))
+      expect(body.federation).toEqual({ feed: false })
+    } finally {
+      sqlite.close()
+    }
+  })
+
+  it('changes the ETag when federation is switched on', async () => {
+    const sqlite = seedFixtures({ count: 0 })
+    try {
+      const base = { CATALOG_DB: asD1(sqlite), CATALOG_KV: makeKV() }
+      const off = await onRequestGet(makeCtx({ env: base }))
+      const on = await onRequestGet(makeCtx({
+        env: { ...base, FEDERATION_ENABLED: 'true', FEDERATION_ABUSE_CONTACT: 'abuse@node.test' },
+        headers: { 'if-none-match': off.headers.get('etag')! },
+      }))
+      expect(on.status).toBe(200)
+      expect(on.headers.get('etag')).not.toBe(off.headers.get('etag'))
+    } finally {
+      sqlite.close()
+    }
   })
 
   it('returns 304 with matching If-None-Match', async () => {

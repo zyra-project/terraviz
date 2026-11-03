@@ -565,6 +565,8 @@ lifetime and test both CDN and application-cache behavior.
 | `citation_text` | Scientific Citation `sci:citation` | Direct after review |
 | Related resources | `related`, `derived_from`, or `via` links | Select relation from actual provenance semantics |
 | `website_link` | Usually `via` or `about` link | It is not automatically the data asset |
+| Native record (Phase 5) | Live Collection and Item `via` link to `/api/v1/datasets/:id`, with the native JSON schema profile | Emitted for rows this node hosts, including history-backed live Collections but not immutable history Items. A mirrored row carries a `via` link to its origin instead. `(origin node, dataset id)` is the join key between representations, not a cross-peer deduplication rule |
+| Native discovery (Phase 5) | Root catalog `describedby` link to `/.well-known/terraviz.json` | The STAC-to-native direction. The native-to-STAC direction is the discovery document's existing `Link rel="related"` header, so the native JSON body is unchanged |
 
 ### Licensing
 
@@ -1163,6 +1165,10 @@ cross-origin client checks, and the outstanding Pages CPU rollout gate.
    independent indexer.
 
 ### Phase 5: federation integration
+
+**Implementation:** [Phase 5 implementation](PHASE5_IMPLEMENTATION.md)
+records the signed public feed, the subscriber, and the STAC-to-native
+links, all behind `FEDERATION_ENABLED`.
 
 Use STAC as an interoperable discovery projection, not as an automatic
 replacement for the native signed federation protocol. Federation also needs
