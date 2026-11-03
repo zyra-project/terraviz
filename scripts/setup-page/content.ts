@@ -470,7 +470,7 @@ npm run terraviz -- verify-deploy --server https://{{W2}}`,
         kind: 'note',
         title: 'Name the node',
         body: [
-          "Open **Settings → Node profile** (`https://{{W2}}/publish/node-profile`). Fill in **Organization name** and, optionally, **Loading screen tagline**: the short line under the Terraviz title while the app loads, such as your organization's name. **Dataset browser subtitle** is the sentence under the title in the dataset browser. Save, then upload an **Organization logo**. Left empty, the tagline reads \"Science On a Sphere\".",
+          "Open **Settings → Node profile** (`https://{{W2}}/publish/node-profile`). Fill in **Organization name** and, optionally, **Loading screen tagline**: the short line under the Terraviz title while the app loads, such as your organization's name. You can also fill in **Dataset browser subtitle**, the sentence under the title in the dataset browser. Save, then upload an **Organization logo**. Left empty, each shows the app's own line; the default subtitle says your datasets come from NOAA Science On a Sphere, so set your own if they do not.",
         ],
       },
     ],

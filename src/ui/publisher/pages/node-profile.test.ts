@@ -121,6 +121,31 @@ describe('renderNodeProfilePage', () => {
     expect((mount.querySelector('#nodeprofile-tagline') as HTMLInputElement).value).toBe('Global Systems Laboratory')
   })
 
+  it('shows every refusal a save returns, not only the first', async () => {
+    // A node missing both display-line migrations refuses both lines
+    // in one 409; the operator should hear about both at once.
+    const refusal = {
+      errors: [
+        { field: 'tagline', code: 'migration_missing', message: 'This node cannot store a tagline until catalog migration 0060 is applied.' },
+        { field: 'browseSubtitle', code: 'migration_missing', message: 'This node cannot store a dataset browser subtitle until catalog migration 0061 is applied.' },
+      ],
+    }
+    const routes = mockFetch({ '/publish/me': ADMIN_ME, '/publish/node-profile': PROFILE })
+    const fetchFn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'PUT') {
+        return { ok: false, status: 409, type: 'basic', json: async () => refusal, text: async () => JSON.stringify(refusal) } as unknown as Response
+      }
+      return routes(input, init)
+    })
+    const mount = document.createElement('div')
+    await renderNodeProfilePage(mount, { fetchFn })
+    Array.from(mount.querySelectorAll('button')).find(b => b.textContent === 'Save profile')!.click()
+    const status = mount.querySelector('.publisher-nodeprofile-status')!
+    await until(() => status.classList.contains('publisher-nodeprofile-status-error'), 'the refused save')
+    expect(status.textContent).toContain('migration 0060')
+    expect(status.textContent).toContain('migration 0061')
+  })
+
   it('mounts the markdown toolbar on About and Preview renders sanitized markdown', async () => {
     const mount = document.createElement('div')
     await renderNodeProfilePage(mount, {

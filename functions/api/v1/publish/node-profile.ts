@@ -28,6 +28,7 @@ import type { CatalogEnv } from '../_lib/env'
 import type { PublisherData } from './_middleware'
 import {
   ProfileMigrationPendingError,
+  type PendingLine,
   bustNodeProfileCache,
   getNodeProfile,
   setNodeProfile,
@@ -39,6 +40,14 @@ import { resolveHttpAssetUrl } from '../_lib/r2-public-url'
 import { writeAuditEvent } from '../_lib/audit-store'
 
 const CONTENT_TYPE = 'application/json; charset=utf-8'
+
+/** How the 409 names each display line. Typed over every field the
+ *  store can refuse, so a line added there fails to compile here until
+ *  it has its own wording. */
+const LINE_WORDING = {
+  tagline: { what: 'a tagline', the: 'the tagline' },
+  browseSubtitle: { what: 'a dataset browser subtitle', the: 'the subtitle' },
+} satisfies Record<PendingLine['field'], { what: string; the: string }>
 
 function jsonError(status: number, error: string, message: string): Response {
   return new Response(JSON.stringify({ error, message }), {
@@ -95,18 +104,15 @@ export const onRequestPut: PagesFunction<CatalogEnv> = async context => {
   } catch (err) {
     if (!(err instanceof ProfileMigrationPendingError)) throw err
     // Field-shaped 409, as publish-while-transcoding is, so the
-    // portal shows the message rather than a generic failure.
-    const what = err.field === 'tagline' ? 'a tagline' : 'a dataset browser subtitle'
-    const field = err.field === 'tagline' ? 'the tagline' : 'the subtitle'
+    // portal shows the message rather than a generic failure; one
+    // entry per line refused, so a single save names them all.
     return new Response(
       JSON.stringify({
-        errors: [
-          {
-            field: err.field,
-            code: 'migration_missing',
-            message: `This node cannot store ${what} until catalog migration ${err.migration} is applied. Apply pending migrations, or save with ${field} empty.`,
-          },
-        ],
+        errors: err.pending.map(({ field, migration }) => ({
+          field,
+          code: 'migration_missing',
+          message: `This node cannot store ${LINE_WORDING[field].what} until catalog migration ${migration} is applied. Apply pending migrations, or save with ${LINE_WORDING[field].the} empty.`,
+        })),
       }),
       { status: 409, headers: { 'Content-Type': CONTENT_TYPE } },
     )

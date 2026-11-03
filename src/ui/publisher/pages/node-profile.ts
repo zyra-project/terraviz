@@ -353,7 +353,11 @@ function renderForm(mount: HTMLElement, state: FormState): void {
           if (handleSessionError({ navigate: state.navigate }) === 'navigating') return
           status.textContent = t('publisher.nodeProfile.error.session')
         } else if (res.kind === 'validation' && res.errors && res.errors.length > 0) {
-          status.textContent = res.errors[0].message
+          // Every refusal at once: a node missing both display-line
+          // migrations refuses both lines, and showing only the first
+          // would make the operator clear one, save, and only then
+          // hear about the other.
+          status.textContent = res.errors.map(e => e.message).join(' ')
         } else {
           status.textContent = t('publisher.nodeProfile.error.generic')
         }

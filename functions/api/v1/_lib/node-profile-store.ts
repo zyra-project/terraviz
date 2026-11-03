@@ -192,14 +192,23 @@ async function presentLateColumns(db: D1Database): Promise<LateLineColumn[]> {
   return present
 }
 
-/** A display line was given for a database that cannot store it yet. */
+/** One display line a database cannot store yet: its wire field and
+ *  the migration that adds its column. */
+export interface PendingLine {
+  field: LateLine['field']
+  migration: string
+}
+
+/** Display lines were given for a database that cannot store them yet.
+ *  Every such line is listed, so one refusal names them all rather than
+ *  the operator emptying one field to meet the next. */
 export class ProfileMigrationPendingError extends Error {
-  /** The wire field refused, and the migration that adds its column. */
-  constructor(
-    readonly field: 'tagline' | 'browseSubtitle',
-    readonly migration: string,
-  ) {
-    super(`node_profile.${field} cannot be stored: apply catalog migration ${migration}`)
+  constructor(readonly pending: readonly PendingLine[]) {
+    super(
+      `node_profile cannot store ${pending
+        .map(p => `${LATE_LINES.find(l => l.field === p.field)?.column} (migration ${p.migration})`)
+        .join(', ')}`,
+    )
     this.name = 'ProfileMigrationPendingError'
   }
 }
@@ -281,9 +290,9 @@ export type PreviousLines = Record<LateLineColumn, string | null>
  *  that predates the field leaves it as it was (see
  *  {@link validateProfileInput}), and only where its migration has been
  *  applied, so the rest of the profile still saves on a database
- *  without it ({@link getNodeProfile}). A non-empty line given there
- *  throws {@link ProfileMigrationPendingError} before anything is
- *  written, rather than saving the rest and dropping it. The column
+ *  without it ({@link getNodeProfile}). Non-empty lines given there
+ *  throw {@link ProfileMigrationPendingError}, naming every one, before
+ *  anything is written, rather than saving the rest and dropping them. The column
  *  names are fixed strings chosen here, never input; every value is
  *  bound.
  *
@@ -300,15 +309,17 @@ export async function setNodeProfile(
 ): Promise<{ row: NodeProfileRow; previous: PreviousLines }> {
   const present = await presentLateColumns(db)
   const written: LateLineColumn[] = []
+  const pending: PendingLine[] = []
   for (const line of LATE_LINES) {
     const value = input[line.column]
     if (value === undefined) continue
     if (!present.includes(line.column)) {
-      if (value != null) throw new ProfileMigrationPendingError(line.field, line.migration)
+      if (value != null) pending.push({ field: line.field, migration: line.migration })
       continue
     }
     written.push(line.column)
   }
+  if (pending.length > 0) throw new ProfileMigrationPendingError(pending)
   const columns = [
     'org_name',
     'mission',

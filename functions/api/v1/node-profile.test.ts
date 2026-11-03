@@ -171,7 +171,7 @@ describe('GET /api/v1/node-profile', () => {
     expect(payload.features.orbit).toBe(false)
   })
 
-  it('reads the profile, without a tagline, on a database without migration 0060', async () => {
+  it('reads the profile, without either line, on a database without migrations 0060 or 0061', async () => {
     const { env, sqlite } = setupEnv()
     insertProfile(sqlite)
     sqlite
@@ -180,6 +180,7 @@ describe('GET /api/v1/node-profile', () => {
          VALUES (1, ?, 'PUB-1', '2026-06-01T00:00:00.000Z')`,
       )
       .run(JSON.stringify({ orbit: false }))
+    sqlite.prepare('ALTER TABLE node_profile DROP COLUMN browse_subtitle').run()
     sqlite.prepare('ALTER TABLE node_profile DROP COLUMN tagline').run()
     const payload = await readJson(await onRequestGet(ctx(env)))
     expect(payload.profile).toEqual({

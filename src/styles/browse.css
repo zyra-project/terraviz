@@ -111,6 +111,10 @@
     margin-top: calc(0.2rem * var(--ui-scale));
     opacity: 0.8;
     letter-spacing: 0.05em;
+    /* A node's own subtitle is marked dir="auto" (src/ui/browseSubtitle.ts),
+       so a left-to-right line on a right-to-left page would otherwise
+       align to its own start, away from the title above it. */
+    text-align: match-parent;
 }
 
 /* View-aware chrome — Graph and Timeline want every vertical pixel

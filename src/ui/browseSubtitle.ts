@@ -12,12 +12,14 @@
  * tagline comes from (`nodeFeatures`), and is written in when that
  * read answers, as the node's own text (`writeNodeLine`: through
  * `textContent`, shown as written in every locale). Unlike the
- * tagline it is **not** held back: the browse panel is behind the
- * loading screen until the catalog has loaded, by which time the read
- * has normally answered, so the default is rarely seen first, and
- * hiding the panel's header until a read that may never answer would
- * cost more than a late change of one line. A read that fails leaves
- * the default in place.
+ * tagline it needs no hold-back, and the reason is an ordering in
+ * `main.ts`'s `initialize`: it awaits this read's `settle()` (for
+ * Orbit) before any path reveals the browse panel, and `settle` either
+ * has the answer or aborts the read, which then leaves the default.
+ * So the line is settled before the panel is on screen or in the
+ * accessibility tree. Moving that wait later (making chat set-up lazy,
+ * say) would reopen a visible swap here. A read that fails leaves the
+ * default in place.
  */
 
 import { writeNodeLine } from './splashTagline'

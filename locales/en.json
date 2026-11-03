@@ -1660,7 +1660,7 @@
   "publisher.nodeProfile.aboutMd": "About (markdown, optional)",
   "publisher.nodeProfile.aiCallout": "AI-assisted drafts in Blog and Tours ground themselves in this profile, so they speak in your organization's voice. Keep the mission and tone current.",
   "publisher.nodeProfile.browseSubtitle": "Dataset browser subtitle (optional)",
-  "publisher.nodeProfile.browseSubtitle.hint": "A short sentence under the Terraviz title in the dataset browser, up to {max} characters, shown as written in every language. Leave it empty to show “{default}”.",
+  "publisher.nodeProfile.browseSubtitle.hint": "A short sentence such as what your catalog covers, up to {max} characters. Shown under the Terraviz title in the dataset browser, as written in every language. It is hidden on small screens and in the Graph, Map and Timeline views, so don't put anything there that visitors need. Leave it empty to show “{default}”.",
   "publisher.nodeProfile.defaultTone": "Default tone for generated drafts (optional)",
   "publisher.nodeProfile.embedding.access": "Embeds cannot load a page that Cloudflare Access protects. If Access covers the public app, other sites show a sign-in page or nothing.",
   "publisher.nodeProfile.embedding.error.duplicate": "This repeats {site}, listed above.",
