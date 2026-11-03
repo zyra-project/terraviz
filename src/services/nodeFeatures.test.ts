@@ -154,3 +154,62 @@ describe('watchForOrbitWithdrawal', () => {
     expect(fetchFn).not.toHaveBeenCalled()
   })
 })
+
+describe('startNodeFeaturesRead().tagline', () => {
+  it('reads the splash tagline from the same response as the toggles', async () => {
+    const fetchFn = vi.fn(async () =>
+      jsonResponse({ profile: { orgName: 'GSL', logoUrl: null, tagline: '  Global Systems Laboratory ' }, features: {} }),
+    )
+    const read = startNodeFeaturesRead({ fetchFn })
+    expect(await read.tagline).toBe('Global Systems Laboratory')
+    await read.settle()
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+  })
+
+  it('answers null for no profile, no tagline, or one that is not text', async () => {
+    for (const body of [
+      { profile: null },
+      { profile: { orgName: 'X', logoUrl: null } },
+      { profile: { orgName: 'X', tagline: null } },
+      { profile: { orgName: 'X', tagline: '   ' } },
+      { profile: { orgName: 'X', tagline: 42 } },
+    ]) {
+      expect(await startNodeFeaturesRead({ fetchFn: async () => jsonResponse(body) }).tagline).toBeNull()
+    }
+  })
+
+  it('answers null when a settle deadline aborts the read', async () => {
+    const read = startNodeFeaturesRead({
+      fetchFn: (_path, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
+        }),
+    })
+    await read.settle(5)
+    expect(await read.tagline).toBeNull()
+  })
+
+  it('stays pending, without rejecting, when a fetch ignores the abort', async () => {
+    const read = startNodeFeaturesRead({ fetchFn: () => new Promise<Response>(() => {}) })
+    await read.settle(5)
+    const outcome = await Promise.race([
+      read.tagline.then(
+        () => 'settled',
+        () => 'rejected',
+      ),
+      new Promise(resolve => setTimeout(() => resolve('pending'), 20)),
+    ])
+    expect(outcome).toBe('pending')
+  })
+
+  it('answers null when the read fails', async () => {
+    const failing = startNodeFeaturesRead({
+      fetchFn: async () => {
+        throw new TypeError('Failed to fetch')
+      },
+    })
+    expect(await failing.tagline).toBeNull()
+    const refused = startNodeFeaturesRead({ fetchFn: async () => jsonResponse({ profile: { tagline: 'X' } }, 500) })
+    expect(await refused.tagline).toBeNull()
+  })
+})

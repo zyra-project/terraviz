@@ -38,7 +38,8 @@ import { initToolsMenu, syncToolsMenuState, syncToolsMenuLayout, pulseBrowseButt
 import { closeOutputUI, initOutputUI, openOutputUI } from './ui/outputUI'
 import { openCreditsPanel } from './ui/creditsPanel'
 import { initChatUI, openChat, openChatSettings, notifyDatasetChanged, showChatTrigger, hideChatTrigger, closeChat, flushPendingGlobeActions, isOrbitAvailable, setOrbitAvailable } from './ui/chatUI'
-import { startNodeFeaturesRead, watchForOrbitWithdrawal } from './services/nodeFeatures'
+import { startNodeFeaturesRead, watchForOrbitWithdrawal, type PendingNodeFeatures } from './services/nodeFeatures'
+import { SPLASH_TAGLINE_WAIT_MS, bindSplashTagline } from './ui/splashTagline'
 import { loadViewPreferences, saveViewPreferences, type ViewPreferences } from './utils/viewPreferences'
 import { renderColorbar, openDisplayControls, closeDisplayControls } from './ui/colorbarUI'
 import {
@@ -438,14 +439,14 @@ class InteractiveSphere {
    * catalog, and either load a URL-specified dataset or show the default
    * Earth with the browse panel.
    */
-  async initialize(): Promise<void> {
+  async initialize(nodeFeatures: PendingNodeFeatures = startNodeFeaturesRead()): Promise<void> {
     // This node's feature toggles, of which boot needs one: whether
-    // Orbit is offered at all. Started first so it overlaps everything
-    // below, and outside the `try` because both outcomes of it need
+    // Orbit is offered at all. Started before the i18n bootstrap (see
+    // the DOMContentLoaded handler) so it overlaps everything up to
+    // here, and read outside the `try` because both outcomes of it need
     // the answer: the chat is set up inside, and the deep links after
     // the `catch` can open the panel even when boot failed. `settle`
     // never rejects and bounds its own wait (all-enabled past it).
-    const nodeFeatures = startNodeFeaturesRead()
 
     try {
       this.setLoading(true)
@@ -2275,11 +2276,17 @@ class InteractiveSphere {
           this.loadingHideTimer = null
           screen.style.opacity = ''
           screen.classList.add('fade-out')
-          screen.addEventListener('transitionend', () => {
+          // The screen's own fade only: `transitionend` bubbles, and the
+          // progress fill and the tagline transition inside it too, so
+          // one of theirs would otherwise end the fade early.
+          const onFaded = (e: TransitionEvent): void => {
+            if (e.target !== screen) return
+            screen.removeEventListener('transitionend', onFaded)
             if (screen.classList.contains('fade-out')) {
               screen.style.display = 'none'
             }
-          }, { once: true })
+          }
+          screen.addEventListener('transitionend', onFaded)
         }, LOADING_HIDE_DELAY_MS)
       }
     }
@@ -4148,10 +4155,14 @@ class InteractiveSphere {
       void screen.offsetHeight
       screen.style.transition = 'opacity 0.3s ease'
       screen.style.opacity = '1'
-      screen.addEventListener('transitionend', () => {
+      // The screen's own fade only, as in `setLoading`.
+      const onShown = (e: TransitionEvent): void => {
+        if (e.target !== screen) return
+        screen.removeEventListener('transitionend', onShown)
         screen.style.transition = ''
         screen.style.opacity = ''
-      }, { once: true })
+      }
+      screen.addEventListener('transitionend', onShown)
     } else {
       screen.style.opacity = ''
     }
@@ -4343,10 +4354,33 @@ async function checkForUpdates(): Promise<void> {
 
 // Initialize app on DOM ready
 document.addEventListener('DOMContentLoaded', async () => {
+  const isBlogPath = location.pathname === '/blog' || location.pathname.startsWith('/blog/')
+  const isGlobeApp = !isPublisherPortalPath(location.pathname) && !isBlogPath
+
+  // The node profile read, started before the i18n bootstrap: it needs
+  // no locale, and the splash is already on screen waiting for its
+  // tagline (src/ui/splashTagline.ts). Started any later — after a
+  // non-English visitor's locale chunk — a cold load would outlast the
+  // splash's reveal deadline and swap the node's line in over the
+  // default, the flash the hold-back exists to prevent. The same read
+  // carries the feature toggles `initialize` waits on. Not for the
+  // portal or blog, which read the profile themselves.
+  const nodeFeatures = isGlobeApp ? startNodeFeaturesRead() : null
+
   // Resolve user locale and apply data-i18n attributes before any
   // UI module renders. English is bundled inline; non-English
   // locales lazy-load here. See docs/I18N_PLAN.md.
-  await bootstrapI18n()
+  const i18nReady = bootstrapI18n()
+  if (nodeFeatures) {
+    // The default is revealed only once it is translated, so a visitor
+    // in another locale never sees the English line first; the node's
+    // own line, shown as written, does not wait.
+    void bindSplashTagline(document.querySelector<HTMLElement>('.loading-subtitle'), nodeFeatures.tagline, {
+      revealAfterMs: SPLASH_TAGLINE_WAIT_MS,
+      defaultReady: i18nReady,
+    })
+  }
+  await i18nReady
 
   // Publisher portal route gate. Visits to `/publish/*` boot a
   // separate admin UI (Cloudflare Access-protected in production)
@@ -4366,7 +4400,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Public blog route gate — same lazy-chunk shape as the portal:
   // `/blog` and `/blog/:slug` render static content pages and skip
   // the globe boot entirely (docs/CURRENT_EVENTS_PLAN.md §7).
-  if (location.pathname === '/blog' || location.pathname.startsWith('/blog/')) {
+  if (isBlogPath) {
     const { bootBlogPage } = await import('./ui/blog')
     await bootBlogPage()
     return
@@ -4374,7 +4408,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   const app = new InteractiveSphere()
   app.setupEventListeners()
-  await app.initialize()
+  await app.initialize(nodeFeatures ?? undefined)
 
   ;(window as any).app = app
 

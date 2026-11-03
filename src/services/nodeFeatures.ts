@@ -5,7 +5,11 @@
  * The public SPA's read of this node's feature toggles
  * (`src/types/node-features.ts`), from the public
  * `GET /api/v1/node-profile` the blog boot and the portal chrome
- * already read.
+ * already read — and, from the same response, the node's splash
+ * tagline (`profile.tagline`), so the loading screen costs no second
+ * request. The tagline has no deadline of its own here: the splash
+ * (`src/ui/splashTagline.ts`) takes it whenever it arrives, and a read
+ * that fails or is aborted answers null, the app's own tagline.
  *
  * Most toggles need no client read at all: a disabled feature's
  * public endpoint answers empty and the surface that renders it
@@ -68,21 +72,52 @@ export interface PendingNodeFeatures {
    * call's answer, so every waiter acts on the same one.
    */
   settle(timeoutMs?: number): Promise<FeatureMap>
+  /**
+   * The node's splash tagline once the read finishes, or null when it
+   * has none, the read failed, or a `settle` deadline aborted it.
+   * Never rejects, and has no deadline of its own: a request that
+   * stalls past the abort leaves it pending, which its one reader,
+   * the splash, tolerates by revealing the default from CSS.
+   */
+  tagline: Promise<string | null>
+}
+
+interface ProfileRead {
+  features: FeatureMap
+  tagline: string | null
+}
+
+function failedRead(): ProfileRead {
+  return { features: defaultFeatures(), tagline: null }
+}
+
+/** `profile.tagline` as a display string: a non-empty, trimmed string,
+ *  or null for anything else. The node bounds and validates it; this
+ *  only refuses what is not text, since it reaches the page through
+ *  `textContent` either way. */
+function taglineFrom(body: unknown): string | null {
+  if (!body || typeof body !== 'object') return null
+  const profile = (body as { profile?: unknown }).profile
+  if (!profile || typeof profile !== 'object') return null
+  const raw = (profile as { tagline?: unknown }).tagline
+  if (typeof raw !== 'string') return null
+  const trimmed = raw.trim()
+  return trimmed.length > 0 ? trimmed : null
 }
 
 /** Start reading the toggles now; wait for them later. */
 export function startNodeFeaturesRead(opts: NodeFeaturesOptions = {}): PendingNodeFeatures {
   const fetchFn = opts.fetchFn ?? apiFetch
   const controller = new AbortController()
-  const read = (async (): Promise<FeatureMap> => {
+  const read = (async (): Promise<ProfileRead> => {
     try {
       const res = await fetchFn(NODE_PROFILE_PATH, { signal: controller.signal, cache: 'no-store' })
-      if (!res.ok) return defaultFeatures()
+      if (!res.ok) return failedRead()
       const body = (await res.json()) as { features?: unknown } | null
-      return normalizeFeatures(body?.features)
+      return { features: normalizeFeatures(body?.features), tagline: taglineFrom(body) }
     } catch (err) {
       logger.debug('[nodeFeatures] read failed; treating every feature as enabled:', err)
-      return defaultFeatures()
+      return failedRead()
     }
   })()
 
@@ -94,13 +129,14 @@ export function startNodeFeaturesRead(opts: NodeFeaturesOptions = {}): PendingNo
           controller.abort()
           resolve(defaultFeatures())
         }, timeoutMs)
-        void read.then(features => {
+        void read.then(({ features }) => {
           clearTimeout(timer)
           resolve(features)
         })
       })
       return settled
     },
+    tagline: read.then(r => r.tagline),
   }
 }
 

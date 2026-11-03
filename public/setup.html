@@ -316,7 +316,7 @@ code{overflow-wrap:anywhere}
 <!--
   GENERATED FILE — do not edit.
 
-  Produced by scripts/build-setup-page.ts on 2026-11-02.
+  Produced by scripts/build-setup-page.ts on 2026-11-03.
   Prose lives in scripts/setup-page/content.ts; every binding,
   prerequisite and validator is imported from the modules the setup
   tool itself uses, so this page cannot disagree with `npm run setup`.
@@ -1891,6 +1891,11 @@ npm run terraviz -- verify-deploy --server https://<span data-slot="W2" data-w="
   <div style="font:600 10.5px/1.35 var(--tv-font-sans);letter-spacing:.13em;text-transform:uppercase;color:var(--tv-accent);margin:0 0 8px">How it works · How the first admin happens</div>
   <p style="margin:0 0 10px;font-size:13.5px;line-height:1.55;color:var(--tv-text-muted);text-wrap:pretty"><b style="font-weight:600;color:var(--tv-text)">The first human to sign in on a deploy with no active admin is bootstrapped to admin automatically.</b> Service tokens are excluded — a machine credential never self-elevates. So on a fresh node, you become the admin by signing in.</p>
   <p style="margin:0 0 10px;font-size:13.5px;line-height:1.55;color:var(--tv-text-muted);text-wrap:pretty">Everyone after you lands as a pending reviewer, and you approve and promote them from the Users tab. Admins cannot demote themselves or remove the last admin, so a node always keeps one operator.</p>
+  
+</div>
+  <div style="background:var(--tv-warn-bg);border:1px solid var(--tv-warn-border);border-left:3px solid var(--tv-warn);border-radius:6px;padding:15px 17px;margin:0 0 16px">
+  <div style="font:600 10.5px/1.35 var(--tv-font-sans);letter-spacing:.13em;text-transform:uppercase;color:var(--tv-warn);margin:0 0 8px">Worth knowing · Name the node</div>
+  <p style="margin:0 0 10px;font-size:13.5px;line-height:1.55;color:var(--tv-text-muted);text-wrap:pretty">Open <b style="font-weight:600;color:var(--tv-text)">Settings → Node profile</b> (<code style="font-family:var(--tv-font-mono);font-size:.92em;background:var(--tv-surface-3);padding:1px 5px;border-radius:3px">https://<span data-slot="W2" data-w="W2" style="cursor:pointer;padding:1px 5px;border-radius:3px"></span>/publish/node-profile</code>). Fill in <b style="font-weight:600;color:var(--tv-text)">Organization name</b> and, optionally, <b style="font-weight:600;color:var(--tv-text)">Loading screen tagline</b>: the short line under the Terraviz title while the app loads, such as your organization's name. Save, then upload an <b style="font-weight:600;color:var(--tv-text)">Organization logo</b>. Left empty, the tagline reads &quot;Science On a Sphere&quot;.</p>
   
 </div>
   <div style="background:var(--tv-accent-bg);border:1px solid var(--tv-accent-border);border-left:3px solid var(--tv-accent);border-radius:6px;padding:14px 16px;margin:0 0 14px">

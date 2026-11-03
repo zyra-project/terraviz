@@ -4,7 +4,7 @@
 /**
  * Tests for the /publish/node-profile page — form rendering from the
  * stored profile, the privileged gate, and the PUT body the Save
- * button composes (incl. link rows). The Embedding card's own
+ * button composes (incl. link rows and the splash tagline). The Embedding card's own
  * behaviour is in `components/embedding-card.test.ts`; here, only
  * who sees it and how.
  */
@@ -12,6 +12,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { FEATURE_KEYS } from '../../../types/node-features'
 import { renderNodeProfilePage } from './node-profile'
+import { until } from '../../../test-utils'
 
 interface RouteMap {
   [pathPrefix: string]: unknown
@@ -42,6 +43,7 @@ const PROFILE = {
     defaultTone: 'educational',
     links: [{ label: 'Website', url: 'https://coastal.example.org' }],
     logoUrl: null,
+    tagline: 'Gulf Coast Science',
   },
 }
 
@@ -55,7 +57,45 @@ describe('renderNodeProfilePage', () => {
     })
     expect((mount.querySelector('#nodeprofile-org') as HTMLInputElement).value).toBe('Coastal Science Center')
     expect((mount.querySelector('#nodeprofile-mission') as HTMLTextAreaElement).value).toBe('Connect visitors with live ocean data.')
+    expect((mount.querySelector('#nodeprofile-tagline') as HTMLInputElement).value).toBe('Gulf Coast Science')
     expect(mount.querySelectorAll('.publisher-nodeprofile-link-row')).toHaveLength(1)
+  })
+
+  it('labels the tagline field and names the default it falls back to', async () => {
+    const mount = document.createElement('div')
+    await renderNodeProfilePage(mount, {
+      // An older deploy's profile carries no `tagline` at all.
+      fetchFn: mockFetch({
+        '/publish/me': ADMIN_ME,
+        '/publish/node-profile': { profile: { ...PROFILE.profile, tagline: undefined } },
+      }),
+    })
+    const input = mount.querySelector('#nodeprofile-tagline') as HTMLInputElement
+    expect(input.value).toBe('')
+    expect(input.maxLength).toBe(80)
+    // Named by its label alone; the hint describes it rather than
+    // lengthening its name.
+    const label = mount.querySelector('label[for="nodeprofile-tagline"]')!
+    expect(label.textContent).toBe('Loading screen tagline (optional)')
+    expect(input.closest('label')).toBeNull()
+    const hint = mount.querySelector(`#${input.getAttribute('aria-describedby')}`)!
+    expect(hint.textContent).toContain('up to 80 characters')
+    expect(hint.textContent).toContain('“Science On a Sphere”')
+  })
+
+  it('cleans a pasted tab or invisible character out of the tagline before saving', async () => {
+    const capture = { puts: [] as Array<{ url: string; body: unknown }> }
+    const mount = document.createElement('div')
+    await renderNodeProfilePage(mount, {
+      fetchFn: mockFetch({ '/publish/me': ADMIN_ME, '/publish/node-profile': { profile: null } }, capture),
+    })
+    ;(mount.querySelector('#nodeprofile-org') as HTMLInputElement).value = 'GSL'
+    ;(mount.querySelector('#nodeprofile-tagline') as HTMLInputElement).value = 'Global\tSystems\u200B Laboratory'
+    Array.from(mount.querySelectorAll('button')).find(b => b.textContent === 'Save profile')!.click()
+    await until(() => capture.puts.length === 1, 'the profile PUT')
+    expect((capture.puts[0].body as { tagline: string }).tagline).toBe('Global Systems Laboratory')
+    // The field shows what was saved.
+    expect((mount.querySelector('#nodeprofile-tagline') as HTMLInputElement).value).toBe('Global Systems Laboratory')
   })
 
   it('mounts the markdown toolbar on About and Preview renders sanitized markdown', async () => {
@@ -224,6 +264,7 @@ describe('renderNodeProfilePage', () => {
 
     ;(mount.querySelector('#nodeprofile-org') as HTMLInputElement).value = 'New Node'
     ;(mount.querySelector('#nodeprofile-mission') as HTMLTextAreaElement).value = 'A mission.'
+    ;(mount.querySelector('#nodeprofile-tagline') as HTMLInputElement).value = '  Global Systems Laboratory '
     // Add one link row and fill it.
     const buttons = Array.from(mount.querySelectorAll('button'))
     const addLink = buttons.find(b => b.textContent === 'Add link')!
@@ -239,6 +280,7 @@ describe('renderNodeProfilePage', () => {
     expect(capture.puts[0].url).toContain('/api/v1/publish/node-profile')
     expect(capture.puts[0].body).toEqual({
       orgName: 'New Node',
+      tagline: 'Global Systems Laboratory',
       mission: 'A mission.',
       aboutMd: null,
       regionFocus: null,

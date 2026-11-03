@@ -1899,6 +1899,26 @@ WHERE email = 'you@your-org.org';
 ```
 </details>
 
+## 11.1 Name the node
+
+Open `https://<W2>/publish/node-profile` (**Settings → Node
+profile** in the sidebar). Fill in **Organization name** and,
+optionally, **Loading screen tagline**: the short line under the
+Terraviz title while the app loads, such as your organization's
+name. Then **Save profile**, and upload an **Organization logo**,
+which needs a saved profile first. The name and logo head the
+public blog.
+
+Left empty, the tagline reads "Science On a Sphere", translated
+for each visitor. A tagline you set is shown as written in every
+language. A change reaches visitors within a few minutes, with no
+redeploy.
+
+On a node upgraded from an earlier release, the tagline is stored
+by catalog migration 0060. Until that migration is applied, saving
+with a tagline filled in is refused and saves nothing; empty the
+field and save again to keep the rest. See §14.3.
+
 ---
 
 # Phase 12 — Put content in
@@ -1996,7 +2016,7 @@ no `frame-ancestors` and no `X-Frame-Options`.
 
 **To limit it, use the portal.** Sign in as an admin, open
 `https://<W2>/publish/node-profile` (**Settings → Node profile** in
-the sidebar), and find the **Embedding** card:
+the sidebar, the page from §11.1), and find the **Embedding** card:
 
 - **Any site can embed** is the default, and how every node starts.
 - **Only sites I list** allows this node and the sites you name.

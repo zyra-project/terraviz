@@ -1762,6 +1762,8 @@
   "publisher.nodeProfile.saved": "Profile saved.",
   "publisher.nodeProfile.section.missionAbout": "Mission & about",
   "publisher.nodeProfile.section.organization": "Organization",
+  "publisher.nodeProfile.tagline": "Loading screen tagline (optional)",
+  "publisher.nodeProfile.tagline.hint": "A short line such as your organization's name, up to {max} characters. Shown in capitals under the Terraviz title while the app loads, as written in every language. Leave it empty to show “{default}”.",
   "publisher.nodeProfile.title": "Node profile",
   "publisher.overview.action.newDataset": "New dataset",
   "publisher.overview.action.newEvent": "New event",

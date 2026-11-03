@@ -98,6 +98,38 @@
     text-transform: uppercase;
     margin-bottom: calc(2.5rem * var(--ui-scale));
     opacity: 0.8;
+    /* A node's own tagline can be longer than the default; keep it
+       centred and wrapping inside the splash rather than overflowing
+       a phone's width. One that wraps adds a line, and the centred
+       splash moves by half of it when the line appears: accepted, as
+       a tagline is meant to be short. */
+    max-width: min(90vw, calc(32rem * var(--ui-scale)));
+    text-align: center;
+    overflow-wrap: anywhere;
+    transition: opacity 0.3s ease;
+}
+
+/* Held back until the node profile says whether this node has its own
+   tagline (src/ui/splashTagline.ts), so the default never shows before
+   the node's line replaces it. `visibility` hides it from a screen
+   reader too, which `opacity` alone would not; the line's space stays
+   reserved. The script reveals it 1.5 s after the read starts at the
+   latest. The animation is only a safety net, for a page whose boot
+   never settles it (the portal and blog share this shell) or a script
+   that never runs, and fades it in as the script's reveal does. */
+.loading-subtitle[data-tagline="pending"] {
+    opacity: 0;
+    visibility: hidden;
+    animation: loading-subtitle-reveal 0.3s ease 4s forwards;
+}
+
+@keyframes loading-subtitle-reveal {
+    to { opacity: 0.8; visibility: visible; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .loading-subtitle { transition: none; }
+    .loading-subtitle[data-tagline="pending"] { animation-duration: 0s; }
 }
 
 .loading-progress-track {

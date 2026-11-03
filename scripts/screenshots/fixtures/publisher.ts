@@ -447,6 +447,7 @@ const nodeProfile = {
     defaultTone: 'educational, general public',
     links: [{ label: 'Website', url: 'https://coastal.example.org' }],
     logoUrl: null,
+    tagline: 'Gulf Coast Science',
     updatedBy: 'PUB-ADMIN',
     updatedAt: '2026-07-01T00:00:00.000Z',
   },
