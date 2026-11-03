@@ -12,7 +12,9 @@
  *       `{ orgName, mission?, aboutMd?, regionFocus?, defaultTone?,
  *          tagline?, links? }` — only `orgName` is mandatory, and an
  *       omitted optional field is cleared (the PUT replaces the
- *       whole profile). 400 `{ errors }`
+ *       whole profile; the logo, set through its own route, is
+ *       kept). 409 `{ errors }` with code `migration_pending` for a
+ *       tagline on a database without migration 0060. 400 `{ errors }`
  *       for body problems (the publisher-API field-error envelope).
  *
  * Writes require a privileged caller (admin / service) and are
@@ -22,6 +24,7 @@
 import type { CatalogEnv } from '../_lib/env'
 import type { PublisherData } from './_middleware'
 import {
+  TaglineMigrationPendingError,
   bustNodeProfileCache,
   getNodeProfile,
   setNodeProfile,
@@ -78,7 +81,31 @@ export const onRequestPut: PagesFunction<CatalogEnv> = async context => {
     })
   }
 
-  const row = await setNodeProfile(context.env.CATALOG_DB, publisher, validation.value)
+  // Read first so the audit row can say what the tagline replaced: it
+  // is the profile's most widely shown text, and a PUT that omits it
+  // clears it.
+  const previous = await getNodeProfile(context.env.CATALOG_DB)
+  let row
+  try {
+    row = await setNodeProfile(context.env.CATALOG_DB, publisher, validation.value)
+  } catch (err) {
+    if (!(err instanceof TaglineMigrationPendingError)) throw err
+    // Field-shaped 409, as publish-while-transcoding is, so the
+    // portal shows the message rather than a generic failure.
+    return new Response(
+      JSON.stringify({
+        errors: [
+          {
+            field: 'tagline',
+            code: 'migration_pending',
+            message:
+              'This node cannot store a tagline until catalog migration 0060 is applied. Apply pending migrations, or save with the tagline empty.',
+          },
+        ],
+      }),
+      { status: 409, headers: { 'Content-Type': CONTENT_TYPE } },
+    )
+  }
 
   await writeAuditEvent(context.env.CATALOG_DB, {
     actor_kind: 'publisher',
@@ -90,7 +117,8 @@ export const onRequestPut: PagesFunction<CatalogEnv> = async context => {
       org_name: row.org_name,
       has_mission: row.mission != null,
       has_about: row.about_md != null,
-      has_tagline: row.tagline != null,
+      tagline: row.tagline,
+      previous_tagline: previous?.tagline ?? null,
     }),
   })
   // The public identity read serves orgName and the splash tagline —

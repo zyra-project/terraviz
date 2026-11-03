@@ -15,11 +15,12 @@
  * links, updated-by) stays behind the authed `/publish/node-profile`
  * read.
  *
- * Caching mirrors the public blog list: KV at `node-profile:v2` with
+ * Caching mirrors the public blog list: KV at `node-profile:v3` with
  * a 300 s TTL (the profile changes rarely), busted by the profile
  * PUT, the logo upload/remove routes, and the node-settings PUT.
- * Degrades to `{ profile: null, features: all-enabled }` with
- * `no-store` on any read failure so nothing caches an error and a
+ * A failed profile read answers `{ profile: null, features }` with the
+ * stored toggles still read, and a failed toggles read answers them
+ * all-enabled; either is `no-store`, so nothing caches an error and a
  * storage blip never dark-launches a disabled feature.
  */
 
@@ -71,7 +72,12 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
     }
   }
 
+  // A profile that cannot be read costs the identity, not the toggles:
+  // the features are still read below and served beside a null
+  // profile, uncached, so a profile-side failure can never turn back
+  // on a feature the operator turned off.
   let row
+  let profileFailed = false
   try {
     row = await getNodeProfile(context.env.CATALOG_DB)
   } catch (err) {
@@ -79,7 +85,8 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
       '[node-profile] public read failed — returning null profile:',
       err instanceof Error ? err.message : String(err),
     )
-    return degraded()
+    row = null
+    profileFailed = true
   }
 
   const profile = row
@@ -105,6 +112,7 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
   }
 
   const body = JSON.stringify({ profile, features })
+  if (profileFailed) return uncached(body)
   if (context.env.CATALOG_KV) {
     try {
       await context.env.CATALOG_KV.put(NODE_PROFILE_CACHE_KEY, body, { expirationTtl: CACHE_TTL_SECONDS })

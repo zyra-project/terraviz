@@ -147,9 +147,16 @@ describe('/api/v1/publish/node-profile', () => {
     expect(profile.tagline).toBeNull()
   })
 
-  it('400 for a tagline that is too long, not text, or more than one line', async () => {
+  it('400 for a tagline that is too long, not text, not one line, or carries invisible characters', async () => {
     const { env } = setupEnv()
-    for (const tagline of ['x'.repeat(PROFILE_TAGLINE_MAX_LEN + 1), 42, 'Two\nlines', 'Tab\there']) {
+    for (const tagline of [
+      'x'.repeat(PROFILE_TAGLINE_MAX_LEN + 1),
+      42,
+      'Two\nlines',
+      'Tab\there',
+      'Right\u202Eto left',
+      'Zero\u200Bwidth',
+    ]) {
       const res = await onRequestPut(ctx({ env, method: 'PUT', body: { orgName: 'X', tagline } }))
       expect(res.status).toBe(400)
       const { errors } = await readJson<{ errors: Array<{ field: string }> }>(res)
@@ -159,6 +166,39 @@ describe('/api/v1/publish/node-profile', () => {
       ctx({ env, method: 'PUT', body: { orgName: 'X', tagline: 'x'.repeat(PROFILE_TAGLINE_MAX_LEN) } }),
     )
     expect(ok.status).toBe(200)
+  })
+
+  it('audits the tagline set and the one it replaced', async () => {
+    const { env, sqlite } = setupEnv()
+    await onRequestPut(ctx({ env, method: 'PUT', body: VALID_BODY }))
+    await onRequestPut(ctx({ env, method: 'PUT', body: { ...VALID_BODY, tagline: 'Global Systems Laboratory' } }))
+    const rows = sqlite
+      .prepare(`SELECT metadata_json FROM audit_events WHERE action = 'node_profile.update' ORDER BY rowid`)
+      .all() as Array<{ metadata_json: string }>
+    const last = JSON.parse(rows[rows.length - 1].metadata_json) as Record<string, unknown>
+    expect(last.tagline).toBe('Global Systems Laboratory')
+    expect(last.previous_tagline).toBe('Gulf Coast Science')
+  })
+
+  it('on a database without migration 0060: saves without a tagline, refuses one with 409', async () => {
+    const { env, sqlite } = setupEnv()
+    sqlite.prepare('ALTER TABLE node_profile DROP COLUMN tagline').run()
+
+    const refused = await onRequestPut(ctx({ env, method: 'PUT', body: VALID_BODY }))
+    expect(refused.status).toBe(409)
+    const { errors } = await readJson<{ errors: Array<{ field: string; code: string }> }>(refused)
+    expect(errors).toEqual([expect.objectContaining({ field: 'tagline', code: 'migration_pending' })])
+    // Refused whole: nothing written.
+    const none = await onRequestGet(ctx({ env, method: 'GET' }))
+    expect((await readJson<{ profile: unknown }>(none)).profile).toBeNull()
+
+    const saved = await onRequestPut(ctx({ env, method: 'PUT', body: { ...VALID_BODY, tagline: null } }))
+    expect(saved.status).toBe(200)
+    const { profile } = await readJson<{ profile: Record<string, unknown> }>(
+      await onRequestGet(ctx({ env, method: 'GET' })),
+    )
+    expect(profile.orgName).toBe('Coastal Science Center')
+    expect(profile.tagline).toBeNull()
   })
 
   it('400 with field errors for a missing orgName and a non-http link', async () => {

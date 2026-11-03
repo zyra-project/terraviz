@@ -7,7 +7,7 @@
  * The operator-authored "about the host organization" context — the
  * Phase 3d blog generator grounds AI drafts in it so they speak in
  * the node's own voice, and it is generic enough to back other
- * identity surfaces (the public app's splash tagline today; an about
+ * identity surfaces (the public app's loading-screen tagline today; an about
  * page or footer attribution later).
  *
  * Mirrors `hero-override-store.ts`: pure data access + body
@@ -17,6 +17,7 @@
  */
 
 import type { PublisherRow } from './publisher-store'
+import { TAGLINE_MAX_LEN, hasOnlyTaglineChars } from '../../../../src/types/node-tagline'
 
 /** Bounds keep the stored payload (and any prompt it is interpolated
  *  into) small. Generous for prose, hostile to paste-bombs. */
@@ -27,9 +28,9 @@ export const PROFILE_REGION_MAX_LEN = 200
 export const PROFILE_TONE_MAX_LEN = 200
 export const PROFILE_MAX_LINKS = 10
 export const PROFILE_LINK_LABEL_MAX_LEN = 100
-/** The splash-screen tagline sits on one line under the app title,
- *  uppercased and letter-spaced, so it is kept short. */
-export const PROFILE_TAGLINE_MAX_LEN = 80
+/** The loading-screen tagline's bound, and its character rules, live
+ *  in `src/types/node-tagline.ts`, shared with the portal form. */
+export const PROFILE_TAGLINE_MAX_LEN = TAGLINE_MAX_LEN
 
 /** Logo upload bounds (`POST /api/v1/publish/node-profile/logo`).
  *  Raster only — SVG is deliberately excluded (scriptable content on
@@ -43,11 +44,12 @@ export { IMAGE_CONTENT_TYPES as LOGO_CONTENT_TYPES } from './image-upload'
  *  v2: the payload gained a `features` field (per-node feature
  *  toggles) — bumping the key means a stale v1 body (no `features`)
  *  is never served; orphaned v1 entries expire on their own TTL.
- *  Not bumped for `profile.tagline` (0060): a v2 body cached before
- *  the column existed lacks it, which every reader takes as "no
- *  tagline" — true of that row, since setting one goes through the
- *  PUT, which busts this key. */
-export const NODE_PROFILE_CACHE_KEY = 'node-profile:v2'
+ *  v3: `profile.tagline` (0060). Bumped for the same reason: a build
+ *  without the field that shares this namespace (a preview of an
+ *  older branch, a rollback) would otherwise refill the key with a
+ *  body lacking it, and a tagline the operator set would vanish from
+ *  the loading screen for up to the TTL. */
+export const NODE_PROFILE_CACHE_KEY = 'node-profile:v3'
 
 /** Best-effort bust of the public profile cache. */
 export async function bustNodeProfileCache(kv: KVNamespace | undefined): Promise<void> {
@@ -87,24 +89,60 @@ export interface NodeProfilePublic {
   defaultTone: string | null
   links: NodeProfileLink[]
   logoUrl: string | null
-  /** The splash-screen tagline, or null for the app's built-in one. */
+  /** The loading-screen tagline, or null for the app's built-in one. */
   tagline: string | null
   updatedBy: string
   updatedAt: string
 }
 
-/** Fetch the singleton profile row, or null when never filled in. */
+/** The columns every deploy has, before 0060's `tagline`. */
+const BASE_COLUMNS = `org_name, mission, about_md, region_focus, default_tone,
+              links_json, logo_ref, updated_by, updated_at`
+
+/**
+ * Fetch the singleton profile row, or null when never filled in.
+ *
+ * Survives a database without migration 0060 (`tagline`), and has to:
+ * a fork has CI migrations off by default (`docs/SELF_HOSTING.md`
+ * §14.3), and a preview deploy shares production's D1 while
+ * migrations apply only from `main`. Failing here would fail the
+ * public identity read, whose fallback turns every feature back on,
+ * Orbit included, on a node that turned it off — the hazard
+ * `node-settings-store` keeps 0057 off its hot path for. So the full
+ * read is tried first and, if it fails for any reason, the pre-0060
+ * columns, reading `tagline` as null. A failure that is not the
+ * schema fails the second query too and propagates.
+ */
 export async function getNodeProfile(db: D1Database): Promise<NodeProfileRow | null> {
-  const row = await db
-    .prepare(
-      `SELECT org_name, mission, about_md, region_focus, default_tone,
-              links_json, logo_ref, tagline, updated_by, updated_at
-         FROM node_profile
-        WHERE id = 1
-        LIMIT 1`,
-    )
-    .first<NodeProfileRow>()
-  return row ?? null
+  try {
+    const row = await db
+      .prepare(`SELECT ${BASE_COLUMNS}, tagline FROM node_profile WHERE id = 1 LIMIT 1`)
+      .first<NodeProfileRow>()
+    return row ?? null
+  } catch {
+    const row = await db
+      .prepare(`SELECT ${BASE_COLUMNS} FROM node_profile WHERE id = 1 LIMIT 1`)
+      .first<Omit<NodeProfileRow, 'tagline'>>()
+    return row ? { ...row, tagline: null } : null
+  }
+}
+
+/** True when this database has 0060's `tagline` column. */
+async function hasTaglineColumn(db: D1Database): Promise<boolean> {
+  try {
+    await db.prepare('SELECT tagline FROM node_profile LIMIT 0').all()
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** A tagline was given for a database that cannot store one yet. */
+export class TaglineMigrationPendingError extends Error {
+  constructor() {
+    super('node_profile.tagline is missing: apply catalog migration 0060')
+    this.name = 'TaglineMigrationPendingError'
+  }
 }
 
 /** Shape a stored row into the wire payload. A corrupt `links_json`
@@ -170,41 +208,51 @@ export interface ValidatedProfileInput {
 
 /** Upsert the singleton profile. `logo_ref` is deliberately absent
  *  from the column list — the text-fields PUT must not clear a logo
- *  set through the dedicated upload route. */
+ *  set through the dedicated upload route.
+ *
+ *  `tagline` is named only where 0060 has been applied, so the rest of
+ *  the profile still saves on a database without it
+ *  ({@link getNodeProfile}). A tagline given there throws
+ *  {@link TaglineMigrationPendingError} before anything is written,
+ *  rather than saving the rest and dropping it. The column names are
+ *  fixed strings chosen here, never input; every value is bound. */
 export async function setNodeProfile(
   db: D1Database,
   publisher: PublisherRow,
   input: ValidatedProfileInput,
   now: string = new Date().toISOString(),
 ): Promise<NodeProfileRow> {
+  const withTagline = await hasTaglineColumn(db)
+  if (!withTagline && input.tagline != null) throw new TaglineMigrationPendingError()
+  const columns = [
+    'org_name',
+    'mission',
+    'about_md',
+    'region_focus',
+    'default_tone',
+    'links_json',
+    ...(withTagline ? ['tagline'] : []),
+    'updated_by',
+    'updated_at',
+  ]
+  const values = [
+    input.org_name,
+    input.mission,
+    input.about_md,
+    input.region_focus,
+    input.default_tone,
+    input.links_json,
+    ...(withTagline ? [input.tagline] : []),
+    publisher.id,
+    now,
+  ]
   await db
     .prepare(
-      `INSERT INTO node_profile
-         (id, org_name, mission, about_md, region_focus, default_tone,
-          links_json, tagline, updated_by, updated_at)
-       VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         org_name     = excluded.org_name,
-         mission      = excluded.mission,
-         about_md     = excluded.about_md,
-         region_focus = excluded.region_focus,
-         default_tone = excluded.default_tone,
-         links_json   = excluded.links_json,
-         tagline      = excluded.tagline,
-         updated_by   = excluded.updated_by,
-         updated_at   = excluded.updated_at`,
+      `INSERT INTO node_profile (id, ${columns.join(', ')})
+       VALUES (1, ${columns.map(() => '?').join(', ')})
+       ON CONFLICT(id) DO UPDATE SET ${columns.map(c => `${c} = excluded.${c}`).join(', ')}`,
     )
-    .bind(
-      input.org_name,
-      input.mission,
-      input.about_md,
-      input.region_focus,
-      input.default_tone,
-      input.links_json,
-      input.tagline,
-      publisher.id,
-      now,
-    )
+    .bind(...values)
     .run()
   // Re-read rather than reconstructing from input so columns the
   // upsert doesn't touch (logo_ref) come back accurate.
@@ -263,22 +311,18 @@ function optionalText(
   return trimmed.length > 0 ? trimmed : null
 }
 
-/** Line breaks, tabs and the other C0/C1 control characters. A
- *  tagline is one line of display text; none of these has a place in
- *  it, and a newline would break the splash layout. */
-const TAGLINE_CONTROL_CHARS = /[\u0000-\u001F\u007F-\u009F]/
-
 /**
  * A stored tagline as it may leave the store: trimmed, non-empty,
- * within {@link PROFILE_TAGLINE_MAX_LEN} and free of control
- * characters, else null (the app's built-in tagline). The PUT already
+ * within {@link PROFILE_TAGLINE_MAX_LEN} and free of the characters
+ * `src/types/node-tagline.ts` refuses, else null (the app's built-in
+ * tagline). The PUT already
  * refuses anything else; this re-check is for a row edited by hand,
  * the same guard {@link toPublicProfile} applies to stored links.
  */
 export function storedTagline(raw: string | null | undefined): string | null {
   if (typeof raw !== 'string') return null
   const trimmed = raw.trim()
-  if (!trimmed || trimmed.length > PROFILE_TAGLINE_MAX_LEN || TAGLINE_CONTROL_CHARS.test(trimmed)) return null
+  if (!trimmed || trimmed.length > PROFILE_TAGLINE_MAX_LEN || !hasOnlyTaglineChars(trimmed)) return null
   return trimmed
 }
 
@@ -323,11 +367,11 @@ export function validateProfileInput(
   const regionFocus = optionalText(body, 'regionFocus', PROFILE_REGION_MAX_LEN, errors)
   const defaultTone = optionalText(body, 'defaultTone', PROFILE_TONE_MAX_LEN, errors)
   const tagline = optionalText(body, 'tagline', PROFILE_TAGLINE_MAX_LEN, errors)
-  if (tagline != null && TAGLINE_CONTROL_CHARS.test(tagline)) {
+  if (tagline != null && !hasOnlyTaglineChars(tagline)) {
     errors.push({
       field: 'tagline',
       code: 'invalid',
-      message: '`tagline` must be a single line of text.',
+      message: '`tagline` must be a single line of visible text, with no tabs, line breaks or invisible characters.',
     })
   }
 
