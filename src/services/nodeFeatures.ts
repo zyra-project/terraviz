@@ -5,11 +5,13 @@
  * The public SPA's read of this node's feature toggles
  * (`src/types/node-features.ts`), from the public
  * `GET /api/v1/node-profile` the blog boot and the portal chrome
- * already read — and, from the same response, the node's splash
- * tagline (`profile.tagline`), so the loading screen costs no second
- * request. The tagline has no deadline of its own here: the splash
- * (`src/ui/splashTagline.ts`) takes it whenever it arrives, and a read
- * that fails or is aborted answers null, the app's own tagline.
+ * already read — and, from the same response, the node's two display
+ * lines (`profile.tagline` for the loading screen, `profile.browseSubtitle`
+ * for the dataset browser), so neither costs a second request. The
+ * lines have no deadline of their own here: their binders
+ * (`src/ui/splashTagline.ts`, `src/ui/browseSubtitle.ts`) take each
+ * whenever it arrives, and a read that fails or is aborted answers
+ * null, the app's own line.
  *
  * Most toggles need no client read at all: a disabled feature's
  * public endpoint answers empty and the surface that renders it
@@ -80,26 +82,38 @@ export interface PendingNodeFeatures {
    * the splash, tolerates by revealing the default from CSS.
    */
   tagline: Promise<string | null>
+  /**
+   * The node's dataset-browser subtitle, on the same terms as
+   * {@link tagline} but one: a line the read delivers after a `settle`
+   * deadline aborted it answers null. The browse panel is revealed
+   * once `settle` answers, so a line landing later would swap the
+   * default under a visitor; the abort normally ends the read, and
+   * this holds when a fetch layer carries on regardless. The splash
+   * tagline keeps a late line, since the splash is still up.
+   */
+  browseSubtitle: Promise<string | null>
 }
 
 interface ProfileRead {
   features: FeatureMap
   tagline: string | null
+  browseSubtitle: string | null
 }
 
 function failedRead(): ProfileRead {
-  return { features: defaultFeatures(), tagline: null }
+  return { features: defaultFeatures(), tagline: null, browseSubtitle: null }
 }
 
-/** `profile.tagline` as a display string: a non-empty, trimmed string,
- *  or null for anything else. The node bounds and validates it; this
+/** A display line of `profile` as a display string: a non-empty,
+ *  trimmed string, or null for anything else (an older node that does
+ *  not send the field included). The node bounds and validates it; this
  *  only refuses what is not text, since it reaches the page through
  *  `textContent` either way. */
-function taglineFrom(body: unknown): string | null {
+function profileLine(body: unknown, key: 'tagline' | 'browseSubtitle'): string | null {
   if (!body || typeof body !== 'object') return null
   const profile = (body as { profile?: unknown }).profile
   if (!profile || typeof profile !== 'object') return null
-  const raw = (profile as { tagline?: unknown }).tagline
+  const raw = (profile as Record<string, unknown>)[key]
   if (typeof raw !== 'string') return null
   const trimmed = raw.trim()
   return trimmed.length > 0 ? trimmed : null
@@ -114,7 +128,11 @@ export function startNodeFeaturesRead(opts: NodeFeaturesOptions = {}): PendingNo
       const res = await fetchFn(NODE_PROFILE_PATH, { signal: controller.signal, cache: 'no-store' })
       if (!res.ok) return failedRead()
       const body = (await res.json()) as { features?: unknown } | null
-      return { features: normalizeFeatures(body?.features), tagline: taglineFrom(body) }
+      return {
+        features: normalizeFeatures(body?.features),
+        tagline: profileLine(body, 'tagline'),
+        browseSubtitle: profileLine(body, 'browseSubtitle'),
+      }
     } catch (err) {
       logger.debug('[nodeFeatures] read failed; treating every feature as enabled:', err)
       return failedRead()
@@ -137,6 +155,7 @@ export function startNodeFeaturesRead(opts: NodeFeaturesOptions = {}): PendingNo
       return settled
     },
     tagline: read.then(r => r.tagline),
+    browseSubtitle: read.then(r => (controller.signal.aborted ? null : r.browseSubtitle)),
   }
 }
 

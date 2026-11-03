@@ -40,6 +40,7 @@ import { openCreditsPanel } from './ui/creditsPanel'
 import { initChatUI, openChat, openChatSettings, notifyDatasetChanged, showChatTrigger, hideChatTrigger, closeChat, flushPendingGlobeActions, isOrbitAvailable, setOrbitAvailable } from './ui/chatUI'
 import { startNodeFeaturesRead, watchForOrbitWithdrawal, type PendingNodeFeatures } from './services/nodeFeatures'
 import { SPLASH_TAGLINE_WAIT_MS, bindSplashTagline } from './ui/splashTagline'
+import { bindBrowseSubtitle } from './ui/browseSubtitle'
 import { loadViewPreferences, saveViewPreferences, type ViewPreferences } from './utils/viewPreferences'
 import { renderColorbar, openDisplayControls, closeDisplayControls } from './ui/colorbarUI'
 import {
@@ -4349,6 +4350,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       revealAfterMs: SPLASH_TAGLINE_WAIT_MS,
       defaultReady: i18nReady,
     })
+    // The browse panel's subtitle rides the same read. It needs no
+    // hold-back because `initialize` awaits this read's `settle()`
+    // before any path reveals the browse panel (see browseSubtitle.ts):
+    // a node's own line is written in when the read answers.
+    void bindBrowseSubtitle(document.querySelector<HTMLElement>('.browse-subtitle'), nodeFeatures.browseSubtitle)
   }
   await i18nReady
 

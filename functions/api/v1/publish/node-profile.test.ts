@@ -17,6 +17,7 @@ import { onRequestGet, onRequestPut } from './node-profile'
 import { asD1, makeKV, seedFixtures } from '../_lib/test-helpers'
 import {
   NODE_PROFILE_CACHE_KEY,
+  PROFILE_BROWSE_SUBTITLE_MAX_LEN,
   PROFILE_TAGLINE_MAX_LEN,
   getNodeProfile,
   setNodeProfile,
@@ -207,9 +208,11 @@ describe('/api/v1/publish/node-profile', () => {
     expect(kept.previous_tagline).toBe('Global Systems Laboratory')
   })
 
-  it('on a database without migration 0060: saves without a tagline, refuses one with 409', async () => {
+  it('on a database without migrations 0060 or 0061: saves without the lines, refuses one with 409', async () => {
     // (The read side of the same database is in node-profile.test.ts.)
+    // A fork with CI migrations off: neither late column exists.
     const { env, sqlite } = setupEnv()
+    sqlite.prepare('ALTER TABLE node_profile DROP COLUMN browse_subtitle').run()
     sqlite.prepare('ALTER TABLE node_profile DROP COLUMN tagline').run()
 
     const refused = await onRequestPut(ctx({ env, method: 'PUT', body: VALID_BODY }))
@@ -227,7 +230,23 @@ describe('/api/v1/publish/node-profile', () => {
     const kept = await readJson<{ profile: Record<string, unknown> }>(await onRequestGet(ctx({ env, method: 'GET' })))
     expect(kept.profile.orgName).toBe('Before')
 
-    for (const body of [{ ...VALID_BODY, tagline: null }, { orgName: 'Coastal Science Center' }]) {
+    // Both lines filled in: one refusal names both.
+    const both = await onRequestPut(
+      ctx({ env, method: 'PUT', body: { ...VALID_BODY, browseSubtitle: 'Browse datasets' } }),
+    )
+    expect(both.status).toBe(409)
+    const bothErrors = (await readJson<{ errors: Array<{ field: string; code: string }> }>(both)).errors
+    expect(bothErrors.map(e => [e.field, e.code])).toEqual([
+      ['tagline', 'migration_missing'],
+      ['browseSubtitle', 'migration_missing'],
+    ])
+
+    // What the portal sends: both keys, empty.
+    for (const body of [
+      { ...VALID_BODY, tagline: null, browseSubtitle: null },
+      { ...VALID_BODY, tagline: '', browseSubtitle: '' },
+      { orgName: 'Coastal Science Center' },
+    ]) {
       const saved = await onRequestPut(ctx({ env, method: 'PUT', body }))
       expect(saved.status).toBe(200)
     }
@@ -236,6 +255,83 @@ describe('/api/v1/publish/node-profile', () => {
     )
     expect(profile.orgName).toBe('Coastal Science Center')
     expect(profile.tagline).toBeNull()
+    expect(profile.browseSubtitle).toBeNull()
+  })
+
+  it('round-trips the browse subtitle, keeps it when omitted, clears it on null', async () => {
+    const { env, sqlite } = setupEnv()
+    const subtitle = "Browse datasets from NOAA's Global Systems Laboratory"
+    await onRequestPut(ctx({ env, method: 'PUT', body: { ...VALID_BODY, browseSubtitle: `  ${subtitle} ` } }))
+    const read = async () =>
+      (await readJson<{ profile: Record<string, unknown> }>(await onRequestGet(ctx({ env, method: 'GET' })))).profile
+    expect((await read()).browseSubtitle).toBe(subtitle)
+
+    await onRequestPut(ctx({ env, method: 'PUT', body: { orgName: 'Renamed' } }))
+    expect((await read()).browseSubtitle).toBe(subtitle)
+
+    await onRequestPut(ctx({ env, method: 'PUT', body: { orgName: 'Renamed', browseSubtitle: null } }))
+    expect((await read()).browseSubtitle).toBeNull()
+
+    const rows = sqlite
+      .prepare(`SELECT metadata_json FROM audit_events WHERE action = 'node_profile.update' ORDER BY rowid`)
+      .all() as Array<{ metadata_json: string }>
+    const last = JSON.parse(rows[rows.length - 1].metadata_json) as Record<string, unknown>
+    expect(last.browse_subtitle).toBeNull()
+    expect(last.previous_browse_subtitle).toBe(subtitle)
+  })
+
+  it('refuses a browse subtitle that is too long or carries invisible characters', async () => {
+    const { env } = setupEnv()
+    const cases: Array<[unknown, string]> = [
+      ['x'.repeat(PROFILE_BROWSE_SUBTITLE_MAX_LEN + 1), 'too_long'],
+      [7, 'invalid'],
+      ['Two\nlines', 'invalid_characters'],
+      ['Zero\u200Bwidth', 'invalid_characters'],
+    ]
+    for (const [browseSubtitle, code] of cases) {
+      const res = await onRequestPut(ctx({ env, method: 'PUT', body: { orgName: 'X', browseSubtitle } }))
+      expect(res.status).toBe(400)
+      const { errors } = await readJson<{ errors: Array<{ field: string; code: string }> }>(res)
+      expect(errors).toEqual([expect.objectContaining({ field: 'browseSubtitle', code })])
+    }
+    // The longest it allows reads back whole: the read holds it to the
+    // subtitle's bound, not the tagline's.
+    const longest = 'x'.repeat(PROFILE_BROWSE_SUBTITLE_MAX_LEN)
+    const ok = await onRequestPut(ctx({ env, method: 'PUT', body: { orgName: 'X', browseSubtitle: longest } }))
+    expect(ok.status).toBe(200)
+    const { profile } = await readJson<{ profile: Record<string, unknown> }>(
+      await onRequestGet(ctx({ env, method: 'GET' })),
+    )
+    expect(profile.browseSubtitle).toBe(longest)
+  })
+
+  it('on a database with 0060 but not 0061: stores a tagline, refuses a browse subtitle with 409', async () => {
+    const { env, sqlite } = setupEnv()
+    sqlite.prepare('ALTER TABLE node_profile DROP COLUMN browse_subtitle').run()
+
+    const saved = await onRequestPut(ctx({ env, method: 'PUT', body: VALID_BODY }))
+    expect(saved.status).toBe(200)
+    const refused = await onRequestPut(
+      ctx({ env, method: 'PUT', body: { ...VALID_BODY, orgName: 'After', browseSubtitle: 'Browse datasets' } }),
+    )
+    expect(refused.status).toBe(409)
+    const { errors } = await readJson<{ errors: Array<{ field: string; code: string; message: string }> }>(refused)
+    expect(errors).toEqual([expect.objectContaining({ field: 'browseSubtitle', code: 'migration_missing' })])
+    expect(errors[0].message).toContain('0061')
+
+    // What the portal sends on this database (production's, until
+    // 0061 lands): the key, empty, which saves.
+    for (const browseSubtitle of [null, '']) {
+      const res = await onRequestPut(ctx({ env, method: 'PUT', body: { ...VALID_BODY, browseSubtitle } }))
+      expect(res.status).toBe(200)
+    }
+
+    const { profile } = await readJson<{ profile: Record<string, unknown> }>(
+      await onRequestGet(ctx({ env, method: 'GET' })),
+    )
+    expect(profile.orgName).toBe('Coastal Science Center')
+    expect(profile.tagline).toBe('Gulf Coast Science')
+    expect(profile.browseSubtitle).toBeNull()
   })
 
   it("reports its own save, not one that lands straight after it", async () => {
@@ -260,7 +356,7 @@ describe('/api/v1/publish/node-profile', () => {
         return out
       },
     } as unknown as D1Database
-    const { row, previousTagline } = await setNodeProfile(racing, ADMIN, {
+    const { row, previous } = await setNodeProfile(racing, ADMIN, {
       org_name: 'A',
       mission: null,
       about_md: null,
@@ -268,10 +364,11 @@ describe('/api/v1/publish/node-profile', () => {
       default_tone: null,
       links_json: null,
       tagline: 'Admin A',
+      browse_subtitle: undefined,
     })
     expect(row.org_name).toBe('A')
     expect(row.tagline).toBe('Admin A')
-    expect(previousTagline).toBe('Gulf Coast Science')
+    expect(previous.tagline).toBe('Gulf Coast Science')
   })
 
   it('does not mistake a one-off database error for a missing column', async () => {
@@ -332,6 +429,7 @@ describe('toPublicProfile', () => {
     links_json: null,
     logo_ref: null,
     tagline: null,
+    browse_subtitle: null,
     updated_by: 'PUB-ADMIN',
     updated_at: '2026-07-01T00:00:00.000Z',
   }
@@ -362,5 +460,12 @@ describe('toPublicProfile', () => {
     expect(toPublicProfile({ ...base, tagline: 'Two\nlines' }).tagline).toBeNull()
     expect(toPublicProfile({ ...base, tagline: 'x'.repeat(PROFILE_TAGLINE_MAX_LEN + 1) }).tagline).toBeNull()
     expect(toPublicProfile({ ...base, tagline: '   ' }).tagline).toBeNull()
+  })
+
+  it('re-checks a stored browse subtitle against its own bound', () => {
+    const long = 'x'.repeat(PROFILE_BROWSE_SUBTITLE_MAX_LEN)
+    expect(toPublicProfile({ ...base, browse_subtitle: long }).browseSubtitle).toBe(long)
+    expect(toPublicProfile({ ...base, browse_subtitle: `${long}x` }).browseSubtitle).toBeNull()
+    expect(toPublicProfile({ ...base, browse_subtitle: 'Two\nlines' }).browseSubtitle).toBeNull()
   })
 })
