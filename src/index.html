@@ -22,7 +22,12 @@
 <body>
     <a href="#container" class="skip-link" data-i18n="app.skipLink">Skip to globe visualization</a>
 
-    <div id="loading-screen" aria-live="assertive" aria-busy="true">
+    <!-- Not a live region. #loading-status (role="status", polite) is
+         the one place the splash announces anything. A live region round
+         the whole screen made the title and tagline announceable too, and
+         assertively: WebKit skips a nested aria-live="off" and uses the
+         next live ancestor, so the tagline could not opt out. -->
+    <div id="loading-screen">
         <div class="loading-globe" aria-hidden="true">
             <div class="loading-globe-inner"></div>
             <div class="loading-ring"></div>
@@ -31,8 +36,8 @@
         <h1 class="loading-title" data-i18n="app.title">Terraviz</h1>
         <!-- data-tagline="pending": held back until the node profile says
              whether this node has its own tagline (src/ui/splashTagline.ts).
-             aria-live="off": branding, never announced as a change. -->
-        <div class="loading-subtitle" data-i18n="loading.subtitle" data-tagline="pending" aria-live="off">Science On a Sphere</div>
+             Outside any live region, so its change is never announced. -->
+        <div class="loading-subtitle" data-i18n="loading.subtitle" data-tagline="pending">Science On a Sphere</div>
         <div class="loading-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Loading progress" data-i18n-aria-label="loading.progress.aria">
             <div id="loading-progress-fill" class="loading-progress-fill"></div>
         </div>

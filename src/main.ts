@@ -2229,14 +2229,23 @@ class InteractiveSphere {
 
     const screen = document.getElementById('loading-screen')
     if (screen) {
+      // The screen is not a live region, and this replaces the status
+      // line that is, so the message announces itself: `role="alert"`
+      // is spoken when it is inserted, where a polite region created
+      // already holding its text is not. Assertive because the app
+      // cannot start and nothing else on the page is current. Only the
+      // two lines that say so, not the fix-it steps, which a reader
+      // opens when they want them.
       screen.innerHTML = `
         <div style="max-width:480px;padding:2rem;text-align:center;color:#e0e0e0;font-family:system-ui,sans-serif;">
           <div style="font-size:2.5rem;margin-bottom:0.75rem;" aria-hidden="true">&#x1F30D;</div>
-          <h1 style="font-size:1.1rem;margin:0 0 0.75rem;color:#fff;">WebGL 2 is not available</h1>
-          <p style="font-size:0.8rem;line-height:1.5;color:#aaa;margin:0 0 1.25rem;">
-            This application requires WebGL 2 to render the interactive globe.
-            Your browser's GPU acceleration appears to be disabled.
-          </p>
+          <div role="alert">
+            <h1 style="font-size:1.1rem;margin:0 0 0.75rem;color:#fff;">WebGL 2 is not available</h1>
+            <p style="font-size:0.8rem;line-height:1.5;color:#aaa;margin:0 0 1.25rem;">
+              This application requires WebGL 2 to render the interactive globe.
+              Your browser's GPU acceleration appears to be disabled.
+            </p>
+          </div>
           <details style="text-align:start;font-size:0.75rem;color:#999;line-height:1.6;">
             <summary style="cursor:pointer;color:#4da6ff;margin-bottom:0.5rem;">How to fix this</summary>
             <ol style="padding-inline-start:1.25rem;margin:0;">
@@ -2270,7 +2279,6 @@ class InteractiveSphere {
     if (!isLoading) {
       const screen = document.getElementById('loading-screen')
       if (screen) {
-        screen.setAttribute('aria-busy', 'false')
         this.setLoadingStatus('Ready', 100)
         this.loadingHideTimer = setTimeout(() => {
           this.loadingHideTimer = null

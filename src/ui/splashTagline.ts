@@ -34,9 +34,10 @@
  * Turkish, `text-transform: uppercase` would dot the capital I of an
  * English name — and `dir="auto"`, so a left-to-right name ending in
  * punctuation lays out correctly on a right-to-left page. The line is
- * `aria-live="off"` in the markup: it is branding, not news, and its
- * change must not be announced from inside the splash's assertive
- * region.
+ * branding, not news, so it sits in no live region and its change is
+ * never announced: the splash speaks only through its status line.
+ * It once relied on a nested `aria-live="off"` inside an assertive
+ * splash, which WebKit skips in favour of the next live ancestor.
  *
  * {@link splashTagline} answers the same question for the VR loading
  * scene (`vrLoading.ts`), which draws this line onto a canvas.
