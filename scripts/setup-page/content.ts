@@ -466,6 +466,13 @@ npm run terraviz -- verify-deploy --server https://{{W2}}`,
           'Everyone after you lands as a pending reviewer, and you approve and promote them from the Users tab. Admins cannot demote themselves or remove the last admin, so a node always keeps one operator.',
         ],
       },
+      {
+        kind: 'note',
+        title: 'Name the node',
+        body: [
+          "Open **Settings → Node profile** (`https://{{W2}}/publish/node-profile`). Fill in **Organization name** and, optionally, **Loading screen tagline**: the short line under the Terraviz title while the app loads, such as your organization's name. Save, then upload an **Organization logo**. Left empty, the tagline reads \"Science On a Sphere\".",
+        ],
+      },
     ],
     gate: '`/publish/me` shows your email with role **admin**, and the sidebar shows the Users tab.',
     gateShort: 'You are signed in as the admin and can add the rest of your team.',

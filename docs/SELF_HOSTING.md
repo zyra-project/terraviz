@@ -1899,6 +1899,26 @@ WHERE email = 'you@your-org.org';
 ```
 </details>
 
+## 11.1 Name the node
+
+Open `https://<W2>/publish/node-profile` (**Settings → Node
+profile** in the sidebar). Fill in **Organization name** and,
+optionally, **Loading screen tagline**: the short line under the
+Terraviz title while the app loads, such as your organization's
+name. Then **Save profile**, and upload an **Organization logo**,
+which needs a saved profile first. The name and logo head the
+public blog.
+
+Left empty, the tagline reads "Science On a Sphere", translated
+for each visitor. A tagline you set is shown as written in every
+language. A change reaches visitors within a few minutes, with no
+redeploy.
+
+On a node upgraded from an earlier release, the tagline is stored
+by catalog migration 0060. Until that migration is applied, the
+page refuses a tagline and saves the rest with the field empty.
+See §14.3.
+
 ---
 
 # Phase 12 — Put content in
@@ -1996,7 +2016,7 @@ no `frame-ancestors` and no `X-Frame-Options`.
 
 **To limit it, use the portal.** Sign in as an admin, open
 `https://<W2>/publish/node-profile` (**Settings → Node profile** in
-the sidebar), and find the **Embedding** card:
+the sidebar, the page from §11.1), and find the **Embedding** card:
 
 - **Any site can embed** is the default, and how every node starts.
 - **Only sites I list** allows this node and the sites you name.
@@ -2951,11 +2971,6 @@ Tools → Privacy.
   Watch Orbit rounds/day against the free-tier ceiling.
 - **Test your own feedback loop.** File a report through the in-app
   form and confirm it appears in `/publish/feedback`.
-- **Name the node.** In the portal, **Settings → Node profile**, fill
-  in the organization name and logo, and the **splash screen
-  tagline**: the line under the TerraViz title while the app loads.
-  Left empty, it reads "Science On a Sphere". A change reaches
-  visitors within a few minutes.
 - **Add a CSP** — Phase 13, if you have not already.
 
 If something here is wrong or under-documented, please open an
