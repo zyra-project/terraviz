@@ -19,6 +19,7 @@ import {
   NODE_PROFILE_CACHE_KEY,
   PROFILE_TAGLINE_MAX_LEN,
   getNodeProfile,
+  setNodeProfile,
   toPublicProfile,
   type NodeProfileRow,
 } from '../_lib/node-profile-store'
@@ -235,6 +236,42 @@ describe('/api/v1/publish/node-profile', () => {
     )
     expect(profile.orgName).toBe('Coastal Science Center')
     expect(profile.tagline).toBeNull()
+  })
+
+  it("reports its own save, not one that lands straight after it", async () => {
+    // Admin B's save arrives the moment admin A's batch has committed.
+    // A's result, and so A's audit row, must describe A's write.
+    const { env, sqlite } = setupEnv()
+    await onRequestPut(ctx({ env, method: 'PUT', body: VALID_BODY }))
+    const db = env.CATALOG_DB as D1Database
+    let batched = false
+    let interleaved = false
+    const racing = {
+      prepare(sql: string) {
+        if (batched && !interleaved) {
+          interleaved = true
+          sqlite.prepare(`UPDATE node_profile SET tagline = 'Admin B', org_name = 'B'`).run()
+        }
+        return db.prepare(sql)
+      },
+      async batch(statements: D1PreparedStatement[]) {
+        const out = await db.batch(statements)
+        batched = true
+        return out
+      },
+    } as unknown as D1Database
+    const { row, previousTagline } = await setNodeProfile(racing, ADMIN, {
+      org_name: 'A',
+      mission: null,
+      about_md: null,
+      region_focus: null,
+      default_tone: null,
+      links_json: null,
+      tagline: 'Admin A',
+    })
+    expect(row.org_name).toBe('A')
+    expect(row.tagline).toBe('Admin A')
+    expect(previousTagline).toBe('Gulf Coast Science')
   })
 
   it('does not mistake a one-off database error for a missing column', async () => {

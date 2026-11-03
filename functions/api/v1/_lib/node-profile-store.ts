@@ -234,20 +234,21 @@ export interface ValidatedProfileInput {
  *  names are fixed strings chosen here, never input; every value is
  *  bound.
  *
- *  Returns the tagline the write replaced beside the new row, for the
- *  audit trail. Where the write sets one, it is read in the same D1
- *  batch, so in one transaction with the write: read separately, two
- *  admins saving at once could each record the same previous value,
- *  and the trail could not say which save replaced which. */
+ *  Returns the tagline the write replaced beside the row as the write
+ *  left it, both read in the same D1 batch as the write, so in one
+ *  transaction with it: read separately, two admins saving at once
+ *  could each record the same previous value, or one could report the
+ *  other's tagline as its own. */
 export async function setNodeProfile(
   db: D1Database,
   publisher: PublisherRow,
   input: ValidatedProfileInput,
   now: string = new Date().toISOString(),
 ): Promise<{ row: NodeProfileRow; previousTagline: string | null }> {
+  const hasColumn = await hasTaglineColumn(db)
   const named = input.tagline !== undefined
-  const withTagline = named && (await hasTaglineColumn(db))
-  if (named && !withTagline && input.tagline != null) throw new TaglineMigrationPendingError()
+  if (named && !hasColumn && input.tagline != null) throw new TaglineMigrationPendingError()
+  const withTagline = named && hasColumn
   const columns = [
     'org_name',
     'mission',
@@ -277,19 +278,21 @@ export async function setNodeProfile(
        ON CONFLICT(id) DO UPDATE SET ${columns.map(c => `${c} = excluded.${c}`).join(', ')}`,
     )
     .bind(...values)
-  let previousTagline: string | null = null
-  if (withTagline) {
-    const [before] = await db.batch([db.prepare('SELECT tagline FROM node_profile WHERE id = 1'), upsert])
-    previousTagline = (before.results as Array<{ tagline: string | null }> | undefined)?.[0]?.tagline ?? null
-  } else {
-    await upsert.run()
-  }
-  // Re-read rather than reconstructing from input so columns the
-  // upsert doesn't touch (logo_ref) come back accurate.
-  const row = await getNodeProfile(db)
-  if (!row) throw new Error('node_profile upsert did not persist')
-  // A write that did not name the tagline left it as it was.
-  return { row, previousTagline: withTagline ? previousTagline : row.tagline }
+  // The row as this write left it, read back rather than reconstructed
+  // from input so columns the upsert doesn't touch (logo_ref) come back
+  // accurate — and read in the same batch as the write, as the replaced
+  // tagline is, so a save landing between them cannot leak into this
+  // one's result or its audit row.
+  const after = db.prepare(`SELECT ${BASE_COLUMNS}${hasColumn ? ', tagline' : ''} FROM node_profile WHERE id = 1`)
+  const results = hasColumn
+    ? await db.batch([db.prepare('SELECT tagline FROM node_profile WHERE id = 1'), upsert, after])
+    : await db.batch([upsert, after])
+  const firstRow = <T,>(r: D1Result | undefined): T | undefined => (r?.results as T[] | undefined)?.[0]
+  const saved = firstRow<NodeProfileRow>(results[results.length - 1])
+  if (!saved) throw new Error('node_profile upsert did not persist')
+  const row: NodeProfileRow = hasColumn ? saved : { ...saved, tagline: null }
+  const previousTagline = hasColumn ? (firstRow<{ tagline: string | null }>(results[0])?.tagline ?? null) : null
+  return { row, previousTagline }
 }
 
 /**
