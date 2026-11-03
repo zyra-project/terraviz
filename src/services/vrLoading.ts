@@ -23,7 +23,7 @@
 
 import type * as THREE from 'three'
 import { getLocale } from '../i18n'
-import { splashTagline } from '../ui/splashTagline'
+import { isNodeTagline, splashTagline } from '../ui/splashTagline'
 
 /** Anchor in local-floor space — same spot the globe will occupy when ready. */
 const LOADING_POSITION = { x: 0, y: 1.3, z: -1.5 }
@@ -84,9 +84,67 @@ export interface VrLoadingHandle {
   dispose(): void
 }
 
+/** The subtitle's font, at a size in px. */
+function subtitleFont(px: number): string {
+  return `500 ${px}px system-ui, -apple-system, sans-serif`
+}
+
+/** Horizontal room for the subtitle: the canvas less a margin each side. */
+const SUBTITLE_MAX_WIDTH = TITLE_CANVAS_WIDTH - 64
+/** One-line sizes tried in turn, then two-line sizes. The two-line
+ *  sizes are smaller because the pair has to fit below the title in a
+ *  192 px canvas. */
+const SUBTITLE_ONE_LINE_PX = [32, 28, 24] as const
+const SUBTITLE_TWO_LINE_PX = [24, 22, 20] as const
+
+/** How the subtitle is laid out: its lines and their size. `squeeze`
+ *  means even the smallest size overflows, so each line is drawn with
+ *  `fillText`'s `maxWidth`, which compresses it to fit. */
+export interface SubtitleLayout {
+  lines: string[]
+  px: number
+  squeeze: boolean
+}
+
 /**
- * Draw the title canvas. "Terraviz" big uppercase + "Science On
- * a Sphere" subtitle in accent — mirrors the 2D headings.
+ * Fit the subtitle to {@link SUBTITLE_MAX_WIDTH}: one line at the
+ * largest size that fits, else two lines split at the space that
+ * balances them, at the largest size that fits, else two lines at the
+ * smallest size, squeezed. A node's tagline may be 80 characters, and
+ * at the default 32 px a canvas this wide holds about 35 capitals, so
+ * drawing it unfitted cut both ends off; squeezing it alone made a
+ * long one unreadable. `measure` is the text's width at a size, so the
+ * fit is testable without a canvas.
+ */
+export function fitSubtitle(text: string, measure: (text: string, px: number) => number): SubtitleLayout {
+  for (const px of SUBTITLE_ONE_LINE_PX) {
+    if (measure(text, px) <= SUBTITLE_MAX_WIDTH) return { lines: [text], px, squeeze: false }
+  }
+  const words = text.split(' ')
+  if (words.length < 2) {
+    return { lines: [text], px: SUBTITLE_ONE_LINE_PX[SUBTITLE_ONE_LINE_PX.length - 1], squeeze: true }
+  }
+  const smallest = SUBTITLE_TWO_LINE_PX[SUBTITLE_TWO_LINE_PX.length - 1]
+  let best: [string, string] = [words[0], words.slice(1).join(' ')]
+  let bestWidth = Infinity
+  for (let i = 1; i < words.length; i++) {
+    const pair: [string, string] = [words.slice(0, i).join(' '), words.slice(i).join(' ')]
+    const widest = Math.max(measure(pair[0], smallest), measure(pair[1], smallest))
+    if (widest < bestWidth) {
+      best = pair
+      bestWidth = widest
+    }
+  }
+  for (const px of SUBTITLE_TWO_LINE_PX) {
+    if (best.every(line => measure(line, px) <= SUBTITLE_MAX_WIDTH)) return { lines: best, px, squeeze: false }
+  }
+  return { lines: best, px: smallest, squeeze: true }
+}
+
+/**
+ * Draw the title canvas. "Terraviz" big uppercase + the subtitle in
+ * accent (the node's tagline, or "Science On a Sphere") — mirrors the
+ * 2D headings.
  */
 function drawTitle(ctx: CanvasRenderingContext2D): void {
   ctx.clearRect(0, 0, TITLE_CANVAS_WIDTH, TITLE_CANVAS_HEIGHT)
@@ -109,20 +167,33 @@ function drawTitle(ctx: CanvasRenderingContext2D): void {
   // Subtitle in accent: the same line the 2D splash shows — the
   // node's own tagline, else the `loading.subtitle` default
   // (`splashTagline`). The 2D version applies `text-transform:
-  // uppercase`; canvas can't do CSS so we uppercase via
-  // `toLocaleUpperCase(getLocale())`.
-  // Passing the i18n active locale explicitly (rather than letting
-  // the call default to the host environment's locale) is what
+  // uppercase`; canvas can't do CSS so we uppercase here. The
+  // translated default is cased with the active i18n locale passed
+  // explicitly (rather than the host environment's), which is what
   // gets the Turkish dotted/dotless-I case right when the user has
-  // picked a locale that differs from the browser default. Scripts
-  // without case (Arabic, CJK, etc.) pass through unchanged.
+  // picked a locale that differs from the browser default. A node's
+  // own tagline is not in that locale — the 2D line is marked
+  // `lang=""` for the same reason — so it is cased without one.
+  // Scripts without case (Arabic, CJK, etc.) pass through unchanged.
+  const subtitle = isNodeTagline()
+    ? splashTagline().toUpperCase()
+    : splashTagline().toLocaleUpperCase(getLocale())
   ctx.fillStyle = '#4da6ff'
-  ctx.font = '500 32px system-ui, -apple-system, sans-serif'
-  ctx.fillText(
-    splashTagline().toLocaleUpperCase(getLocale()),
-    TITLE_CANVAS_WIDTH / 2,
-    TITLE_CANVAS_HEIGHT / 2 + 64,
-  )
+  const layout = fitSubtitle(subtitle, (text, px) => {
+    ctx.font = subtitleFont(px)
+    return ctx.measureText(text).width
+  })
+  ctx.font = subtitleFont(layout.px)
+  const centreX = TITLE_CANVAS_WIDTH / 2
+  const maxWidth = layout.squeeze ? SUBTITLE_MAX_WIDTH : undefined
+  if (layout.lines.length === 1) {
+    ctx.fillText(layout.lines[0], centreX, TITLE_CANVAS_HEIGHT / 2 + 64, maxWidth)
+  } else {
+    // Two lines fill the canvas below the title: centres at +54 and
+    // +80 keep the pair clear of the title and inside the canvas.
+    ctx.fillText(layout.lines[0], centreX, TITLE_CANVAS_HEIGHT / 2 + 54, maxWidth)
+    ctx.fillText(layout.lines[1], centreX, TITLE_CANVAS_HEIGHT / 2 + 80, maxWidth)
+  }
 }
 
 /** Draw the status text canvas. */
