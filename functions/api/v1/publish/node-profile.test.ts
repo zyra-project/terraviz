@@ -7,15 +7,20 @@
  *
  * Coverage: privileged gate on writes (403), GET before any write
  * (`profile: null`), PUT → GET round-trip, validation (missing
- * orgName, non-http link), links round-trip, corrupt stored
- * links_json degrading to `[]`, and the `node_profile.update` audit
- * row.
+ * orgName, non-http link, a bad splash tagline), links round-trip,
+ * corrupt stored links_json degrading to `[]`, the public cache bust,
+ * and the `node_profile.update` audit row.
  */
 
 import { describe, expect, it } from 'vitest'
 import { onRequestGet, onRequestPut } from './node-profile'
-import { asD1, seedFixtures } from '../_lib/test-helpers'
-import { toPublicProfile, type NodeProfileRow } from '../_lib/node-profile-store'
+import { asD1, makeKV, seedFixtures } from '../_lib/test-helpers'
+import {
+  NODE_PROFILE_CACHE_KEY,
+  PROFILE_TAGLINE_MAX_LEN,
+  toPublicProfile,
+  type NodeProfileRow,
+} from '../_lib/node-profile-store'
 import type { PublisherRow } from '../_lib/publisher-store'
 
 const ADMIN: PublisherRow = {
@@ -67,6 +72,7 @@ async function readJson<T>(res: Response): Promise<T> {
 
 const VALID_BODY = {
   orgName: 'Coastal Science Center',
+  tagline: 'Gulf Coast Science',
   mission: 'We connect visitors with live ocean data.',
   aboutMd: '## About us\nA museum on the gulf coast.',
   regionFocus: 'Gulf of Mexico coast',
@@ -99,6 +105,7 @@ describe('/api/v1/publish/node-profile', () => {
     expect(profile.mission).toBe('We connect visitors with live ocean data.')
     expect(profile.regionFocus).toBe('Gulf of Mexico coast')
     expect(profile.links).toEqual([{ label: 'Website', url: 'https://coastal.example.org' }])
+    expect(profile.tagline).toBe('Gulf Coast Science')
     expect(profile.updatedBy).toBe(ADMIN.id)
 
     const audit = sqlite
@@ -116,7 +123,42 @@ describe('/api/v1/publish/node-profile', () => {
     expect(profile.orgName).toBe('Renamed Center')
     // Optional fields omitted in the second write are cleared, not kept.
     expect(profile.mission).toBeNull()
+    expect(profile.tagline).toBeNull()
     expect(profile.links).toEqual([])
+  })
+
+  it('PUT busts the public profile cache, so a new tagline reaches the splash', async () => {
+    const { env } = setupEnv()
+    const kv = makeKV()
+    await kv.put(NODE_PROFILE_CACHE_KEY, '{"profile":null}')
+    const res = await onRequestPut(ctx({ env: { ...env, CATALOG_KV: kv }, method: 'PUT', body: VALID_BODY }))
+    expect(res.status).toBe(200)
+    expect(await kv.get(NODE_PROFILE_CACHE_KEY)).toBeNull()
+  })
+
+  it('trims the tagline and stores an empty one as none', async () => {
+    const { env } = setupEnv()
+    await onRequestPut(ctx({ env, method: 'PUT', body: { orgName: 'X', tagline: '  Global Systems Laboratory  ' } }))
+    let profile = (await readJson<{ profile: Record<string, unknown> }>(await onRequestGet(ctx({ env, method: 'GET' })))).profile
+    expect(profile.tagline).toBe('Global Systems Laboratory')
+
+    await onRequestPut(ctx({ env, method: 'PUT', body: { orgName: 'X', tagline: '   ' } }))
+    profile = (await readJson<{ profile: Record<string, unknown> }>(await onRequestGet(ctx({ env, method: 'GET' })))).profile
+    expect(profile.tagline).toBeNull()
+  })
+
+  it('400 for a tagline that is too long, not text, or more than one line', async () => {
+    const { env } = setupEnv()
+    for (const tagline of ['x'.repeat(PROFILE_TAGLINE_MAX_LEN + 1), 42, 'Two\nlines', 'Tab\there']) {
+      const res = await onRequestPut(ctx({ env, method: 'PUT', body: { orgName: 'X', tagline } }))
+      expect(res.status).toBe(400)
+      const { errors } = await readJson<{ errors: Array<{ field: string }> }>(res)
+      expect(errors.map(e => e.field)).toEqual(['tagline'])
+    }
+    const ok = await onRequestPut(
+      ctx({ env, method: 'PUT', body: { orgName: 'X', tagline: 'x'.repeat(PROFILE_TAGLINE_MAX_LEN) } }),
+    )
+    expect(ok.status).toBe(200)
   })
 
   it('400 with field errors for a missing orgName and a non-http link', async () => {
@@ -157,6 +199,7 @@ describe('toPublicProfile', () => {
     default_tone: null,
     links_json: null,
     logo_ref: null,
+    tagline: null,
     updated_by: 'PUB-ADMIN',
     updated_at: '2026-07-01T00:00:00.000Z',
   }
@@ -180,5 +223,12 @@ describe('toPublicProfile', () => {
     expect(links[0]).toEqual({ label: 'ok', url: 'https://example.org' })
     expect(links.every(l => l.url.startsWith('http'))).toBe(true)
     expect(links).toHaveLength(10)
+  })
+
+  it('re-validates a stored tagline on read — a hand-edited bad one reads as none', () => {
+    expect(toPublicProfile({ ...base, tagline: 'Global Systems Laboratory' }).tagline).toBe('Global Systems Laboratory')
+    expect(toPublicProfile({ ...base, tagline: 'Two\nlines' }).tagline).toBeNull()
+    expect(toPublicProfile({ ...base, tagline: 'x'.repeat(PROFILE_TAGLINE_MAX_LEN + 1) }).tagline).toBeNull()
+    expect(toPublicProfile({ ...base, tagline: '   ' }).tagline).toBeNull()
   })
 })

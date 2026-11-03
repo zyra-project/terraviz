@@ -154,3 +154,38 @@ describe('watchForOrbitWithdrawal', () => {
     expect(fetchFn).not.toHaveBeenCalled()
   })
 })
+
+describe('startNodeFeaturesRead().tagline', () => {
+  it('reads the splash tagline from the same response as the toggles', async () => {
+    const fetchFn = vi.fn(async () =>
+      jsonResponse({ profile: { orgName: 'GSL', logoUrl: null, tagline: '  Global Systems Laboratory ' }, features: {} }),
+    )
+    const read = startNodeFeaturesRead({ fetchFn })
+    expect(await read.tagline).toBe('Global Systems Laboratory')
+    await read.settle()
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+  })
+
+  it('answers null for no profile, no tagline, or one that is not text', async () => {
+    for (const body of [
+      { profile: null },
+      { profile: { orgName: 'X', logoUrl: null } },
+      { profile: { orgName: 'X', tagline: null } },
+      { profile: { orgName: 'X', tagline: '   ' } },
+      { profile: { orgName: 'X', tagline: 42 } },
+    ]) {
+      expect(await startNodeFeaturesRead({ fetchFn: async () => jsonResponse(body) }).tagline).toBeNull()
+    }
+  })
+
+  it('answers null when the read fails', async () => {
+    const failing = startNodeFeaturesRead({
+      fetchFn: async () => {
+        throw new TypeError('Failed to fetch')
+      },
+    })
+    expect(await failing.tagline).toBeNull()
+    const refused = startNodeFeaturesRead({ fetchFn: async () => jsonResponse({ profile: { tagline: 'X' } }, 500) })
+    expect(await refused.tagline).toBeNull()
+  })
+})

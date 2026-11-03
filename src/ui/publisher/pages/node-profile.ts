@@ -9,8 +9,8 @@
  *
  * Privileged-only (admin / service) — the API enforces 403 on writes;
  * gating here avoids a fill-then-reject round-trip. Renders a single
- * form (org name, mission, about markdown, region focus, default
- * tone, outbound links) backed by `GET`/`PUT
+ * form (org name, splash tagline, mission, about markdown, region
+ * focus, default tone, outbound links) backed by `GET`/`PUT
  * /api/v1/publish/node-profile`. Mirrors `featured-hero.ts`. Below it,
  * two node-settings cards with their own Saves: Features (admins
  * only) and Embedding (`components/embedding-card.ts`, read-only for
@@ -36,6 +36,7 @@ const MISSION_MAX_LEN = 1_000
 const ABOUT_MAX_LEN = 10_000
 const REGION_MAX_LEN = 200
 const TONE_MAX_LEN = 200
+const TAGLINE_MAX_LEN = 80
 const MAX_LINKS = 10
 
 interface MeResponse {
@@ -57,6 +58,8 @@ interface ProfileResponse {
     defaultTone: string | null
     links: ProfileLink[]
     logoUrl: string | null
+    /** Absent from an older deploy's response. */
+    tagline?: string | null
   } | null
 }
 
@@ -179,6 +182,14 @@ function renderForm(mount: HTMLElement, state: FormState): void {
     id: 'nodeprofile-org',
     maxLength: ORG_NAME_MAX_LEN,
     value: profile?.orgName ?? '',
+  })
+  // The public app's loading-screen line (`src/ui/splashTagline.ts`).
+  const tagline = el('input', {
+    type: 'text',
+    className: 'publisher-nodeprofile-input',
+    id: 'nodeprofile-tagline',
+    maxLength: TAGLINE_MAX_LEN,
+    value: profile?.tagline ?? '',
   })
   const mission = el('textarea', {
     className: 'publisher-nodeprofile-textarea',
@@ -305,6 +316,7 @@ function renderForm(mount: HTMLElement, state: FormState): void {
     }
     const body = {
       orgName: name,
+      tagline: tagline.value.trim() || null,
       mission: mission.value.trim() || null,
       aboutMd: about.value.trim() || null,
       regionFocus: region.value.trim() || null,
@@ -352,6 +364,11 @@ function renderForm(mount: HTMLElement, state: FormState): void {
     heading(t('publisher.nodeProfile.section.organization')),
     buildLogo(state),
     labelled(t('publisher.nodeProfile.orgName'), orgName),
+    labelledWithHint(
+      t('publisher.nodeProfile.tagline'),
+      tagline,
+      t('publisher.nodeProfile.tagline.hint', { default: t('loading.subtitle') }),
+    ),
     labelledWithHint(
       t('publisher.nodeProfile.regionFocus'),
       region,

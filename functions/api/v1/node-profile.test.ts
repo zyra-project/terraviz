@@ -24,7 +24,11 @@ function setupEnv() {
   return { sqlite, kv, env: { CATALOG_DB: asD1(sqlite), CATALOG_KV: kv, MOCK_R2: 'true' } }
 }
 
-function insertProfile(sqlite: ReturnType<typeof seedFixtures>, logoRef: string | null = null): void {
+function insertProfile(
+  sqlite: ReturnType<typeof seedFixtures>,
+  logoRef: string | null = null,
+  tagline: string | null = null,
+): void {
   // `node_profile.updated_by` is an FK to publishers.
   sqlite
     .prepare(
@@ -34,10 +38,10 @@ function insertProfile(sqlite: ReturnType<typeof seedFixtures>, logoRef: string 
     .run()
   sqlite
     .prepare(
-      `INSERT INTO node_profile (id, org_name, logo_ref, updated_by, updated_at)
-       VALUES (1, 'The Zyra Project', ?, 'PUB-1', '2026-06-01T00:00:00.000Z')`,
+      `INSERT INTO node_profile (id, org_name, logo_ref, tagline, updated_by, updated_at)
+       VALUES (1, 'The Zyra Project', ?, ?, 'PUB-1', '2026-06-01T00:00:00.000Z')`,
     )
-    .run(logoRef)
+    .run(logoRef, tagline)
 }
 
 function ctx(env: Record<string, unknown>) {
@@ -55,7 +59,7 @@ function ctx(env: Record<string, unknown>) {
 }
 
 interface Payload {
-  profile: { orgName: string; logoUrl: string | null } | null
+  profile: { orgName: string; logoUrl: string | null; tagline: string | null } | null
   features: FeatureMap
 }
 
@@ -92,7 +96,22 @@ describe('GET /api/v1/node-profile', () => {
     const { env, sqlite } = setupEnv()
     insertProfile(sqlite)
     const payload = await readJson(await onRequestGet(ctx(env)))
-    expect(payload.profile).toEqual({ orgName: 'The Zyra Project', logoUrl: null })
+    expect(payload.profile).toEqual({ orgName: 'The Zyra Project', logoUrl: null, tagline: null })
+  })
+
+  it('carries the splash tagline the operator set', async () => {
+    const { env, sqlite } = setupEnv()
+    insertProfile(sqlite, null, 'Global Systems Laboratory')
+    const payload = await readJson(await onRequestGet(ctx(env)))
+    expect(payload.profile?.tagline).toBe('Global Systems Laboratory')
+  })
+
+  it('withholds a stored tagline the PUT would refuse (a hand-edited row)', async () => {
+    const { env, sqlite } = setupEnv()
+    insertProfile(sqlite, null, 'Two\nlines')
+    const payload = await readJson(await onRequestGet(ctx(env)))
+    expect(payload.profile?.orgName).toBe('The Zyra Project')
+    expect(payload.profile?.tagline).toBeNull()
   })
 
   it('degrades to profile: null (no-store) when the table is missing', async () => {

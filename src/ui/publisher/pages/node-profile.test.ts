@@ -4,7 +4,7 @@
 /**
  * Tests for the /publish/node-profile page — form rendering from the
  * stored profile, the privileged gate, and the PUT body the Save
- * button composes (incl. link rows). The Embedding card's own
+ * button composes (incl. link rows and the splash tagline). The Embedding card's own
  * behaviour is in `components/embedding-card.test.ts`; here, only
  * who sees it and how.
  */
@@ -42,6 +42,7 @@ const PROFILE = {
     defaultTone: 'educational',
     links: [{ label: 'Website', url: 'https://coastal.example.org' }],
     logoUrl: null,
+    tagline: 'Gulf Coast Science',
   },
 }
 
@@ -55,7 +56,25 @@ describe('renderNodeProfilePage', () => {
     })
     expect((mount.querySelector('#nodeprofile-org') as HTMLInputElement).value).toBe('Coastal Science Center')
     expect((mount.querySelector('#nodeprofile-mission') as HTMLTextAreaElement).value).toBe('Connect visitors with live ocean data.')
+    expect((mount.querySelector('#nodeprofile-tagline') as HTMLInputElement).value).toBe('Gulf Coast Science')
     expect(mount.querySelectorAll('.publisher-nodeprofile-link-row')).toHaveLength(1)
+  })
+
+  it('labels the tagline field and names the default it falls back to', async () => {
+    const mount = document.createElement('div')
+    await renderNodeProfilePage(mount, {
+      // An older deploy's profile carries no `tagline` at all.
+      fetchFn: mockFetch({
+        '/publish/me': ADMIN_ME,
+        '/publish/node-profile': { profile: { ...PROFILE.profile, tagline: undefined } },
+      }),
+    })
+    const input = mount.querySelector('#nodeprofile-tagline') as HTMLInputElement
+    expect(input.value).toBe('')
+    expect(input.maxLength).toBe(80)
+    const field = input.closest('label')!
+    expect(field.textContent).toContain('Splash screen tagline')
+    expect(field.querySelector('.publisher-nodeprofile-hint')!.textContent).toContain('“Science On a Sphere”')
   })
 
   it('mounts the markdown toolbar on About and Preview renders sanitized markdown', async () => {
@@ -224,6 +243,7 @@ describe('renderNodeProfilePage', () => {
 
     ;(mount.querySelector('#nodeprofile-org') as HTMLInputElement).value = 'New Node'
     ;(mount.querySelector('#nodeprofile-mission') as HTMLTextAreaElement).value = 'A mission.'
+    ;(mount.querySelector('#nodeprofile-tagline') as HTMLInputElement).value = '  Global Systems Laboratory '
     // Add one link row and fill it.
     const buttons = Array.from(mount.querySelectorAll('button'))
     const addLink = buttons.find(b => b.textContent === 'Add link')!
@@ -239,6 +259,7 @@ describe('renderNodeProfilePage', () => {
     expect(capture.puts[0].url).toContain('/api/v1/publish/node-profile')
     expect(capture.puts[0].body).toEqual({
       orgName: 'New Node',
+      tagline: 'Global Systems Laboratory',
       mission: 'A mission.',
       aboutMd: null,
       regionFocus: null,

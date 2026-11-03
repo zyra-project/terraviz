@@ -10,7 +10,9 @@
  *       generated drafts every author sees), writes are privileged.
  * PUT → Upsert the profile. Body:
  *       `{ orgName, mission?, aboutMd?, regionFocus?, defaultTone?,
- *          links? }` — only `orgName` is mandatory. 400 `{ errors }`
+ *          tagline?, links? }` — only `orgName` is mandatory, and an
+ *       omitted optional field is cleared (the PUT replaces the
+ *       whole profile). 400 `{ errors }`
  *       for body problems (the publisher-API field-error envelope).
  *
  * Writes require a privileged caller (admin / service) and are
@@ -88,9 +90,11 @@ export const onRequestPut: PagesFunction<CatalogEnv> = async context => {
       org_name: row.org_name,
       has_mission: row.mission != null,
       has_about: row.about_md != null,
+      has_tagline: row.tagline != null,
     }),
   })
-  // The public identity read serves orgName — keep it fresh.
+  // The public identity read serves orgName and the splash tagline —
+  // keep it fresh.
   await bustNodeProfileCache(context.env.CATALOG_KV)
 
   const env = context.env

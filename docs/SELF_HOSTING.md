@@ -2951,6 +2951,11 @@ Tools → Privacy.
   Watch Orbit rounds/day against the free-tier ceiling.
 - **Test your own feedback loop.** File a report through the in-app
   form and confirm it appears in `/publish/feedback`.
+- **Name the node.** In the portal, **Settings → Node profile**, fill
+  in the organization name and logo, and the **splash screen
+  tagline**: the line under the TerraViz title while the app loads.
+  Left empty, it reads "Science On a Sphere". A change reaches
+  visitors within a few minutes.
 - **Add a CSP** — Phase 13, if you have not already.
 
 If something here is wrong or under-documented, please open an

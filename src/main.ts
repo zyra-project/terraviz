@@ -39,6 +39,7 @@ import { closeOutputUI, initOutputUI, openOutputUI } from './ui/outputUI'
 import { openCreditsPanel } from './ui/creditsPanel'
 import { initChatUI, openChat, openChatSettings, notifyDatasetChanged, showChatTrigger, hideChatTrigger, closeChat, flushPendingGlobeActions, isOrbitAvailable, setOrbitAvailable } from './ui/chatUI'
 import { startNodeFeaturesRead, watchForOrbitWithdrawal } from './services/nodeFeatures'
+import { bindSplashTagline } from './ui/splashTagline'
 import { loadViewPreferences, saveViewPreferences, type ViewPreferences } from './utils/viewPreferences'
 import { renderColorbar, openDisplayControls, closeDisplayControls } from './ui/colorbarUI'
 import {
@@ -446,6 +447,11 @@ class InteractiveSphere {
     // the `catch` can open the panel even when boot failed. `settle`
     // never rejects and bounds its own wait (all-enabled past it).
     const nodeFeatures = startNodeFeaturesRead()
+    // The splash's tagline rides the same read: the node's own line
+    // (set in its profile) or the app's default, revealed once the read
+    // answers. Not awaited — boot carries on, and the splash's CSS
+    // reveals the default by itself if the read is slow.
+    void bindSplashTagline(document.querySelector<HTMLElement>('.loading-subtitle'), nodeFeatures.tagline)
 
     try {
       this.setLoading(true)

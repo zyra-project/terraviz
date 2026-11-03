@@ -7,7 +7,8 @@
  * The operator-authored "about the host organization" context — the
  * Phase 3d blog generator grounds AI drafts in it so they speak in
  * the node's own voice, and it is generic enough to back other
- * identity surfaces later (about page, footer attribution).
+ * identity surfaces (the public app's splash tagline today; an about
+ * page or footer attribution later).
  *
  * Mirrors `hero-override-store.ts`: pure data access + body
  * validation; authorisation lives in the route handler
@@ -26,6 +27,9 @@ export const PROFILE_REGION_MAX_LEN = 200
 export const PROFILE_TONE_MAX_LEN = 200
 export const PROFILE_MAX_LINKS = 10
 export const PROFILE_LINK_LABEL_MAX_LEN = 100
+/** The splash-screen tagline sits on one line under the app title,
+ *  uppercased and letter-spaced, so it is kept short. */
+export const PROFILE_TAGLINE_MAX_LEN = 80
 
 /** Logo upload bounds (`POST /api/v1/publish/node-profile/logo`).
  *  Raster only — SVG is deliberately excluded (scriptable content on
@@ -38,7 +42,11 @@ export { IMAGE_CONTENT_TYPES as LOGO_CONTENT_TYPES } from './image-upload'
 /** KV key for the public `GET /api/v1/node-profile` payload.
  *  v2: the payload gained a `features` field (per-node feature
  *  toggles) — bumping the key means a stale v1 body (no `features`)
- *  is never served; orphaned v1 entries expire on their own TTL. */
+ *  is never served; orphaned v1 entries expire on their own TTL.
+ *  Not bumped for `profile.tagline` (0060): a v2 body cached before
+ *  the column existed lacks it, which every reader takes as "no
+ *  tagline" — true of that row, since setting one goes through the
+ *  PUT, which busts this key. */
 export const NODE_PROFILE_CACHE_KEY = 'node-profile:v2'
 
 /** Best-effort bust of the public profile cache. */
@@ -60,6 +68,7 @@ export interface NodeProfileRow {
   default_tone: string | null
   links_json: string | null
   logo_ref: string | null
+  tagline: string | null
   updated_by: string
   updated_at: string
 }
@@ -78,6 +87,8 @@ export interface NodeProfilePublic {
   defaultTone: string | null
   links: NodeProfileLink[]
   logoUrl: string | null
+  /** The splash-screen tagline, or null for the app's built-in one. */
+  tagline: string | null
   updatedBy: string
   updatedAt: string
 }
@@ -87,7 +98,7 @@ export async function getNodeProfile(db: D1Database): Promise<NodeProfileRow | n
   const row = await db
     .prepare(
       `SELECT org_name, mission, about_md, region_focus, default_tone,
-              links_json, logo_ref, updated_by, updated_at
+              links_json, logo_ref, tagline, updated_by, updated_at
          FROM node_profile
         WHERE id = 1
         LIMIT 1`,
@@ -140,6 +151,7 @@ export function toPublicProfile(
     defaultTone: row.default_tone,
     links,
     logoUrl: row.logo_ref && resolveLogoRef ? resolveLogoRef(row.logo_ref) : null,
+    tagline: storedTagline(row.tagline),
     updatedBy: row.updated_by,
     updatedAt: row.updated_at,
   }
@@ -153,6 +165,7 @@ export interface ValidatedProfileInput {
   region_focus: string | null
   default_tone: string | null
   links_json: string | null
+  tagline: string | null
 }
 
 /** Upsert the singleton profile. `logo_ref` is deliberately absent
@@ -168,8 +181,8 @@ export async function setNodeProfile(
     .prepare(
       `INSERT INTO node_profile
          (id, org_name, mission, about_md, region_focus, default_tone,
-          links_json, updated_by, updated_at)
-       VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+          links_json, tagline, updated_by, updated_at)
+       VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          org_name     = excluded.org_name,
          mission      = excluded.mission,
@@ -177,6 +190,7 @@ export async function setNodeProfile(
          region_focus = excluded.region_focus,
          default_tone = excluded.default_tone,
          links_json   = excluded.links_json,
+         tagline      = excluded.tagline,
          updated_by   = excluded.updated_by,
          updated_at   = excluded.updated_at`,
     )
@@ -187,6 +201,7 @@ export async function setNodeProfile(
       input.region_focus,
       input.default_tone,
       input.links_json,
+      input.tagline,
       publisher.id,
       now,
     )
@@ -248,6 +263,25 @@ function optionalText(
   return trimmed.length > 0 ? trimmed : null
 }
 
+/** Line breaks, tabs and the other C0/C1 control characters. A
+ *  tagline is one line of display text; none of these has a place in
+ *  it, and a newline would break the splash layout. */
+const TAGLINE_CONTROL_CHARS = /[\u0000-\u001F\u007F-\u009F]/
+
+/**
+ * A stored tagline as it may leave the store: trimmed, non-empty,
+ * within {@link PROFILE_TAGLINE_MAX_LEN} and free of control
+ * characters, else null (the app's built-in tagline). The PUT already
+ * refuses anything else; this re-check is for a row edited by hand,
+ * the same guard {@link toPublicProfile} applies to stored links.
+ */
+export function storedTagline(raw: string | null | undefined): string | null {
+  if (typeof raw !== 'string') return null
+  const trimmed = raw.trim()
+  if (!trimmed || trimmed.length > PROFILE_TAGLINE_MAX_LEN || TAGLINE_CONTROL_CHARS.test(trimmed)) return null
+  return trimmed
+}
+
 /** True for the http(s) URLs the profile is allowed to link out to —
  *  the same scheme guard the events surfaces apply to source URLs. */
 function isHttpUrl(value: string): boolean {
@@ -261,7 +295,9 @@ function isHttpUrl(value: string): boolean {
 
 /**
  * Validate a `PUT /api/v1/publish/node-profile` body. Only `orgName`
- * is mandatory — a node can fill in the rest over time. Links are
+ * is mandatory — a node can fill in the rest over time. `tagline` is
+ * optional like the other prose fields, and like them is cleared by a
+ * PUT that omits it (the PUT replaces the whole profile). Links are
  * validated as `{label, url}` pairs with http(s) urls; anything else
  * is a field error rather than a silent drop, so the operator sees
  * what the form refused.
@@ -286,6 +322,14 @@ export function validateProfileInput(
   const aboutMd = optionalText(body, 'aboutMd', PROFILE_ABOUT_MAX_LEN, errors)
   const regionFocus = optionalText(body, 'regionFocus', PROFILE_REGION_MAX_LEN, errors)
   const defaultTone = optionalText(body, 'defaultTone', PROFILE_TONE_MAX_LEN, errors)
+  const tagline = optionalText(body, 'tagline', PROFILE_TAGLINE_MAX_LEN, errors)
+  if (tagline != null && TAGLINE_CONTROL_CHARS.test(tagline)) {
+    errors.push({
+      field: 'tagline',
+      code: 'invalid',
+      message: '`tagline` must be a single line of text.',
+    })
+  }
 
   let linksJson: string | null = null
   if (body.links != null) {
@@ -323,6 +367,7 @@ export function validateProfileInput(
       region_focus: regionFocus,
       default_tone: defaultTone,
       links_json: linksJson,
+      tagline,
     },
   }
 }

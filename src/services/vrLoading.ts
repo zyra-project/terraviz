@@ -22,7 +22,8 @@
  */
 
 import type * as THREE from 'three'
-import { getLocale, t } from '../i18n'
+import { getLocale } from '../i18n'
+import { splashTagline } from '../ui/splashTagline'
 
 /** Anchor in local-floor space — same spot the globe will occupy when ready. */
 const LOADING_POSITION = { x: 0, y: 1.3, z: -1.5 }
@@ -105,9 +106,11 @@ function drawTitle(ctx: CanvasRenderingContext2D): void {
     x += letterWidth * 0.55 + letterSpacingPx
   }
 
-  // Subtitle in accent. The 2D version applies `text-transform:
-  // uppercase` to the same `loading.subtitle` key; canvas can't
-  // do CSS so we uppercase via `toLocaleUpperCase(getLocale())`.
+  // Subtitle in accent: the same line the 2D splash shows — the
+  // node's own tagline, else the `loading.subtitle` default
+  // (`splashTagline`). The 2D version applies `text-transform:
+  // uppercase`; canvas can't do CSS so we uppercase via
+  // `toLocaleUpperCase(getLocale())`.
   // Passing the i18n active locale explicitly (rather than letting
   // the call default to the host environment's locale) is what
   // gets the Turkish dotted/dotless-I case right when the user has
@@ -116,7 +119,7 @@ function drawTitle(ctx: CanvasRenderingContext2D): void {
   ctx.fillStyle = '#4da6ff'
   ctx.font = '500 32px system-ui, -apple-system, sans-serif'
   ctx.fillText(
-    t('loading.subtitle').toLocaleUpperCase(getLocale()),
+    splashTagline().toLocaleUpperCase(getLocale()),
     TITLE_CANVAS_WIDTH / 2,
     TITLE_CANVAS_HEIGHT / 2 + 64,
   )
