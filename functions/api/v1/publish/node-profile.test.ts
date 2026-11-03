@@ -17,6 +17,7 @@ import { onRequestGet, onRequestPut } from './node-profile'
 import { asD1, makeKV, seedFixtures } from '../_lib/test-helpers'
 import {
   NODE_PROFILE_CACHE_KEY,
+  PROFILE_BROWSE_SUBTITLE_MAX_LEN,
   PROFILE_TAGLINE_MAX_LEN,
   getNodeProfile,
   setNodeProfile,
@@ -238,6 +239,70 @@ describe('/api/v1/publish/node-profile', () => {
     expect(profile.tagline).toBeNull()
   })
 
+  it('round-trips the browse subtitle, keeps it when omitted, clears it on null', async () => {
+    const { env, sqlite } = setupEnv()
+    const subtitle = "Browse datasets from NOAA's Global Systems Laboratory"
+    await onRequestPut(ctx({ env, method: 'PUT', body: { ...VALID_BODY, browseSubtitle: `  ${subtitle} ` } }))
+    const read = async () =>
+      (await readJson<{ profile: Record<string, unknown> }>(await onRequestGet(ctx({ env, method: 'GET' })))).profile
+    expect((await read()).browseSubtitle).toBe(subtitle)
+
+    await onRequestPut(ctx({ env, method: 'PUT', body: { orgName: 'Renamed' } }))
+    expect((await read()).browseSubtitle).toBe(subtitle)
+
+    await onRequestPut(ctx({ env, method: 'PUT', body: { orgName: 'Renamed', browseSubtitle: null } }))
+    expect((await read()).browseSubtitle).toBeNull()
+
+    const rows = sqlite
+      .prepare(`SELECT metadata_json FROM audit_events WHERE action = 'node_profile.update' ORDER BY rowid`)
+      .all() as Array<{ metadata_json: string }>
+    const last = JSON.parse(rows[rows.length - 1].metadata_json) as Record<string, unknown>
+    expect(last.browse_subtitle).toBeNull()
+    expect(last.previous_browse_subtitle).toBe(subtitle)
+  })
+
+  it('refuses a browse subtitle that is too long or carries invisible characters', async () => {
+    const { env } = setupEnv()
+    const cases: Array<[unknown, string]> = [
+      ['x'.repeat(PROFILE_BROWSE_SUBTITLE_MAX_LEN + 1), 'too_long'],
+      [7, 'invalid'],
+      ['Two\nlines', 'invalid_characters'],
+      ['Zero\u200Bwidth', 'invalid_characters'],
+    ]
+    for (const [browseSubtitle, code] of cases) {
+      const res = await onRequestPut(ctx({ env, method: 'PUT', body: { orgName: 'X', browseSubtitle } }))
+      expect(res.status).toBe(400)
+      const { errors } = await readJson<{ errors: Array<{ field: string; code: string }> }>(res)
+      expect(errors).toEqual([expect.objectContaining({ field: 'browseSubtitle', code })])
+    }
+    const ok = await onRequestPut(
+      ctx({ env, method: 'PUT', body: { orgName: 'X', browseSubtitle: 'x'.repeat(PROFILE_BROWSE_SUBTITLE_MAX_LEN) } }),
+    )
+    expect(ok.status).toBe(200)
+  })
+
+  it('on a database with 0060 but not 0061: stores a tagline, refuses a browse subtitle with 409', async () => {
+    const { env, sqlite } = setupEnv()
+    sqlite.prepare('ALTER TABLE node_profile DROP COLUMN browse_subtitle').run()
+
+    const saved = await onRequestPut(ctx({ env, method: 'PUT', body: VALID_BODY }))
+    expect(saved.status).toBe(200)
+    const refused = await onRequestPut(
+      ctx({ env, method: 'PUT', body: { ...VALID_BODY, orgName: 'After', browseSubtitle: 'Browse datasets' } }),
+    )
+    expect(refused.status).toBe(409)
+    const { errors } = await readJson<{ errors: Array<{ field: string; code: string; message: string }> }>(refused)
+    expect(errors).toEqual([expect.objectContaining({ field: 'browseSubtitle', code: 'migration_missing' })])
+    expect(errors[0].message).toContain('0061')
+
+    const { profile } = await readJson<{ profile: Record<string, unknown> }>(
+      await onRequestGet(ctx({ env, method: 'GET' })),
+    )
+    expect(profile.orgName).toBe('Coastal Science Center')
+    expect(profile.tagline).toBe('Gulf Coast Science')
+    expect(profile.browseSubtitle).toBeNull()
+  })
+
   it("reports its own save, not one that lands straight after it", async () => {
     // Admin B's save arrives the moment admin A's batch has committed.
     // A's result, and so A's audit row, must describe A's write.
@@ -260,7 +325,7 @@ describe('/api/v1/publish/node-profile', () => {
         return out
       },
     } as unknown as D1Database
-    const { row, previousTagline } = await setNodeProfile(racing, ADMIN, {
+    const { row, previous } = await setNodeProfile(racing, ADMIN, {
       org_name: 'A',
       mission: null,
       about_md: null,
@@ -268,10 +333,11 @@ describe('/api/v1/publish/node-profile', () => {
       default_tone: null,
       links_json: null,
       tagline: 'Admin A',
+      browse_subtitle: undefined,
     })
     expect(row.org_name).toBe('A')
     expect(row.tagline).toBe('Admin A')
-    expect(previousTagline).toBe('Gulf Coast Science')
+    expect(previous.tagline).toBe('Gulf Coast Science')
   })
 
   it('does not mistake a one-off database error for a missing column', async () => {
@@ -332,6 +398,7 @@ describe('toPublicProfile', () => {
     links_json: null,
     logo_ref: null,
     tagline: null,
+    browse_subtitle: null,
     updated_by: 'PUB-ADMIN',
     updated_at: '2026-07-01T00:00:00.000Z',
   }

@@ -264,6 +264,7 @@ describe('buildBlogPrompt / parseDraftReply', () => {
         links_json: JSON.stringify([{ label: 'TerraViz', url: 'https://terraviz.zyra-project.org/' }]),
         logo_ref: null,
         tagline: null,
+        browse_subtitle: null,
         updated_by: 'P1',
         updated_at: '2026-07-01T00:00:00.000Z',
       },

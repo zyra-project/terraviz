@@ -10,13 +10,14 @@
  *       generated drafts every author sees), writes are privileged.
  * PUT → Upsert the profile. Body:
  *       `{ orgName, mission?, aboutMd?, regionFocus?, defaultTone?,
- *          tagline?, links? }` — only `orgName` is mandatory. An
- *       omitted `mission` / `aboutMd` / `regionFocus` /
- *       `defaultTone` / `links` is cleared; an omitted `tagline`, a
- *       later field, is kept (null or "" clears it), and so is the
- *       logo, which has its own route. 409 `{ errors }` with code
- *       `migration_missing` for a non-empty tagline on a database
- *       without migration 0060. 400 `{ errors }`
+ *          tagline?, browseSubtitle?, links? }` — only `orgName` is
+ *       mandatory. An omitted `mission` / `aboutMd` / `regionFocus` /
+ *       `defaultTone` / `links` is cleared; an omitted `tagline` or
+ *       `browseSubtitle`, later fields, is kept (null or "" clears
+ *       it), and so is the logo, which has its own route. 409
+ *       `{ errors }` with code `migration_missing` for a non-empty
+ *       `tagline` on a database without migration 0060, or a
+ *       non-empty `browseSubtitle` without 0061. 400 `{ errors }`
  *       for body problems (the publisher-API field-error envelope).
  *
  * Writes require a privileged caller (admin / service) and are
@@ -26,7 +27,7 @@
 import type { CatalogEnv } from '../_lib/env'
 import type { PublisherData } from './_middleware'
 import {
-  TaglineMigrationPendingError,
+  ProfileMigrationPendingError,
   bustNodeProfileCache,
   getNodeProfile,
   setNodeProfile,
@@ -83,26 +84,27 @@ export const onRequestPut: PagesFunction<CatalogEnv> = async context => {
     })
   }
 
-  // The write reports what the tagline replaced, read in the same
-  // transaction: it is the profile's most widely shown text, so a
-  // defaced or cleared one should be traceable, and restorable, from
-  // the audit alone.
+  // The write reports what the display lines replaced, read in the
+  // same transaction: they are the profile's most widely shown text,
+  // so a defaced or cleared one should be traceable, and restorable,
+  // from the audit alone.
   let row
-  let previousTagline: string | null
+  let previous
   try {
-    ;({ row, previousTagline } = await setNodeProfile(context.env.CATALOG_DB, publisher, validation.value))
+    ;({ row, previous } = await setNodeProfile(context.env.CATALOG_DB, publisher, validation.value))
   } catch (err) {
-    if (!(err instanceof TaglineMigrationPendingError)) throw err
+    if (!(err instanceof ProfileMigrationPendingError)) throw err
     // Field-shaped 409, as publish-while-transcoding is, so the
     // portal shows the message rather than a generic failure.
+    const what = err.field === 'tagline' ? 'a tagline' : 'a dataset browser subtitle'
+    const field = err.field === 'tagline' ? 'the tagline' : 'the subtitle'
     return new Response(
       JSON.stringify({
         errors: [
           {
-            field: 'tagline',
+            field: err.field,
             code: 'migration_missing',
-            message:
-              'This node cannot store a tagline until catalog migration 0060 is applied. Apply pending migrations, or save with the tagline empty.',
+            message: `This node cannot store ${what} until catalog migration ${err.migration} is applied. Apply pending migrations, or save with ${field} empty.`,
           },
         ],
       }),
@@ -121,11 +123,13 @@ export const onRequestPut: PagesFunction<CatalogEnv> = async context => {
       has_mission: row.mission != null,
       has_about: row.about_md != null,
       tagline: row.tagline,
-      previous_tagline: previousTagline,
+      previous_tagline: previous.tagline,
+      browse_subtitle: row.browse_subtitle,
+      previous_browse_subtitle: previous.browse_subtitle,
     }),
   })
-  // The public identity read serves orgName and the splash tagline —
-  // keep it fresh.
+  // The public identity read serves orgName and the two display
+  // lines — keep it fresh.
   await bustNodeProfileCache(context.env.CATALOG_KV)
 
   const env = context.env

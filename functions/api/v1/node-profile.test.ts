@@ -59,7 +59,12 @@ function ctx(env: Record<string, unknown>) {
 }
 
 interface Payload {
-  profile: { orgName: string; logoUrl: string | null; tagline: string | null } | null
+  profile: {
+    orgName: string
+    logoUrl: string | null
+    tagline: string | null
+    browseSubtitle: string | null
+  } | null
   features: FeatureMap
 }
 
@@ -96,7 +101,12 @@ describe('GET /api/v1/node-profile', () => {
     const { env, sqlite } = setupEnv()
     insertProfile(sqlite)
     const payload = await readJson(await onRequestGet(ctx(env)))
-    expect(payload.profile).toEqual({ orgName: 'The Zyra Project', logoUrl: null, tagline: null })
+    expect(payload.profile).toEqual({
+      orgName: 'The Zyra Project',
+      logoUrl: null,
+      tagline: null,
+      browseSubtitle: null,
+    })
   })
 
   it('carries the loading-screen tagline the operator set', async () => {
@@ -104,6 +114,23 @@ describe('GET /api/v1/node-profile', () => {
     insertProfile(sqlite, null, 'Global Systems Laboratory')
     const payload = await readJson(await onRequestGet(ctx(env)))
     expect(payload.profile?.tagline).toBe('Global Systems Laboratory')
+  })
+
+  it('carries the dataset browser subtitle the operator set', async () => {
+    const { env, sqlite } = setupEnv()
+    insertProfile(sqlite)
+    sqlite.prepare(`UPDATE node_profile SET browse_subtitle = 'Browse datasets from GSL'`).run()
+    const payload = await readJson(await onRequestGet(ctx(env)))
+    expect(payload.profile?.browseSubtitle).toBe('Browse datasets from GSL')
+  })
+
+  it('reads the tagline on a database with 0060 but not 0061', async () => {
+    const { env, sqlite } = setupEnv()
+    insertProfile(sqlite, null, 'Global Systems Laboratory')
+    sqlite.prepare('ALTER TABLE node_profile DROP COLUMN browse_subtitle').run()
+    const payload = await readJson(await onRequestGet(ctx(env)))
+    expect(payload.profile?.tagline).toBe('Global Systems Laboratory')
+    expect(payload.profile?.browseSubtitle).toBeNull()
   })
 
   it('withholds a stored tagline the PUT would refuse (a hand-edited row)', async () => {
@@ -155,7 +182,12 @@ describe('GET /api/v1/node-profile', () => {
       .run(JSON.stringify({ orbit: false }))
     sqlite.prepare('ALTER TABLE node_profile DROP COLUMN tagline').run()
     const payload = await readJson(await onRequestGet(ctx(env)))
-    expect(payload.profile).toEqual({ orgName: 'The Zyra Project', logoUrl: null, tagline: null })
+    expect(payload.profile).toEqual({
+      orgName: 'The Zyra Project',
+      logoUrl: null,
+      tagline: null,
+      browseSubtitle: null,
+    })
     expect(payload.features.orbit).toBe(false)
   })
 

@@ -460,7 +460,7 @@ CREATE TABLE node_profile (
   -- splices new columns onto the last column-def line of the stored
   -- CREATE TABLE text, and a trailing comment would read as if it
   -- documented the appended column (see 0024's reviewed_by).
-  updated_at   TEXT NOT NULL, logo_ref TEXT, tagline TEXT,
+  updated_at   TEXT NOT NULL, logo_ref TEXT, tagline TEXT, browse_subtitle TEXT,
   FOREIGN KEY (updated_by) REFERENCES publishers(id)
 );
 

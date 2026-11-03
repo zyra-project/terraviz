@@ -27,7 +27,7 @@ import { buildEmbeddingCard, embedPolicyFromSettings, embedProblemFromSettings }
 import type { EmbedPolicyProblem, NodeSettingsResponse } from '../types'
 import type { EmbedPolicy } from '../../../types/node-embedding'
 import { renderMarkdown } from '../../../services/markdownRenderer'
-import { TAGLINE_MAX_LEN, cleanTaglineInput } from '../../../types/node-tagline'
+import { TAGLINE_MAX_LEN, cleanDisplayLineInput } from '../../../types/node-profile-lines'
 
 /** Keep in sync with the backend store bounds
  *  (`functions/api/v1/_lib/node-profile-store.ts`). The API is the
@@ -318,7 +318,7 @@ function renderForm(mount: HTMLElement, state: FormState): void {
       return
     }
     // Shown back in the field, so what it reads is what is stored.
-    tagline.value = cleanTaglineInput(tagline.value)
+    tagline.value = cleanDisplayLineInput(tagline.value)
     const body = {
       orgName: name,
       tagline: tagline.value || null,
