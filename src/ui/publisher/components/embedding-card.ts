@@ -622,6 +622,9 @@ export function buildEmbeddingCard(options: EmbeddingCardOptions): HTMLElement {
 
       const body = { embedding: { mode, origins: mode === 'list' ? sent.map(s => s.value) : [] } }
       saving.set(true)
+      // Said in words too: a screen reader does not reliably announce
+      // aria-disabled changing on the focused button.
+      status.textContent = t('publisher.nodeProfile.saving')
       void publisherSend<NodeSettingsResponse>(SETTINGS_ENDPOINT, body, { method: 'PUT', fetchFn })
         .then(res => {
           if (res.ok) {

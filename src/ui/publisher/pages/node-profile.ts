@@ -334,6 +334,9 @@ function renderForm(mount: HTMLElement, state: FormState): void {
       links: collectLinks(),
     }
     saving.set(true)
+    // A screen reader does not reliably announce aria-disabled changing
+    // on the focused button, so the status line says it is working.
+    status.textContent = t('publisher.nodeProfile.saving')
     void publisherSend<ProfileResponse>(PROFILE_ENDPOINT, body, { method: 'PUT', fetchFn: state.fetchFn })
       .then(res => {
         if (res.ok) {
@@ -457,6 +460,7 @@ function buildFeaturesCard(features: FeatureMap, state: FormState): HTMLElement 
     const body: { features: Record<string, boolean> } = { features: {} }
     for (const [key, checkbox] of checkboxes) body.features[key] = checkbox.checked
     saving.set(true)
+    status.textContent = t('publisher.nodeProfile.saving')
     void publisherSend<{ features: unknown }>(SETTINGS_ENDPOINT, body, { method: 'PUT', fetchFn: state.fetchFn })
       .then(res => {
         if (res.ok) {
@@ -551,22 +555,33 @@ function buildLogo(state: FormState): HTMLElement {
     className: 'publisher-button publisher-button-small',
     textContent: t('publisher.nodeProfile.logo.choose'),
   })
-  // Busy rather than disabled while an upload runs, so focus stays on
-  // the button; a press then opens no second picker.
-  const choosing = busyButton(chooseBtn)
-  chooseBtn.addEventListener('click', () => {
-    if (choosing.busy) return
-    fileInput.click()
-  })
-
   const removeBtn = el('button', {
     type: 'button',
     className: 'publisher-button publisher-button-small',
     textContent: t('publisher.nodeProfile.logo.remove'),
   })
-  const removing = busyButton(removeBtn)
+
+  // One logo operation at a time: an upload and a delete in flight
+  // together would leave the preview showing whichever landed last. Both
+  // buttons are marked busy rather than disabled, so focus stays where
+  // it was, and both refuse a press until the operation ends.
+  const logoButtons = [busyButton(chooseBtn), busyButton(removeBtn)]
+  const logoBusy = (): boolean => logoButtons.some(b => b.busy)
+  const setLogoBusy = (next: boolean): void => logoButtons.forEach(b => b.set(next))
+
+  chooseBtn.addEventListener('click', () => {
+    if (logoBusy()) return
+    fileInput.click()
+  })
+
   const refreshRemove = (): void => {
-    removeBtn.hidden = logoUrl === null
+    const hide = logoUrl === null
+    // Hiding the focused Remove drops its focus to <body> as surely as
+    // disabling it would; hand focus to Choose, the control left in its
+    // place. A delete hides it, and so does an upload answered with a
+    // URL that is not http(s).
+    if (hide && document.activeElement === removeBtn) chooseBtn.focus()
+    removeBtn.hidden = hide
   }
   refreshRemove()
 
@@ -582,7 +597,7 @@ function buildLogo(state: FormState): HTMLElement {
       setStatus(t('publisher.nodeProfile.logo.error.size'), true)
       return
     }
-    choosing.set(true)
+    setLogoBusy(true)
     setStatus(t('publisher.nodeProfile.logo.uploading'), false)
     void file
       .arrayBuffer()
@@ -620,24 +635,20 @@ function buildLogo(state: FormState): HTMLElement {
       })
       .catch(() => setStatus(t('publisher.nodeProfile.error.generic'), true))
       .finally(() => {
-        choosing.set(false)
+        setLogoBusy(false)
       })
   })
 
   removeBtn.addEventListener('click', () => {
-    if (removing.busy) return
-    removing.set(true)
+    if (logoBusy()) return
+    setLogoBusy(true)
+    setStatus(t('publisher.nodeProfile.logo.removing'), false)
     void publisherSend<{ logoUrl: string | null }>(LOGO_ENDPOINT, {}, { method: 'DELETE', fetchFn: state.fetchFn })
       .then(res => {
         if (res.ok) {
-          // Remove hides itself once there is no logo, which would drop
-          // its focus to <body> as surely as disabling it; hand focus to
-          // Choose, the control left in its place.
-          const hadFocus = document.activeElement === removeBtn
           logoUrl = null
           renderPreview()
           refreshRemove()
-          if (hadFocus) chooseBtn.focus()
           setStatus(t('publisher.nodeProfile.logo.removed'), false)
           return
         }
@@ -649,7 +660,7 @@ function buildLogo(state: FormState): HTMLElement {
         }
       })
       .finally(() => {
-        removing.set(false)
+        setLogoBusy(false)
       })
   })
 

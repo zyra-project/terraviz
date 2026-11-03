@@ -1576,10 +1576,20 @@
 
 /* A button whose action is running stays focusable (aria-disabled,
    not disabled — `components/busy-button.ts`), so it says so by look
-   instead. */
+   instead. Not by `opacity`: that dims the focus ring with the rest of
+   the button, and this is the button the user's focus was kept on. As a
+   later rule of equal specificity it also beats `:hover`, so a busy
+   button does not light up under the pointer. */
 .publisher-button[aria-disabled='true'] {
-  opacity: 0.6;
+  background: var(--white-o05, rgba(255, 255, 255, 0.05));
+  color: var(--color-text-muted, #999999);
   cursor: progress;
+}
+@media (forced-colors: active) {
+  .publisher-button[aria-disabled='true'] {
+    color: GrayText;
+    border-color: GrayText;
+  }
 }
 
 /* Compact variant — replaces the former `.publisher-btn-small`. */

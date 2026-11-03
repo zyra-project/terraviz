@@ -411,6 +411,31 @@ function holdMethod(base: (input: RequestInfo | URL, init?: RequestInit) => Prom
   return { fetchFn: fetchFn as unknown as typeof fetch, release, sent }
 }
 
+/** The page's reads with a logo already set, answering an upload with a
+ *  new logo and a delete with none (or with `deleteStatus`). */
+function logoFetch(opts: { deleteStatus?: number } = {}) {
+  const withLogo = { profile: { ...PROFILE.profile, logoUrl: 'https://assets.example.org/logo.png' } }
+  return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = typeof input === 'string' ? input : (input as Request).url
+    const method = init?.method ?? 'GET'
+    let status = 200
+    let body: unknown = {}
+    if (method === 'DELETE') {
+      status = opts.deleteStatus ?? 200
+      body = status < 400 ? { logoUrl: null } : { error: 'server_error' }
+    } else if (method === 'POST') body = { logoUrl: 'https://assets.example.org/new-logo.png' }
+    else if (url.includes('/publish/me')) body = ADMIN_ME
+    else if (url.includes('/publish/node-profile')) body = withLogo
+    return {
+      ok: status < 400,
+      status,
+      type: 'basic',
+      json: async () => body,
+      text: async () => JSON.stringify(body),
+    } as unknown as Response
+  }
+}
+
 function button(mount: HTMLElement, text: string): HTMLButtonElement {
   return Array.from(mount.querySelectorAll<HTMLButtonElement>('button')).find(b => b.textContent === text)!
 }
@@ -433,6 +458,9 @@ describe('renderNodeProfilePage — buttons stay focusable while busy', () => {
     expect(save.disabled).toBe(false)
     expect(save.getAttribute('aria-disabled')).toBe('true')
     expect(document.activeElement).toBe(save)
+    // Said in words, since aria-disabled changing on the focused button
+    // is not reliably announced.
+    expect(mount.querySelector('.publisher-nodeprofile-status')!.textContent).toBe('Saving…')
     // A second press while busy sends nothing more.
     save.click()
     held.release()
@@ -466,6 +494,7 @@ describe('renderNodeProfilePage — buttons stay focusable while busy', () => {
     expect(save.disabled).toBe(false)
     expect(save.getAttribute('aria-disabled')).toBe('true')
     expect(document.activeElement).toBe(save)
+    expect(save.closest('.publisher-nodeprofile-actions')!.querySelector('[role="status"]')!.textContent).toBe('Saving…')
     save.click()
     held.release()
     await until(() => !save.hasAttribute('aria-disabled'), 'the save to finish')
@@ -510,16 +539,7 @@ describe('renderNodeProfilePage — buttons stay focusable while busy', () => {
   })
 
   it('Remove logo sends one DELETE while busy, then hands focus to Choose as it hides', async () => {
-    const withLogo = { profile: { ...PROFILE.profile, logoUrl: 'https://assets.example.org/logo.png' } }
-    const base = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = typeof input === 'string' ? input : (input as Request).url
-      let body: unknown = {}
-      if (init?.method === 'DELETE') body = { logoUrl: null }
-      else if (url.includes('/publish/me')) body = ADMIN_ME
-      else if (url.includes('/publish/node-profile')) body = withLogo
-      return { ok: true, status: 200, type: 'basic', json: async () => body, text: async () => JSON.stringify(body) } as unknown as Response
-    })
-    const held = holdMethod(base, 'DELETE')
+    const held = holdMethod(logoFetch(), 'DELETE')
     const mount = document.createElement('div')
     document.body.replaceChildren(mount)
     await renderNodeProfilePage(mount, { fetchFn: held.fetchFn })
@@ -531,10 +551,69 @@ describe('renderNodeProfilePage — buttons stay focusable while busy', () => {
     expect(remove.disabled).toBe(false)
     expect(remove.getAttribute('aria-disabled')).toBe('true')
     expect(document.activeElement).toBe(remove)
+    expect(mount.querySelector('.publisher-nodeprofile-logo-status')!.textContent).toBe('Removing…')
     remove.click()
     held.release()
     await until(() => remove.hidden, 'Remove to hide once the logo is gone')
     expect(held.sent()).toBe(1)
     expect(document.activeElement).toBe(button(mount, 'Choose image…'))
+    expect(mount.querySelector('.publisher-nodeprofile-logo-status')!.textContent).toBe('Logo removed.')
+  })
+
+  it('Remove logo leaves focus alone when the user has moved on before it hides', async () => {
+    const held = holdMethod(logoFetch(), 'DELETE')
+    const mount = document.createElement('div')
+    document.body.replaceChildren(mount)
+    await renderNodeProfilePage(mount, { fetchFn: held.fetchFn })
+
+    const remove = button(mount, 'Remove logo')
+    remove.focus()
+    remove.click()
+    await until(() => held.sent() === 1, 'the DELETE to start')
+    const orgName = mount.querySelector('#nodeprofile-org') as HTMLInputElement
+    orgName.focus()
+    held.release()
+    await until(() => remove.hidden, 'Remove to hide once the logo is gone')
+    expect(document.activeElement).toBe(orgName)
+  })
+
+  it('a failed Remove keeps the button, and focus on it', async () => {
+    const held = holdMethod(logoFetch({ deleteStatus: 500 }), 'DELETE')
+    const mount = document.createElement('div')
+    document.body.replaceChildren(mount)
+    await renderNodeProfilePage(mount, { fetchFn: held.fetchFn })
+
+    const remove = button(mount, 'Remove logo')
+    remove.focus()
+    remove.click()
+    held.release()
+    await until(() => held.sent() === 1 && !remove.hasAttribute('aria-disabled'), 'the failed delete to finish')
+    expect(remove.hidden).toBe(false)
+    expect(document.activeElement).toBe(remove)
+    const logoStatus = mount.querySelector('.publisher-nodeprofile-logo-status')!
+    expect(logoStatus.classList.contains('publisher-nodeprofile-status-error')).toBe(true)
+    expect(mount.querySelector('.publisher-nodeprofile-logo-img')).toBeTruthy()
+  })
+
+  it('treats the logo block as one operation: Remove is busy while an upload runs', async () => {
+    const held = holdMethod(logoFetch(), 'POST')
+    const mount = document.createElement('div')
+    document.body.replaceChildren(mount)
+    await renderNodeProfilePage(mount, { fetchFn: held.fetchFn })
+
+    const fileInput = mount.querySelector('#nodeprofile-logo-file') as HTMLInputElement
+    const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'logo.png', { type: 'image/png' })
+    Object.defineProperty(fileInput, 'files', { value: [file], configurable: true })
+    fileInput.dispatchEvent(new Event('change'))
+    await until(() => held.sent() === 1, 'the logo upload to start')
+    const remove = button(mount, 'Remove logo')
+    expect(remove.getAttribute('aria-disabled')).toBe('true')
+    remove.click()
+    held.release()
+    await until(() => !remove.hasAttribute('aria-disabled'), 'the upload to finish')
+    expect(held.fetchFn).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ method: 'DELETE' }))
+    expect(mount.querySelector('.publisher-nodeprofile-logo-img')!.getAttribute('src')).toBe(
+      'https://assets.example.org/new-logo.png',
+    )
   })
 })
