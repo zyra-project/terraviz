@@ -9,7 +9,7 @@
  *
  * Privileged-only (admin / service) — the API enforces 403 on writes;
  * gating here avoids a fill-then-reject round-trip. Renders a single
- * form (org name, splash tagline, mission, about markdown, region
+ * form (org name, loading-screen tagline, mission, about markdown, region
  * focus, default tone, outbound links) backed by `GET`/`PUT
  * /api/v1/publish/node-profile`. Mirrors `featured-hero.ts`. Below it,
  * two node-settings cards with their own Saves: Features (admins
@@ -27,6 +27,7 @@ import { buildEmbeddingCard, embedPolicyFromSettings, embedProblemFromSettings }
 import type { EmbedPolicyProblem, NodeSettingsResponse } from '../types'
 import type { EmbedPolicy } from '../../../types/node-embedding'
 import { renderMarkdown } from '../../../services/markdownRenderer'
+import { TAGLINE_MAX_LEN, cleanTaglineInput } from '../../../types/node-tagline'
 
 /** Keep in sync with the backend store bounds
  *  (`functions/api/v1/_lib/node-profile-store.ts`). The API is the
@@ -36,7 +37,6 @@ const MISSION_MAX_LEN = 1_000
 const ABOUT_MAX_LEN = 10_000
 const REGION_MAX_LEN = 200
 const TONE_MAX_LEN = 200
-const TAGLINE_MAX_LEN = 80
 const MAX_LINKS = 10
 
 interface MeResponse {
@@ -184,6 +184,9 @@ function renderForm(mount: HTMLElement, state: FormState): void {
     value: profile?.orgName ?? '',
   })
   // The public app's loading-screen line (`src/ui/splashTagline.ts`).
+  // Its character rules are shared with the API
+  // (`src/types/node-tagline.ts`); Save cleans what was pasted so a
+  // tab or an invisible character cannot draw an error nobody can see.
   const tagline = el('input', {
     type: 'text',
     className: 'publisher-nodeprofile-input',
@@ -316,7 +319,7 @@ function renderForm(mount: HTMLElement, state: FormState): void {
     }
     const body = {
       orgName: name,
-      tagline: tagline.value.trim() || null,
+      tagline: cleanTaglineInput(tagline.value) || null,
       mission: mission.value.trim() || null,
       aboutMd: about.value.trim() || null,
       regionFocus: region.value.trim() || null,
@@ -367,7 +370,7 @@ function renderForm(mount: HTMLElement, state: FormState): void {
     labelledWithHint(
       t('publisher.nodeProfile.tagline'),
       tagline,
-      t('publisher.nodeProfile.tagline.hint', { default: t('loading.subtitle') }),
+      t('publisher.nodeProfile.tagline.hint', { max: TAGLINE_MAX_LEN, default: t('loading.subtitle') }),
     ),
     labelledWithHint(
       t('publisher.nodeProfile.regionFocus'),
@@ -659,12 +662,20 @@ function labelled(label: string, control: HTMLElement): HTMLElement {
   return wrap
 }
 
-/** `labelled` plus a muted help line under the control (deck fields
- *  like "Geographic focus" carry a one-line hint). */
+/** A label, the control, and a muted help line under it (deck fields
+ *  like "Geographic focus" carry a one-line hint). The hint sits
+ *  outside the `<label>` and is tied to the control by
+ *  `aria-describedby`: inside, it became part of the field's
+ *  accessible name, read in full on every focus and in forms lists.
+ *  The control needs an `id`. */
 function labelledWithHint(label: string, control: HTMLElement, hint: string): HTMLElement {
-  const wrap = labelled(label, control)
-  wrap.append(el('span', { className: 'publisher-nodeprofile-hint', textContent: hint }))
-  return wrap
+  const hintId = `${control.id}-hint`
+  control.setAttribute('aria-describedby', hintId)
+  return el('div', { className: 'publisher-nodeprofile-field' }, [
+    el('label', { className: 'publisher-field-label', htmlFor: control.id, textContent: label }),
+    control,
+    el('span', { className: 'publisher-nodeprofile-hint', id: hintId, textContent: hint }),
+  ])
 }
 
 /** The About field: label + Edit/Preview toggle on one row, then the

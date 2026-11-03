@@ -12,6 +12,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { FEATURE_KEYS } from '../../../types/node-features'
 import { renderNodeProfilePage } from './node-profile'
+import { until } from '../../../test-utils'
 
 interface RouteMap {
   [pathPrefix: string]: unknown
@@ -72,9 +73,27 @@ describe('renderNodeProfilePage', () => {
     const input = mount.querySelector('#nodeprofile-tagline') as HTMLInputElement
     expect(input.value).toBe('')
     expect(input.maxLength).toBe(80)
-    const field = input.closest('label')!
-    expect(field.textContent).toContain('Splash screen tagline')
-    expect(field.querySelector('.publisher-nodeprofile-hint')!.textContent).toContain('“Science On a Sphere”')
+    // Named by its label alone; the hint describes it rather than
+    // lengthening its name.
+    const label = mount.querySelector('label[for="nodeprofile-tagline"]')!
+    expect(label.textContent).toBe('Loading screen tagline (optional)')
+    expect(input.closest('label')).toBeNull()
+    const hint = mount.querySelector(`#${input.getAttribute('aria-describedby')}`)!
+    expect(hint.textContent).toContain('up to 80 characters')
+    expect(hint.textContent).toContain('“Science On a Sphere”')
+  })
+
+  it('cleans a pasted tab or invisible character out of the tagline before saving', async () => {
+    const capture = { puts: [] as Array<{ url: string; body: unknown }> }
+    const mount = document.createElement('div')
+    await renderNodeProfilePage(mount, {
+      fetchFn: mockFetch({ '/publish/me': ADMIN_ME, '/publish/node-profile': { profile: null } }, capture),
+    })
+    ;(mount.querySelector('#nodeprofile-org') as HTMLInputElement).value = 'GSL'
+    ;(mount.querySelector('#nodeprofile-tagline') as HTMLInputElement).value = 'Global\tSystems\u200B Laboratory'
+    Array.from(mount.querySelectorAll('button')).find(b => b.textContent === 'Save profile')!.click()
+    await until(() => capture.puts.length === 1, 'the profile PUT')
+    expect((capture.puts[0].body as { tagline: string }).tagline).toBe('Global Systems Laboratory')
   })
 
   it('mounts the markdown toolbar on About and Preview renders sanitized markdown', async () => {
