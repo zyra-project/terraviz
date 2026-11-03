@@ -7,7 +7,8 @@
  * The operator-authored "about the host organization" context — the
  * Phase 3d blog generator grounds AI drafts in it so they speak in
  * the node's own voice, and it is generic enough to back other
- * identity surfaces (the public app's loading-screen tagline today; an about
+ * identity surfaces (the public app's loading-screen tagline and
+ * dataset-browser subtitle today; an about
  * page or footer attribution later).
  *
  * Mirrors `hero-override-store.ts`: pure data access + body
@@ -17,7 +18,11 @@
  */
 
 import type { PublisherRow } from './publisher-store'
-import { TAGLINE_MAX_LEN, hasOnlyTaglineChars } from '../../../../src/types/node-tagline'
+import {
+  BROWSE_SUBTITLE_MAX_LEN,
+  TAGLINE_MAX_LEN,
+  hasOnlyDisplayLineChars,
+} from '../../../../src/types/node-profile-lines'
 
 /** Bounds keep the stored payload (and any prompt it is interpolated
  *  into) small. Generous for prose, hostile to paste-bombs. */
@@ -28,9 +33,10 @@ export const PROFILE_REGION_MAX_LEN = 200
 export const PROFILE_TONE_MAX_LEN = 200
 export const PROFILE_MAX_LINKS = 10
 export const PROFILE_LINK_LABEL_MAX_LEN = 100
-/** The loading-screen tagline's bound, and its character rules, live
- *  in `src/types/node-tagline.ts`, shared with the portal form. */
+/** The display lines' bounds, and their character rules, live in
+ *  `src/types/node-profile-lines.ts`, shared with the portal form. */
 export const PROFILE_TAGLINE_MAX_LEN = TAGLINE_MAX_LEN
+export const PROFILE_BROWSE_SUBTITLE_MAX_LEN = BROWSE_SUBTITLE_MAX_LEN
 
 /** Logo upload bounds (`POST /api/v1/publish/node-profile/logo`).
  *  Raster only — SVG is deliberately excluded (scriptable content on
@@ -48,8 +54,9 @@ export { IMAGE_CONTENT_TYPES as LOGO_CONTENT_TYPES } from './image-upload'
  *  without the field that shares this namespace (a preview of an
  *  older branch, a rollback) would otherwise refill the key with a
  *  body lacking it, and a tagline the operator set would vanish from
- *  the loading screen for up to the TTL. */
-export const NODE_PROFILE_CACHE_KEY = 'node-profile:v3'
+ *  the loading screen for up to the TTL.
+ *  v4: `profile.browseSubtitle` (0061), for the same reason. */
+export const NODE_PROFILE_CACHE_KEY = 'node-profile:v4'
 
 /** Best-effort bust of the public profile cache. */
 export async function bustNodeProfileCache(kv: KVNamespace | undefined): Promise<void> {
@@ -71,6 +78,7 @@ export interface NodeProfileRow {
   links_json: string | null
   logo_ref: string | null
   tagline: string | null
+  browse_subtitle: string | null
   updated_by: string
   updated_at: string
 }
@@ -91,43 +99,75 @@ export interface NodeProfilePublic {
   logoUrl: string | null
   /** The loading-screen tagline, or null for the app's built-in one. */
   tagline: string | null
+  /** The dataset browser's subtitle, or null for the app's built-in one. */
+  browseSubtitle: string | null
   updatedBy: string
   updatedAt: string
 }
 
-/** The columns every deploy has, before 0060's `tagline`. */
+/** The columns every deploy has, before the display lines were added. */
 const BASE_COLUMNS = `org_name, mission, about_md, region_focus, default_tone,
               links_json, logo_ref, updated_by, updated_at`
+
+/** A display line added to the profile after 0028, one migration each
+ *  (see `src/types/node-profile-lines.ts`). Each is optional on a PUT
+ *  and kept when omitted ({@link validateProfileInput}), and each may
+ *  be missing from a database its migration has not reached. */
+export type LateLineColumn = 'tagline' | 'browse_subtitle'
+
+interface LateLine {
+  column: LateLineColumn
+  /** The field's name on the wire. */
+  field: 'tagline' | 'browseSubtitle'
+  migration: string
+  maxLen: number
+}
+
+const LATE_LINES: readonly LateLine[] = [
+  { column: 'tagline', field: 'tagline', migration: '0060', maxLen: TAGLINE_MAX_LEN },
+  { column: 'browse_subtitle', field: 'browseSubtitle', migration: '0061', maxLen: BROWSE_SUBTITLE_MAX_LEN },
+]
 
 /**
  * Fetch the singleton profile row, or null when never filled in.
  *
- * Survives a database without migration 0060 (`tagline`), and has to:
- * a fork has CI migrations off by default (`docs/SELF_HOSTING.md`
- * §14.3), and a preview deploy shares production's D1 while
- * migrations apply only from `main`. Failing here would fail the
- * public identity read, whose fallback turns every feature back on,
- * Orbit included, on a node that turned it off — the hazard
- * `node-settings-store` keeps 0057 off its hot path for. So the full
- * read is tried first and, **only** if it fails for a missing column,
- * the pre-0060 columns, reading `tagline` as null. Any other failure
- * propagates: a one-off error answered with the fallback would cache
- * "no tagline" for the TTL, and hand the portal an empty field whose
- * next Save clears the real one.
+ * Survives a database without the display lines' migrations (0060,
+ * 0061), and has to: a fork has CI migrations off by default
+ * (`docs/SELF_HOSTING.md` §14.3), and a preview deploy shares
+ * production's D1 while migrations apply only from `main`. Failing
+ * here would fail the public identity read, whose fallback turns every
+ * feature back on, Orbit included, on a node that turned it off — the
+ * hazard `node-settings-store` keeps 0057 off its hot path for. So the
+ * full read is tried first and, **only** if it fails for a missing
+ * column, the columns this database has, reading the rest as null.
+ * Any other failure propagates: a one-off error answered with the
+ * fallback would cache "no tagline" for the TTL, and hand the portal
+ * an empty field whose next Save clears the real one.
  */
 export async function getNodeProfile(db: D1Database): Promise<NodeProfileRow | null> {
+  const all = LATE_LINES.map(l => l.column)
   try {
-    const row = await db
-      .prepare(`SELECT ${BASE_COLUMNS}, tagline FROM node_profile WHERE id = 1 LIMIT 1`)
-      .first<NodeProfileRow>()
+    const row = await db.prepare(selectProfileSql(all)).first<NodeProfileRow>()
     return row ?? null
   } catch (err) {
     if (!isMissingColumn(err)) throw err
-    const row = await db
-      .prepare(`SELECT ${BASE_COLUMNS} FROM node_profile WHERE id = 1 LIMIT 1`)
-      .first<Omit<NodeProfileRow, 'tagline'>>()
-    return row ? { ...row, tagline: null } : null
+    const present = await presentLateColumns(db)
+    const row = await db.prepare(selectProfileSql(present)).first<Partial<NodeProfileRow>>()
+    return row ? withAbsentLines(row) : null
   }
+}
+
+/** The profile read, naming only the late columns given. The names are
+ *  fixed strings from {@link LATE_LINES}, never input. */
+function selectProfileSql(late: readonly LateLineColumn[]): string {
+  return `SELECT ${[BASE_COLUMNS, ...late].join(', ')} FROM node_profile WHERE id = 1 LIMIT 1`
+}
+
+/** A row read without some late columns, with each absent one null. */
+function withAbsentLines(row: Partial<NodeProfileRow>): NodeProfileRow {
+  const out = { ...row } as NodeProfileRow
+  for (const { column } of LATE_LINES) if (out[column] === undefined) out[column] = null
+  return out
 }
 
 /** SQLite's error for a column the table does not have, as D1 and
@@ -136,24 +176,40 @@ function isMissingColumn(err: unknown): boolean {
   return err instanceof Error && /no such column/i.test(err.message)
 }
 
-/** True when this database has 0060's `tagline` column. Any failure
- *  other than the missing column propagates, so a one-off error is
- *  not reported as a pending migration. */
-async function hasTaglineColumn(db: D1Database): Promise<boolean> {
-  try {
-    await db.prepare('SELECT tagline FROM node_profile LIMIT 0').all()
-    return true
-  } catch (err) {
-    if (isMissingColumn(err)) return false
-    throw err
+/** The late columns this database has. Any failure other than a
+ *  missing column propagates, so a one-off error is not reported as a
+ *  pending migration. */
+async function presentLateColumns(db: D1Database): Promise<LateLineColumn[]> {
+  const present: LateLineColumn[] = []
+  for (const { column } of LATE_LINES) {
+    try {
+      await db.prepare(`SELECT ${column} FROM node_profile LIMIT 0`).all()
+      present.push(column)
+    } catch (err) {
+      if (!isMissingColumn(err)) throw err
+    }
   }
+  return present
 }
 
-/** A tagline was given for a database that cannot store one yet. */
-export class TaglineMigrationPendingError extends Error {
-  constructor() {
-    super('node_profile.tagline is missing: apply catalog migration 0060')
-    this.name = 'TaglineMigrationPendingError'
+/** One display line a database cannot store yet: its wire field and
+ *  the migration that adds its column. */
+export interface PendingLine {
+  field: LateLine['field']
+  migration: string
+}
+
+/** Display lines were given for a database that cannot store them yet.
+ *  Every such line is listed, so one refusal names them all rather than
+ *  the operator emptying one field to meet the next. */
+export class ProfileMigrationPendingError extends Error {
+  constructor(readonly pending: readonly PendingLine[]) {
+    super(
+      `node_profile cannot store ${pending
+        .map(p => `${LATE_LINES.find(l => l.field === p.field)?.column} (migration ${p.migration})`)
+        .join(', ')}`,
+    )
+    this.name = 'ProfileMigrationPendingError'
   }
 }
 
@@ -202,6 +258,7 @@ export function toPublicProfile(
     links,
     logoUrl: row.logo_ref && resolveLogoRef ? resolveLogoRef(row.logo_ref) : null,
     tagline: storedTagline(row.tagline),
+    browseSubtitle: storedBrowseSubtitle(row.browse_subtitle),
     updatedBy: row.updated_by,
     updatedAt: row.updated_at,
   }
@@ -215,40 +272,54 @@ export interface ValidatedProfileInput {
   region_focus: string | null
   default_tone: string | null
   links_json: string | null
-  /** `undefined` (the body did not name it) keeps the stored value;
-   *  null clears it. */
+  /** For each display line, `undefined` (the body did not name it)
+   *  keeps the stored value; null clears it. */
   tagline: string | null | undefined
+  browse_subtitle: string | null | undefined
 }
+
+/** The display lines a write replaced, by column, for the audit trail:
+ *  null for a line this database cannot hold. */
+export type PreviousLines = Record<LateLineColumn, string | null>
 
 /** Upsert the singleton profile. `logo_ref` is deliberately absent
  *  from the column list — the text-fields PUT must not clear a logo
  *  set through the dedicated upload route.
  *
- *  `tagline` is named only when the body named it, so a writer that
- *  predates the field leaves it as it was (see
- *  {@link validateProfileInput}), and only where 0060 has been
+ *  Each display line is named only when the body named it, so a writer
+ *  that predates the field leaves it as it was (see
+ *  {@link validateProfileInput}), and only where its migration has been
  *  applied, so the rest of the profile still saves on a database
- *  without it ({@link getNodeProfile}). A non-empty tagline given
- *  there throws {@link TaglineMigrationPendingError} before anything
- *  is written, rather than saving the rest and dropping it. The column
+ *  without it ({@link getNodeProfile}). Non-empty lines given there
+ *  throw {@link ProfileMigrationPendingError}, naming every one, before
+ *  anything is written, rather than saving the rest and dropping them. The column
  *  names are fixed strings chosen here, never input; every value is
  *  bound.
  *
- *  Returns the tagline the write replaced beside the row as the write
+ *  Returns the lines the write replaced beside the row as the write
  *  left it, both read in the same D1 batch as the write, so in one
  *  transaction with it: read separately, two admins saving at once
  *  could each record the same previous value, or one could report the
- *  other's tagline as its own. */
+ *  other's line as its own. */
 export async function setNodeProfile(
   db: D1Database,
   publisher: PublisherRow,
   input: ValidatedProfileInput,
   now: string = new Date().toISOString(),
-): Promise<{ row: NodeProfileRow; previousTagline: string | null }> {
-  const hasColumn = await hasTaglineColumn(db)
-  const named = input.tagline !== undefined
-  if (named && !hasColumn && input.tagline != null) throw new TaglineMigrationPendingError()
-  const withTagline = named && hasColumn
+): Promise<{ row: NodeProfileRow; previous: PreviousLines }> {
+  const present = await presentLateColumns(db)
+  const written: LateLineColumn[] = []
+  const pending: PendingLine[] = []
+  for (const line of LATE_LINES) {
+    const value = input[line.column]
+    if (value === undefined) continue
+    if (!present.includes(line.column)) {
+      if (value != null) pending.push({ field: line.field, migration: line.migration })
+      continue
+    }
+    written.push(line.column)
+  }
+  if (pending.length > 0) throw new ProfileMigrationPendingError(pending)
   const columns = [
     'org_name',
     'mission',
@@ -256,7 +327,7 @@ export async function setNodeProfile(
     'region_focus',
     'default_tone',
     'links_json',
-    ...(withTagline ? ['tagline'] : []),
+    ...written,
     'updated_by',
     'updated_at',
   ]
@@ -267,7 +338,7 @@ export async function setNodeProfile(
     input.region_focus,
     input.default_tone,
     input.links_json,
-    ...(withTagline ? [input.tagline] : []),
+    ...written.map(column => input[column] ?? null),
     publisher.id,
     now,
   ]
@@ -281,18 +352,20 @@ export async function setNodeProfile(
   // The row as this write left it, read back rather than reconstructed
   // from input so columns the upsert doesn't touch (logo_ref) come back
   // accurate — and read in the same batch as the write, as the replaced
-  // tagline is, so a save landing between them cannot leak into this
+  // lines are, so a save landing between them cannot leak into this
   // one's result or its audit row.
-  const after = db.prepare(`SELECT ${BASE_COLUMNS}${hasColumn ? ', tagline' : ''} FROM node_profile WHERE id = 1`)
-  const results = hasColumn
-    ? await db.batch([db.prepare('SELECT tagline FROM node_profile WHERE id = 1'), upsert, after])
-    : await db.batch([upsert, after])
+  const after = db.prepare(selectProfileSql(present))
+  const results =
+    present.length > 0
+      ? await db.batch([db.prepare(`SELECT ${present.join(', ')} FROM node_profile WHERE id = 1`), upsert, after])
+      : await db.batch([upsert, after])
   const firstRow = <T,>(r: D1Result | undefined): T | undefined => (r?.results as T[] | undefined)?.[0]
-  const saved = firstRow<NodeProfileRow>(results[results.length - 1])
+  const saved = firstRow<Partial<NodeProfileRow>>(results[results.length - 1])
   if (!saved) throw new Error('node_profile upsert did not persist')
-  const row: NodeProfileRow = hasColumn ? saved : { ...saved, tagline: null }
-  const previousTagline = hasColumn ? (firstRow<{ tagline: string | null }>(results[0])?.tagline ?? null) : null
-  return { row, previousTagline }
+  const before = present.length > 0 ? firstRow<Partial<PreviousLines>>(results[0]) : undefined
+  const previous = {} as PreviousLines
+  for (const { column } of LATE_LINES) previous[column] = before?.[column] ?? null
+  return { row: withAbsentLines(saved), previous }
 }
 
 /**
@@ -346,18 +419,28 @@ function optionalText(
 }
 
 /**
- * A stored tagline as it may leave the store: trimmed, non-empty,
- * within {@link PROFILE_TAGLINE_MAX_LEN} and free of the characters
- * `src/types/node-tagline.ts` refuses, else null (the app's built-in
- * tagline). The PUT already
- * refuses anything else; this re-check is for a row edited by hand,
- * the same guard {@link toPublicProfile} applies to stored links.
+ * A stored display line as it may leave the store: trimmed, non-empty,
+ * within its bound and free of the characters
+ * `src/types/node-profile-lines.ts` refuses, else null (the app's
+ * built-in line). The PUT already refuses anything else; this
+ * re-check is for a row edited by hand, the same guard
+ * {@link toPublicProfile} applies to stored links.
  */
-export function storedTagline(raw: string | null | undefined): string | null {
+function storedLine(raw: string | null | undefined, maxLen: number): string | null {
   if (typeof raw !== 'string') return null
   const trimmed = raw.trim()
-  if (!trimmed || trimmed.length > PROFILE_TAGLINE_MAX_LEN || !hasOnlyTaglineChars(trimmed)) return null
+  if (!trimmed || trimmed.length > maxLen || !hasOnlyDisplayLineChars(trimmed)) return null
   return trimmed
+}
+
+/** {@link storedLine} for the loading-screen tagline. */
+export function storedTagline(raw: string | null | undefined): string | null {
+  return storedLine(raw, PROFILE_TAGLINE_MAX_LEN)
+}
+
+/** {@link storedLine} for the dataset browser's subtitle. */
+export function storedBrowseSubtitle(raw: string | null | undefined): string | null {
+  return storedLine(raw, PROFILE_BROWSE_SUBTITLE_MAX_LEN)
 }
 
 /** True for the http(s) URLs the profile is allowed to link out to —
@@ -381,8 +464,8 @@ function isHttpUrl(value: string): boolean {
  * does not know it, not to clear it — so a later field is **kept when
  * omitted** and cleared by an explicit null or empty string, the rule
  * `logo_ref` (0030) and node-settings' sections already follow.
- * `tagline` (0060) is the first such text field; any further one
- * should follow it. Links are
+ * The display lines `tagline` (0060) and `browseSubtitle` (0061) are
+ * such fields, and any further one should follow them. Links are
  * validated as `{label, url}` pairs with http(s) urls; anything else
  * is a field error rather than a silent drop, so the operator sees
  * what the form refused.
@@ -407,14 +490,17 @@ export function validateProfileInput(
   const aboutMd = optionalText(body, 'aboutMd', PROFILE_ABOUT_MAX_LEN, errors)
   const regionFocus = optionalText(body, 'regionFocus', PROFILE_REGION_MAX_LEN, errors)
   const defaultTone = optionalText(body, 'defaultTone', PROFILE_TONE_MAX_LEN, errors)
-  const tagline =
-    body.tagline === undefined ? undefined : optionalText(body, 'tagline', PROFILE_TAGLINE_MAX_LEN, errors)
-  if (tagline != null && !hasOnlyTaglineChars(tagline)) {
-    errors.push({
-      field: 'tagline',
-      code: 'invalid_characters',
-      message: '`tagline` must be a single line of visible text, with no tabs, line breaks or invisible characters.',
-    })
+  const lines = {} as Record<LateLineColumn, string | null | undefined>
+  for (const { column, field, maxLen } of LATE_LINES) {
+    const value = body[field] === undefined ? undefined : optionalText(body, field, maxLen, errors)
+    if (value != null && !hasOnlyDisplayLineChars(value)) {
+      errors.push({
+        field,
+        code: 'invalid_characters',
+        message: `\`${field}\` must be a single line of visible text, with no tabs, line breaks or invisible characters.`,
+      })
+    }
+    lines[column] = value
   }
 
   let linksJson: string | null = null
@@ -453,7 +539,8 @@ export function validateProfileInput(
       region_focus: regionFocus,
       default_tone: defaultTone,
       links_json: linksJson,
-      tagline,
+      tagline: lines.tagline,
+      browse_subtitle: lines.browse_subtitle,
     },
   }
 }

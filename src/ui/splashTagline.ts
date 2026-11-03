@@ -105,14 +105,26 @@ export async function bindSplashTagline(
   const text = typeof value === 'string' ? value.trim() : ''
   nodeTagline = text.length > 0 ? text : null
   if (el && nodeTagline) {
-    el.removeAttribute('data-i18n')
-    el.textContent = nodeTagline
-    el.lang = ''
-    el.dir = 'auto'
+    writeNodeLine(el, nodeTagline)
     reveal()
   } else {
     revealDefault()
   }
+}
+
+/**
+ * Write a node's own display line into `el`, which holds the app's
+ * translated default: as text, never markup; with `data-i18n` dropped,
+ * so nothing re-applies the default over it; `lang=""` (language
+ * unknown), so the page's locale does not case it; and `dir="auto"`,
+ * so a left-to-right line lays out on a right-to-left page. Shared
+ * with the dataset browser's subtitle (`browseSubtitle.ts`).
+ */
+export function writeNodeLine(el: HTMLElement, text: string): void {
+  el.removeAttribute('data-i18n')
+  el.textContent = text
+  el.lang = ''
+  el.dir = 'auto'
 }
 
 /** Test seam: forget the node's tagline. */

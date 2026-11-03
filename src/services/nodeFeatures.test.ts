@@ -213,3 +213,52 @@ describe('startNodeFeaturesRead().tagline', () => {
     expect(await refused.tagline).toBeNull()
   })
 })
+
+describe('startNodeFeaturesRead().browseSubtitle', () => {
+  it('reads the browse subtitle from the same response', async () => {
+    const fetchFn = vi.fn(async () =>
+      jsonResponse({
+        profile: { orgName: 'GSL', tagline: 'Global Systems Laboratory', browseSubtitle: ' Browse GSL datasets ' },
+        features: {},
+      }),
+    )
+    const read = startNodeFeaturesRead({ fetchFn })
+    expect(await read.browseSubtitle).toBe('Browse GSL datasets')
+    expect(await read.tagline).toBe('Global Systems Laboratory')
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+  })
+
+  it('answers null from an older node, a blank line, or a failed read', async () => {
+    for (const body of [{ profile: { orgName: 'X', tagline: 'T' } }, { profile: { orgName: 'X', browseSubtitle: '  ' } }]) {
+      expect(await startNodeFeaturesRead({ fetchFn: async () => jsonResponse(body) }).browseSubtitle).toBeNull()
+    }
+    const failing = startNodeFeaturesRead({
+      fetchFn: async () => {
+        throw new TypeError('Failed to fetch')
+      },
+    })
+    expect(await failing.browseSubtitle).toBeNull()
+  })
+
+  it('drops a subtitle that lands after a settle deadline, from a fetch that ignored the abort', async () => {
+    // The browse panel is revealed once settle answers, so a late line
+    // would swap the default in front of a visitor. The splash tagline
+    // still takes it: the splash is up for seconds more.
+    let answer: (res: Response) => void = () => {}
+    const read = startNodeFeaturesRead({
+      fetchFn: () => new Promise<Response>(resolve => (answer = resolve)),
+    })
+    await read.settle(5)
+    answer(jsonResponse({ profile: { orgName: 'GSL', tagline: 'Global Systems Laboratory', browseSubtitle: 'Browse GSL datasets' } }))
+    expect(await read.tagline).toBe('Global Systems Laboratory')
+    expect(await read.browseSubtitle).toBeNull()
+  })
+
+  it('keeps a subtitle that arrives before the deadline', async () => {
+    const read = startNodeFeaturesRead({
+      fetchFn: async () => jsonResponse({ profile: { orgName: 'GSL', browseSubtitle: 'Browse GSL datasets' } }),
+    })
+    await read.settle(1_000)
+    expect(await read.browseSubtitle).toBe('Browse GSL datasets')
+  })
+})

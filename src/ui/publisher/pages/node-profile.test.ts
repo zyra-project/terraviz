@@ -44,6 +44,7 @@ const PROFILE = {
     links: [{ label: 'Website', url: 'https://coastal.example.org' }],
     logoUrl: null,
     tagline: 'Gulf Coast Science',
+    browseSubtitle: 'Browse ocean datasets from the Coastal Science Center',
   },
 }
 
@@ -58,6 +59,9 @@ describe('renderNodeProfilePage', () => {
     expect((mount.querySelector('#nodeprofile-org') as HTMLInputElement).value).toBe('Coastal Science Center')
     expect((mount.querySelector('#nodeprofile-mission') as HTMLTextAreaElement).value).toBe('Connect visitors with live ocean data.')
     expect((mount.querySelector('#nodeprofile-tagline') as HTMLInputElement).value).toBe('Gulf Coast Science')
+    expect((mount.querySelector('#nodeprofile-browse-subtitle') as HTMLInputElement).value).toBe(
+      'Browse ocean datasets from the Coastal Science Center',
+    )
     expect(mount.querySelectorAll('.publisher-nodeprofile-link-row')).toHaveLength(1)
   })
 
@@ -83,6 +87,25 @@ describe('renderNodeProfilePage', () => {
     expect(hint.textContent).toContain('“Science On a Sphere”')
   })
 
+  it('labels the browse subtitle field and names the default it falls back to', async () => {
+    const mount = document.createElement('div')
+    await renderNodeProfilePage(mount, {
+      fetchFn: mockFetch({
+        '/publish/me': ADMIN_ME,
+        '/publish/node-profile': { profile: { ...PROFILE.profile, browseSubtitle: undefined } },
+      }),
+    })
+    const input = mount.querySelector('#nodeprofile-browse-subtitle') as HTMLInputElement
+    expect(input.value).toBe('')
+    expect(input.maxLength).toBe(120)
+    expect(mount.querySelector('label[for="nodeprofile-browse-subtitle"]')!.textContent).toBe(
+      'Dataset browser subtitle (optional)',
+    )
+    const hint = mount.querySelector(`#${input.getAttribute('aria-describedby')}`)!
+    expect(hint.textContent).toContain('up to 120 characters')
+    expect(hint.textContent).toContain('“Browse environmental datasets from NOAA Science On a Sphere”')
+  })
+
   it('cleans a pasted tab or invisible character out of the tagline before saving', async () => {
     const capture = { puts: [] as Array<{ url: string; body: unknown }> }
     const mount = document.createElement('div')
@@ -96,6 +119,31 @@ describe('renderNodeProfilePage', () => {
     expect((capture.puts[0].body as { tagline: string }).tagline).toBe('Global Systems Laboratory')
     // The field shows what was saved.
     expect((mount.querySelector('#nodeprofile-tagline') as HTMLInputElement).value).toBe('Global Systems Laboratory')
+  })
+
+  it('shows every refusal a save returns, not only the first', async () => {
+    // A node missing both display-line migrations refuses both lines
+    // in one 409; the operator should hear about both at once.
+    const refusal = {
+      errors: [
+        { field: 'tagline', code: 'migration_missing', message: 'This node cannot store a tagline until catalog migration 0060 is applied.' },
+        { field: 'browseSubtitle', code: 'migration_missing', message: 'This node cannot store a dataset browser subtitle until catalog migration 0061 is applied.' },
+      ],
+    }
+    const routes = mockFetch({ '/publish/me': ADMIN_ME, '/publish/node-profile': PROFILE })
+    const fetchFn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'PUT') {
+        return { ok: false, status: 409, type: 'basic', json: async () => refusal, text: async () => JSON.stringify(refusal) } as unknown as Response
+      }
+      return routes(input, init)
+    })
+    const mount = document.createElement('div')
+    await renderNodeProfilePage(mount, { fetchFn })
+    Array.from(mount.querySelectorAll('button')).find(b => b.textContent === 'Save profile')!.click()
+    const status = mount.querySelector('.publisher-nodeprofile-status')!
+    await until(() => status.classList.contains('publisher-nodeprofile-status-error'), 'the refused save')
+    expect(status.textContent).toContain('migration 0060')
+    expect(status.textContent).toContain('migration 0061')
   })
 
   it('mounts the markdown toolbar on About and Preview renders sanitized markdown', async () => {
@@ -281,6 +329,7 @@ describe('renderNodeProfilePage', () => {
     expect(capture.puts[0].body).toEqual({
       orgName: 'New Node',
       tagline: 'Global Systems Laboratory',
+      browseSubtitle: null,
       mission: 'A mission.',
       aboutMd: null,
       regionFocus: null,
