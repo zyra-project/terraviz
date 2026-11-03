@@ -213,3 +213,30 @@ describe('startNodeFeaturesRead().tagline', () => {
     expect(await refused.tagline).toBeNull()
   })
 })
+
+describe('startNodeFeaturesRead().browseSubtitle', () => {
+  it('reads the browse subtitle from the same response', async () => {
+    const fetchFn = vi.fn(async () =>
+      jsonResponse({
+        profile: { orgName: 'GSL', tagline: 'Global Systems Laboratory', browseSubtitle: ' Browse GSL datasets ' },
+        features: {},
+      }),
+    )
+    const read = startNodeFeaturesRead({ fetchFn })
+    expect(await read.browseSubtitle).toBe('Browse GSL datasets')
+    expect(await read.tagline).toBe('Global Systems Laboratory')
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+  })
+
+  it('answers null from an older node, a blank line, or a failed read', async () => {
+    for (const body of [{ profile: { orgName: 'X', tagline: 'T' } }, { profile: { orgName: 'X', browseSubtitle: '  ' } }]) {
+      expect(await startNodeFeaturesRead({ fetchFn: async () => jsonResponse(body) }).browseSubtitle).toBeNull()
+    }
+    const failing = startNodeFeaturesRead({
+      fetchFn: async () => {
+        throw new TypeError('Failed to fetch')
+      },
+    })
+    expect(await failing.browseSubtitle).toBeNull()
+  })
+})

@@ -9,7 +9,8 @@
  *
  * Privileged-only (admin / service) — the API enforces 403 on writes;
  * gating here avoids a fill-then-reject round-trip. Renders a single
- * form (org name, loading-screen tagline, mission, about markdown, region
+ * form (org name, loading-screen tagline, dataset-browser subtitle,
+ * mission, about markdown, region
  * focus, default tone, outbound links) backed by `GET`/`PUT
  * /api/v1/publish/node-profile`. Mirrors `featured-hero.ts`. Below it,
  * two node-settings cards with their own Saves: Features (admins
@@ -27,7 +28,7 @@ import { buildEmbeddingCard, embedPolicyFromSettings, embedProblemFromSettings }
 import type { EmbedPolicyProblem, NodeSettingsResponse } from '../types'
 import type { EmbedPolicy } from '../../../types/node-embedding'
 import { renderMarkdown } from '../../../services/markdownRenderer'
-import { TAGLINE_MAX_LEN, cleanDisplayLineInput } from '../../../types/node-profile-lines'
+import { BROWSE_SUBTITLE_MAX_LEN, TAGLINE_MAX_LEN, cleanDisplayLineInput } from '../../../types/node-profile-lines'
 
 /** Keep in sync with the backend store bounds
  *  (`functions/api/v1/_lib/node-profile-store.ts`). The API is the
@@ -60,6 +61,8 @@ interface ProfileResponse {
     logoUrl: string | null
     /** Absent from an older deploy's response. */
     tagline?: string | null
+    /** Absent from an older deploy's response. */
+    browseSubtitle?: string | null
   } | null
 }
 
@@ -183,16 +186,25 @@ function renderForm(mount: HTMLElement, state: FormState): void {
     maxLength: ORG_NAME_MAX_LEN,
     value: profile?.orgName ?? '',
   })
-  // The public app's loading-screen line (`src/ui/splashTagline.ts`).
-  // Its character rules are shared with the API
-  // (`src/types/node-tagline.ts`); Save cleans what was pasted so a
-  // tab or an invisible character cannot draw an error nobody can see.
+  // The public app's two display lines: the loading screen's
+  // (`src/ui/splashTagline.ts`) and the dataset browser's
+  // (`src/ui/browseSubtitle.ts`). Their character rules are shared with
+  // the API (`src/types/node-profile-lines.ts`); Save cleans what was
+  // pasted so a tab or an invisible character cannot draw an error
+  // nobody can see.
   const tagline = el('input', {
     type: 'text',
     className: 'publisher-nodeprofile-input',
     id: 'nodeprofile-tagline',
     maxLength: TAGLINE_MAX_LEN,
     value: profile?.tagline ?? '',
+  })
+  const browseSubtitle = el('input', {
+    type: 'text',
+    className: 'publisher-nodeprofile-input',
+    id: 'nodeprofile-browse-subtitle',
+    maxLength: BROWSE_SUBTITLE_MAX_LEN,
+    value: profile?.browseSubtitle ?? '',
   })
   const mission = el('textarea', {
     className: 'publisher-nodeprofile-textarea',
@@ -317,11 +329,13 @@ function renderForm(mount: HTMLElement, state: FormState): void {
       status.classList.add('publisher-nodeprofile-status-error')
       return
     }
-    // Shown back in the field, so what it reads is what is stored.
+    // Shown back in the fields, so what they read is what is stored.
     tagline.value = cleanDisplayLineInput(tagline.value)
+    browseSubtitle.value = cleanDisplayLineInput(browseSubtitle.value)
     const body = {
       orgName: name,
       tagline: tagline.value || null,
+      browseSubtitle: browseSubtitle.value || null,
       mission: mission.value.trim() || null,
       aboutMd: about.value.trim() || null,
       regionFocus: region.value.trim() || null,
@@ -373,6 +387,14 @@ function renderForm(mount: HTMLElement, state: FormState): void {
       t('publisher.nodeProfile.tagline'),
       tagline,
       t('publisher.nodeProfile.tagline.hint', { max: TAGLINE_MAX_LEN, default: t('loading.subtitle') }),
+    ),
+    labelledWithHint(
+      t('publisher.nodeProfile.browseSubtitle'),
+      browseSubtitle,
+      t('publisher.nodeProfile.browseSubtitle.hint', {
+        max: BROWSE_SUBTITLE_MAX_LEN,
+        default: t('browse.subtitle'),
+      }),
     ),
     labelledWithHint(
       t('publisher.nodeProfile.regionFocus'),

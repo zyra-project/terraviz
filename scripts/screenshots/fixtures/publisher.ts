@@ -448,6 +448,7 @@ const nodeProfile = {
     links: [{ label: 'Website', url: 'https://coastal.example.org' }],
     logoUrl: null,
     tagline: 'Gulf Coast Science',
+    browseSubtitle: 'Browse ocean and atmosphere datasets from the Coastal Science Center',
     updatedBy: 'PUB-ADMIN',
     updatedAt: '2026-07-01T00:00:00.000Z',
   },

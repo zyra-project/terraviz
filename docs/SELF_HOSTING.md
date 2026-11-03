@@ -1905,19 +1905,22 @@ Open `https://<W2>/publish/node-profile` (**Settings → Node
 profile** in the sidebar). Fill in **Organization name** and,
 optionally, **Loading screen tagline**: the short line under the
 Terraviz title while the app loads, such as your organization's
-name. Then **Save profile**, and upload an **Organization logo**,
-which needs a saved profile first. The name and logo head the
-public blog.
+name. You can also fill in **Dataset browser subtitle**, the
+sentence under the title in the dataset browser. Then **Save
+profile**, and upload an **Organization logo**, which needs a
+saved profile first. The name and logo head the public blog.
 
-Left empty, the tagline reads "Science On a Sphere", translated
-for each visitor. A tagline you set is shown as written in every
-language. A change reaches visitors within a few minutes, with no
-redeploy.
+Left empty, the tagline reads "Science On a Sphere" and the
+subtitle "Browse environmental datasets from NOAA Science On a
+Sphere", each translated for each visitor. A line you set is shown
+as written in every language. A change reaches visitors within a
+few minutes, with no redeploy.
 
 On a node upgraded from an earlier release, the tagline is stored
-by catalog migration 0060. Until that migration is applied, saving
-with a tagline filled in is refused and saves nothing; empty the
-field and save again to keep the rest. See §14.3.
+by catalog migration 0060 and the subtitle by 0061. Until the
+migration for a line is applied, saving with that line filled in is
+refused and saves nothing; empty the field and save again to keep
+the rest. See §14.3.
 
 ---
 

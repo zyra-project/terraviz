@@ -44,6 +44,7 @@ const PROFILE = {
     links: [{ label: 'Website', url: 'https://coastal.example.org' }],
     logoUrl: null,
     tagline: 'Gulf Coast Science',
+    browseSubtitle: 'Browse ocean datasets from the Coastal Science Center',
   },
 }
 
@@ -58,6 +59,9 @@ describe('renderNodeProfilePage', () => {
     expect((mount.querySelector('#nodeprofile-org') as HTMLInputElement).value).toBe('Coastal Science Center')
     expect((mount.querySelector('#nodeprofile-mission') as HTMLTextAreaElement).value).toBe('Connect visitors with live ocean data.')
     expect((mount.querySelector('#nodeprofile-tagline') as HTMLInputElement).value).toBe('Gulf Coast Science')
+    expect((mount.querySelector('#nodeprofile-browse-subtitle') as HTMLInputElement).value).toBe(
+      'Browse ocean datasets from the Coastal Science Center',
+    )
     expect(mount.querySelectorAll('.publisher-nodeprofile-link-row')).toHaveLength(1)
   })
 
@@ -81,6 +85,25 @@ describe('renderNodeProfilePage', () => {
     const hint = mount.querySelector(`#${input.getAttribute('aria-describedby')}`)!
     expect(hint.textContent).toContain('up to 80 characters')
     expect(hint.textContent).toContain('“Science On a Sphere”')
+  })
+
+  it('labels the browse subtitle field and names the default it falls back to', async () => {
+    const mount = document.createElement('div')
+    await renderNodeProfilePage(mount, {
+      fetchFn: mockFetch({
+        '/publish/me': ADMIN_ME,
+        '/publish/node-profile': { profile: { ...PROFILE.profile, browseSubtitle: undefined } },
+      }),
+    })
+    const input = mount.querySelector('#nodeprofile-browse-subtitle') as HTMLInputElement
+    expect(input.value).toBe('')
+    expect(input.maxLength).toBe(120)
+    expect(mount.querySelector('label[for="nodeprofile-browse-subtitle"]')!.textContent).toBe(
+      'Dataset browser subtitle (optional)',
+    )
+    const hint = mount.querySelector(`#${input.getAttribute('aria-describedby')}`)!
+    expect(hint.textContent).toContain('up to 120 characters')
+    expect(hint.textContent).toContain('“Browse environmental datasets from NOAA Science On a Sphere”')
   })
 
   it('cleans a pasted tab or invisible character out of the tagline before saving', async () => {
@@ -281,6 +304,7 @@ describe('renderNodeProfilePage', () => {
     expect(capture.puts[0].body).toEqual({
       orgName: 'New Node',
       tagline: 'Global Systems Laboratory',
+      browseSubtitle: null,
       mission: 'A mission.',
       aboutMd: null,
       regionFocus: null,
