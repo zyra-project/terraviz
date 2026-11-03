@@ -23,7 +23,9 @@
     <a href="#container" class="skip-link" data-i18n="app.skipLink">Skip to globe visualization</a>
 
     <!-- Not a live region. #loading-status (role="status", polite) is
-         the one place the splash announces anything. A live region round
+         the one place the splash announces anything; when WebGL 2 is
+         missing, showWebGLUnavailable (src/utils/webglSupport.ts)
+         replaces it with an alert of its own. A live region round
          the whole screen made the title and tagline announceable too, and
          assertively: WebKit skips a nested aria-live="off" and uses the
          next live ancestor, so the tagline could not opt out. -->

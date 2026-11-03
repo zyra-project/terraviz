@@ -35,7 +35,8 @@
  * English name — and `dir="auto"`, so a left-to-right name ending in
  * punctuation lays out correctly on a right-to-left page. The line is
  * branding, not news, so it sits in no live region and its change is
- * never announced: the splash speaks only through its status line.
+ * never announced: the splash speaks only through its status line (or
+ * the alert that replaces it when WebGL 2 is missing).
  * It once relied on a nested `aria-live="off"` inside an assertive
  * splash, which WebKit skips in favour of the next live ancestor.
  *

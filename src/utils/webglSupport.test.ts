@@ -2,7 +2,7 @@
 // Copyright 2026 The Zyra Project
 
 import { describe, it, expect, vi } from 'vitest'
-import { hasWebGL2 } from './webglSupport'
+import { hasWebGL2, showWebGLUnavailable } from './webglSupport'
 
 /**
  * A canvas stub that answers only the context types it is told to, so a
@@ -51,5 +51,44 @@ describe('hasWebGL2', () => {
     hasWebGL2()
     expect(spy).toHaveBeenCalledWith('canvas')
     spy.mockRestore()
+  })
+})
+
+describe('showWebGLUnavailable', () => {
+  function screenWithStatus(): HTMLElement {
+    const screen = document.createElement('div')
+    screen.id = 'loading-screen'
+    screen.className = 'fade-out'
+    screen.innerHTML = '<div id="loading-status" role="status">Starting up</div>'
+    return screen
+  }
+
+  it('announces the problem itself, since it replaces the status line', () => {
+    // The loading screen is not a live region and this removes the one
+    // inside it, so without its own alert the message is never spoken.
+    const screen = screenWithStatus()
+    showWebGLUnavailable(screen)
+    expect(screen.querySelector('#loading-status')).toBeNull()
+    const alerts = screen.querySelectorAll('[role="alert"]')
+    expect(alerts).toHaveLength(1)
+    expect(alerts[0].querySelector('h1')?.textContent).toBe('WebGL 2 is not available')
+    expect(alerts[0].textContent).toContain('requires WebGL 2')
+  })
+
+  it('keeps the fix-it steps out of the alert', () => {
+    const screen = screenWithStatus()
+    showWebGLUnavailable(screen)
+    const details = screen.querySelector('details')
+    expect(details).not.toBeNull()
+    expect(details!.closest('[role="alert"]')).toBeNull()
+    expect(screen.querySelector('[role="alert"] details, [role="alert"] summary')).toBeNull()
+  })
+
+  it('marks its English text as English, and shows the screen', () => {
+    const screen = screenWithStatus()
+    showWebGLUnavailable(screen)
+    expect(screen.querySelector('[role="alert"]')!.closest('[lang]')?.getAttribute('lang')).toBe('en')
+    expect(screen.style.display).toBe('flex')
+    expect(screen.classList.contains('fade-out')).toBe(false)
   })
 })

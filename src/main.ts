@@ -85,7 +85,7 @@ import { TourEngine, type TourTelemetryMeta } from './services/tourEngine'
 import { showTourControls, hideTourControls, hideAllTourTextBoxes, hideAllTourImages, hideAllTourVideos, hideAllTourPopups, hideAllTourQuestions } from './ui/tourUI'
 import { initLegendForDataset, clearLegendCache, loadConfig, readCurrentTime } from './services/docentService'
 import { isMobile, IS_MOBILE_NATIVE, getCloudTextureUrl } from './utils/deviceCapability'
-import { hasWebGL2 } from './utils/webglSupport'
+import { hasWebGL2, showWebGLUnavailable } from './utils/webglSupport'
 import { isPublisherPortalPath } from './utils/publisherPath'
 import { initDeepLinks } from './services/deepLinkService'
 import {
@@ -2224,52 +2224,11 @@ class InteractiveSphere {
   private checkWebGLSupport(): boolean {
     // The predicate, and why it is WebGL 2 with no WebGL 1 fallback, lives
     // in `utils/webglSupport` — reachable from a test, which this method is
-    // not. What stays here is the screen that follows from a `false`.
+    // not — and so does the screen that follows from a `false`.
     if (hasWebGL2()) return true
 
     const screen = document.getElementById('loading-screen')
-    if (screen) {
-      // The screen is not a live region, and this replaces the status
-      // line that is, so the message announces itself: `role="alert"`
-      // is spoken when it is inserted, where a polite region created
-      // already holding its text is not. Assertive because the app
-      // cannot start and nothing else on the page is current. Only the
-      // two lines that say so, not the fix-it steps, which a reader
-      // opens when they want them.
-      screen.innerHTML = `
-        <div style="max-width:480px;padding:2rem;text-align:center;color:#e0e0e0;font-family:system-ui,sans-serif;">
-          <div style="font-size:2.5rem;margin-bottom:0.75rem;" aria-hidden="true">&#x1F30D;</div>
-          <div role="alert">
-            <h1 style="font-size:1.1rem;margin:0 0 0.75rem;color:#fff;">WebGL 2 is not available</h1>
-            <p style="font-size:0.8rem;line-height:1.5;color:#aaa;margin:0 0 1.25rem;">
-              This application requires WebGL 2 to render the interactive globe.
-              Your browser's GPU acceleration appears to be disabled.
-            </p>
-          </div>
-          <details style="text-align:start;font-size:0.75rem;color:#999;line-height:1.6;">
-            <summary style="cursor:pointer;color:#4da6ff;margin-bottom:0.5rem;">How to fix this</summary>
-            <ol style="padding-inline-start:1.25rem;margin:0;">
-              <li>Open <strong style="color:#fff;">chrome://flags</strong> in your address bar</li>
-              <li>Search for <strong style="color:#fff;">Override software rendering list</strong></li>
-              <li>Set it to <strong style="color:#fff;">Enabled</strong> and relaunch Chrome</li>
-            </ol>
-            <p style="margin:0.75rem 0 0.25rem;color:#888;">Alternatively, launch Chrome from the terminal with:</p>
-            <code style="display:block;background:#1a1a2e;padding:0.5rem 0.75rem;border-radius:4px;color:#4da6ff;font-size:0.7rem;overflow-x:auto;">
-              google-chrome --ignore-gpu-blocklist --enable-unsafe-swiftshader
-            </code>
-            <p style="margin:0.75rem 0 0;color:#888;">
-              If the problem persists, check <strong style="color:#fff;">chrome://gpu</strong>
-              for driver issues. Installing or updating your GPU drivers
-              (e.g. <code style="color:#ccc;">sudo apt install nvidia-driver-xxx</code>
-              or <code style="color:#ccc;">mesa-utils</code>) usually resolves this.
-            </p>
-          </details>
-        </div>`
-      screen.style.display = 'flex'
-      screen.style.alignItems = 'center'
-      screen.style.justifyContent = 'center'
-      screen.classList.remove('fade-out')
-    }
+    if (screen) showWebGLUnavailable(screen)
     return false
   }
 
