@@ -412,8 +412,8 @@ function holdMethod(base: (input: RequestInfo | URL, init?: RequestInit) => Prom
 }
 
 /** The page's reads with a logo already set, answering an upload with a
- *  new logo and a delete with none (or with `deleteStatus`). */
-function logoFetch(opts: { deleteStatus?: number } = {}) {
+ *  new logo (or `uploadUrl`) and a delete with none (or `deleteStatus`). */
+function logoFetch(opts: { deleteStatus?: number; uploadUrl?: string } = {}) {
   const withLogo = { profile: { ...PROFILE.profile, logoUrl: 'https://assets.example.org/logo.png' } }
   return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = typeof input === 'string' ? input : (input as Request).url
@@ -423,7 +423,7 @@ function logoFetch(opts: { deleteStatus?: number } = {}) {
     if (method === 'DELETE') {
       status = opts.deleteStatus ?? 200
       body = status < 400 ? { logoUrl: null } : { error: 'server_error' }
-    } else if (method === 'POST') body = { logoUrl: 'https://assets.example.org/new-logo.png' }
+    } else if (method === 'POST') body = { logoUrl: opts.uploadUrl ?? 'https://assets.example.org/new-logo.png' }
     else if (url.includes('/publish/me')) body = ADMIN_ME
     else if (url.includes('/publish/node-profile')) body = withLogo
     return {
@@ -593,6 +593,22 @@ describe('renderNodeProfilePage — buttons stay focusable while busy', () => {
     const logoStatus = mount.querySelector('.publisher-nodeprofile-logo-status')!
     expect(logoStatus.classList.contains('publisher-nodeprofile-status-error')).toBe(true)
     expect(mount.querySelector('.publisher-nodeprofile-logo-img')).toBeTruthy()
+  })
+
+  it('hands focus to Choose when an upload answered with a non-http URL hides a focused Remove', async () => {
+    const fetchFn = logoFetch({ uploadUrl: 'data:image/png;base64,AAAA' }) as unknown as typeof fetch
+    const mount = document.createElement('div')
+    document.body.replaceChildren(mount)
+    await renderNodeProfilePage(mount, { fetchFn })
+
+    const remove = button(mount, 'Remove logo')
+    remove.focus()
+    const fileInput = mount.querySelector('#nodeprofile-logo-file') as HTMLInputElement
+    const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'logo.png', { type: 'image/png' })
+    Object.defineProperty(fileInput, 'files', { value: [file], configurable: true })
+    fileInput.dispatchEvent(new Event('change'))
+    await until(() => remove.hidden, 'Remove to hide once the logo reads as none')
+    expect(document.activeElement).toBe(button(mount, 'Choose image…'))
   })
 
   it('treats the logo block as one operation: Remove is busy while an upload runs', async () => {
