@@ -1574,6 +1574,14 @@
   cursor: default;
 }
 
+/* A button whose action is running stays focusable (aria-disabled,
+   not disabled — `components/busy-button.ts`), so it says so by look
+   instead. */
+.publisher-button[aria-disabled='true'] {
+  opacity: 0.6;
+  cursor: progress;
+}
+
 /* Compact variant — replaces the former `.publisher-btn-small`. */
 .publisher-button-small {
   min-height: max(30px, calc(30px * var(--ui-scale)));
@@ -3663,12 +3671,6 @@
 .publisher-nodeprofile-embed-input[aria-invalid='true'] {
   border-color: var(--color-error-soft, #ff6b6b);
   border-width: 2px;
-}
-/* A button whose action is running stays focusable (aria-disabled,
-   not disabled), so it says so by look instead. */
-.publisher-nodeprofile-embedding .publisher-button[aria-disabled='true'] {
-  opacity: 0.6;
-  cursor: progress;
 }
 .publisher-nodeprofile-embed-mode {
   cursor: default;

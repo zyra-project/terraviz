@@ -392,3 +392,149 @@ describe('renderNodeProfilePage', () => {
     expect(status.classList.contains('publisher-nodeprofile-status-error')).toBe(true)
   })
 })
+
+/**
+ * A fetch that holds every request of one method until released, so a
+ * test can press a button again while its request is in flight. Every
+ * other request goes straight through to `base`.
+ */
+function holdMethod(base: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>, method: string) {
+  let release: () => void = () => {}
+  const gate = new Promise<void>(resolve => {
+    release = resolve
+  })
+  const fetchFn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if ((init?.method ?? 'GET') === method) await gate
+    return base(input, init)
+  })
+  const sent = (): number => fetchFn.mock.calls.filter(([, init]) => (init?.method ?? 'GET') === method).length
+  return { fetchFn: fetchFn as unknown as typeof fetch, release, sent }
+}
+
+function button(mount: HTMLElement, text: string): HTMLButtonElement {
+  return Array.from(mount.querySelectorAll<HTMLButtonElement>('button')).find(b => b.textContent === text)!
+}
+
+// Disabling the focused button would drop focus to <body>, losing a
+// keyboard or screen-reader user's place; each is marked busy instead,
+// and a press while busy does nothing.
+describe('renderNodeProfilePage — buttons stay focusable while busy', () => {
+  it('Save profile keeps focus and sends no second PUT while one is in flight', async () => {
+    const capture = { puts: [] as Array<{ url: string; body: unknown }> }
+    const held = holdMethod(mockFetch({ '/publish/me': ADMIN_ME, '/publish/node-profile': PROFILE }, capture), 'PUT')
+    const mount = document.createElement('div')
+    document.body.replaceChildren(mount)
+    await renderNodeProfilePage(mount, { fetchFn: held.fetchFn })
+
+    const save = button(mount, 'Save profile')
+    save.focus()
+    save.click()
+    await until(() => held.sent() === 1, 'the profile PUT to start')
+    expect(save.disabled).toBe(false)
+    expect(save.getAttribute('aria-disabled')).toBe('true')
+    expect(document.activeElement).toBe(save)
+    // A second press while busy sends nothing more.
+    save.click()
+    held.release()
+    await until(() => !save.hasAttribute('aria-disabled'), 'the save to finish')
+    expect(held.sent()).toBe(1)
+    expect(capture.puts).toHaveLength(1)
+    expect(document.activeElement).toBe(save)
+    expect(mount.querySelector('.publisher-nodeprofile-status')!.textContent).toBe('Profile saved.')
+    // Pressable again once it is done.
+    save.click()
+    await until(() => held.sent() === 2, 'a second save after the first finished')
+  })
+
+  it('Save features keeps focus and sends no second PUT while one is in flight', async () => {
+    const held = holdMethod(
+      mockFetch({
+        '/publish/me': ADMIN_ME,
+        '/publish/node-profile': PROFILE,
+        '/publish/node-settings': { features: {} },
+      }),
+      'PUT',
+    )
+    const mount = document.createElement('div')
+    document.body.replaceChildren(mount)
+    await renderNodeProfilePage(mount, { fetchFn: held.fetchFn })
+
+    const save = button(mount, 'Save features')
+    save.focus()
+    save.click()
+    await until(() => held.sent() === 1, 'the features PUT to start')
+    expect(save.disabled).toBe(false)
+    expect(save.getAttribute('aria-disabled')).toBe('true')
+    expect(document.activeElement).toBe(save)
+    save.click()
+    held.release()
+    await until(() => !save.hasAttribute('aria-disabled'), 'the save to finish')
+    expect(held.sent()).toBe(1)
+    expect(document.activeElement).toBe(save)
+  })
+
+  it('Choose logo keeps focus and opens no second picker while an upload runs', async () => {
+    const base = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : (input as Request).url
+      let body: unknown = {}
+      if (init?.method === 'POST') body = { logoUrl: 'https://assets.example.org/new-logo.png' }
+      else if (url.includes('/publish/me')) body = ADMIN_ME
+      else if (url.includes('/publish/node-profile')) body = PROFILE
+      return { ok: true, status: 200, type: 'basic', json: async () => body, text: async () => JSON.stringify(body) } as unknown as Response
+    })
+    const held = holdMethod(base, 'POST')
+    const mount = document.createElement('div')
+    document.body.replaceChildren(mount)
+    await renderNodeProfilePage(mount, { fetchFn: held.fetchFn })
+
+    const choose = button(mount, 'Choose image…')
+    const fileInput = mount.querySelector('#nodeprofile-logo-file') as HTMLInputElement
+    const picker = vi.spyOn(fileInput, 'click').mockImplementation(() => {})
+    choose.focus()
+    choose.click()
+    expect(picker).toHaveBeenCalledTimes(1)
+    // The picker hands back a file, as a browser's would.
+    const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'logo.png', { type: 'image/png' })
+    Object.defineProperty(fileInput, 'files', { value: [file], configurable: true })
+    fileInput.dispatchEvent(new Event('change'))
+    await until(() => held.sent() === 1, 'the logo upload to start')
+    expect(choose.disabled).toBe(false)
+    expect(choose.getAttribute('aria-disabled')).toBe('true')
+    expect(document.activeElement).toBe(choose)
+    choose.click()
+    expect(picker).toHaveBeenCalledTimes(1)
+    held.release()
+    await until(() => !choose.hasAttribute('aria-disabled'), 'the upload to finish')
+    expect(held.sent()).toBe(1)
+    expect(document.activeElement).toBe(choose)
+  })
+
+  it('Remove logo sends one DELETE while busy, then hands focus to Choose as it hides', async () => {
+    const withLogo = { profile: { ...PROFILE.profile, logoUrl: 'https://assets.example.org/logo.png' } }
+    const base = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : (input as Request).url
+      let body: unknown = {}
+      if (init?.method === 'DELETE') body = { logoUrl: null }
+      else if (url.includes('/publish/me')) body = ADMIN_ME
+      else if (url.includes('/publish/node-profile')) body = withLogo
+      return { ok: true, status: 200, type: 'basic', json: async () => body, text: async () => JSON.stringify(body) } as unknown as Response
+    })
+    const held = holdMethod(base, 'DELETE')
+    const mount = document.createElement('div')
+    document.body.replaceChildren(mount)
+    await renderNodeProfilePage(mount, { fetchFn: held.fetchFn })
+
+    const remove = button(mount, 'Remove logo')
+    remove.focus()
+    remove.click()
+    await until(() => held.sent() === 1, 'the DELETE to start')
+    expect(remove.disabled).toBe(false)
+    expect(remove.getAttribute('aria-disabled')).toBe('true')
+    expect(document.activeElement).toBe(remove)
+    remove.click()
+    held.release()
+    await until(() => remove.hidden, 'Remove to hide once the logo is gone')
+    expect(held.sent()).toBe(1)
+    expect(document.activeElement).toBe(button(mount, 'Choose image…'))
+  })
+})

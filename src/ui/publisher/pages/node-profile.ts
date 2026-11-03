@@ -20,6 +20,7 @@
 import { t } from '../../../i18n'
 import { FEATURE_KEYS, normalizeFeatures, type FeatureKey, type FeatureMap } from '../../../types/node-features'
 import { publisherGet, publisherSend, handleSessionError } from '../api'
+import { busyButton } from '../components/busy-button'
 import { buildErrorCard } from '../components/error-card'
 import { attachToolbar, renderMarkdownToolbar } from '../components/markdown-toolbar'
 import { FEATURES_CHANGE_EVENT, featureLabel, resetFeaturesCache } from '../features'
@@ -308,7 +309,11 @@ function renderForm(mount: HTMLElement, state: FormState): void {
     className: 'publisher-button publisher-button-primary',
     textContent: t('publisher.nodeProfile.save'),
   })
+  // Busy rather than disabled while the PUT runs: disabling the focused
+  // button would drop a keyboard user's focus to <body>.
+  const saving = busyButton(saveBtn)
   saveBtn.addEventListener('click', () => {
+    if (saving.busy) return
     status.textContent = ''
     status.classList.remove('publisher-nodeprofile-status-error')
     const name = orgName.value.trim()
@@ -328,7 +333,7 @@ function renderForm(mount: HTMLElement, state: FormState): void {
       defaultTone: tone.value.trim() || null,
       links: collectLinks(),
     }
-    saveBtn.disabled = true
+    saving.set(true)
     void publisherSend<ProfileResponse>(PROFILE_ENDPOINT, body, { method: 'PUT', fetchFn: state.fetchFn })
       .then(res => {
         if (res.ok) {
@@ -346,7 +351,7 @@ function renderForm(mount: HTMLElement, state: FormState): void {
         status.classList.add('publisher-nodeprofile-status-error')
       })
       .finally(() => {
-        saveBtn.disabled = false
+        saving.set(false)
       })
   })
 
@@ -444,12 +449,14 @@ function buildFeaturesCard(features: FeatureMap, state: FormState): HTMLElement 
     className: 'publisher-button publisher-button-primary',
     textContent: t('publisher.nodeProfile.features.save'),
   })
+  const saving = busyButton(saveBtn)
   saveBtn.addEventListener('click', () => {
+    if (saving.busy) return
     status.textContent = ''
     status.classList.remove('publisher-nodeprofile-status-error')
     const body: { features: Record<string, boolean> } = { features: {} }
     for (const [key, checkbox] of checkboxes) body.features[key] = checkbox.checked
-    saveBtn.disabled = true
+    saving.set(true)
     void publisherSend<{ features: unknown }>(SETTINGS_ENDPOINT, body, { method: 'PUT', fetchFn: state.fetchFn })
       .then(res => {
         if (res.ok) {
@@ -469,7 +476,7 @@ function buildFeaturesCard(features: FeatureMap, state: FormState): HTMLElement 
         status.classList.add('publisher-nodeprofile-status-error')
       })
       .finally(() => {
-        saveBtn.disabled = false
+        saving.set(false)
       })
   })
 
@@ -544,13 +551,20 @@ function buildLogo(state: FormState): HTMLElement {
     className: 'publisher-button publisher-button-small',
     textContent: t('publisher.nodeProfile.logo.choose'),
   })
-  chooseBtn.addEventListener('click', () => fileInput.click())
+  // Busy rather than disabled while an upload runs, so focus stays on
+  // the button; a press then opens no second picker.
+  const choosing = busyButton(chooseBtn)
+  chooseBtn.addEventListener('click', () => {
+    if (choosing.busy) return
+    fileInput.click()
+  })
 
   const removeBtn = el('button', {
     type: 'button',
     className: 'publisher-button publisher-button-small',
     textContent: t('publisher.nodeProfile.logo.remove'),
   })
+  const removing = busyButton(removeBtn)
   const refreshRemove = (): void => {
     removeBtn.hidden = logoUrl === null
   }
@@ -568,7 +582,7 @@ function buildLogo(state: FormState): HTMLElement {
       setStatus(t('publisher.nodeProfile.logo.error.size'), true)
       return
     }
-    chooseBtn.disabled = true
+    choosing.set(true)
     setStatus(t('publisher.nodeProfile.logo.uploading'), false)
     void file
       .arrayBuffer()
@@ -606,18 +620,24 @@ function buildLogo(state: FormState): HTMLElement {
       })
       .catch(() => setStatus(t('publisher.nodeProfile.error.generic'), true))
       .finally(() => {
-        chooseBtn.disabled = false
+        choosing.set(false)
       })
   })
 
   removeBtn.addEventListener('click', () => {
-    removeBtn.disabled = true
+    if (removing.busy) return
+    removing.set(true)
     void publisherSend<{ logoUrl: string | null }>(LOGO_ENDPOINT, {}, { method: 'DELETE', fetchFn: state.fetchFn })
       .then(res => {
         if (res.ok) {
+          // Remove hides itself once there is no logo, which would drop
+          // its focus to <body> as surely as disabling it; hand focus to
+          // Choose, the control left in its place.
+          const hadFocus = document.activeElement === removeBtn
           logoUrl = null
           renderPreview()
           refreshRemove()
+          if (hadFocus) chooseBtn.focus()
           setStatus(t('publisher.nodeProfile.logo.removed'), false)
           return
         }
@@ -629,7 +649,7 @@ function buildLogo(state: FormState): HTMLElement {
         }
       })
       .finally(() => {
-        removeBtn.disabled = false
+        removing.set(false)
       })
   })
 
