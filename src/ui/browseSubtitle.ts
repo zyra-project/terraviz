@@ -15,8 +15,9 @@
  * tagline it needs no hold-back, and the reason is an ordering in
  * `main.ts`'s `initialize`: it awaits this read's `settle()` (for
  * Orbit) before any path reveals the browse panel, and `settle` either
- * has the answer or aborts the read, which then leaves the default.
- * So the line is settled before the panel is on screen or in the
+ * has the answer or aborts the read. A line the read delivers after
+ * that abort is dropped (`nodeFeatures`), so the default stays. So the
+ * line is settled before the panel is on screen or in the
  * accessibility tree. Moving that wait later (making chat set-up lazy,
  * say) would reopen a visible swap here. A read that fails leaves the
  * default in place.

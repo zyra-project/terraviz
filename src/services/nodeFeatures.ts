@@ -84,7 +84,12 @@ export interface PendingNodeFeatures {
   tagline: Promise<string | null>
   /**
    * The node's dataset-browser subtitle, on the same terms as
-   * {@link tagline}.
+   * {@link tagline} but one: a line the read delivers after a `settle`
+   * deadline aborted it answers null. The browse panel is revealed
+   * once `settle` answers, so a line landing later would swap the
+   * default under a visitor; the abort normally ends the read, and
+   * this holds when a fetch layer carries on regardless. The splash
+   * tagline keeps a late line, since the splash is still up.
    */
   browseSubtitle: Promise<string | null>
 }
@@ -150,7 +155,7 @@ export function startNodeFeaturesRead(opts: NodeFeaturesOptions = {}): PendingNo
       return settled
     },
     tagline: read.then(r => r.tagline),
-    browseSubtitle: read.then(r => r.browseSubtitle),
+    browseSubtitle: read.then(r => (controller.signal.aborted ? null : r.browseSubtitle)),
   }
 }
 

@@ -239,4 +239,26 @@ describe('startNodeFeaturesRead().browseSubtitle', () => {
     })
     expect(await failing.browseSubtitle).toBeNull()
   })
+
+  it('drops a subtitle that lands after a settle deadline, from a fetch that ignored the abort', async () => {
+    // The browse panel is revealed once settle answers, so a late line
+    // would swap the default in front of a visitor. The splash tagline
+    // still takes it: the splash is up for seconds more.
+    let answer: (res: Response) => void = () => {}
+    const read = startNodeFeaturesRead({
+      fetchFn: () => new Promise<Response>(resolve => (answer = resolve)),
+    })
+    await read.settle(5)
+    answer(jsonResponse({ profile: { orgName: 'GSL', tagline: 'Global Systems Laboratory', browseSubtitle: 'Browse GSL datasets' } }))
+    expect(await read.tagline).toBe('Global Systems Laboratory')
+    expect(await read.browseSubtitle).toBeNull()
+  })
+
+  it('keeps a subtitle that arrives before the deadline', async () => {
+    const read = startNodeFeaturesRead({
+      fetchFn: async () => jsonResponse({ profile: { orgName: 'GSL', browseSubtitle: 'Browse GSL datasets' } }),
+    })
+    await read.settle(1_000)
+    expect(await read.browseSubtitle).toBe('Browse GSL datasets')
+  })
 })
