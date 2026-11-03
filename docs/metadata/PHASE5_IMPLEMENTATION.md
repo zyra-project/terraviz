@@ -184,10 +184,11 @@ joined with `datasets` and are not served by any route.
 `POST /api/v1/publish/federation/sync` reads one page of at most 25
 entries per invocation (`page_size`: 1-25). Its counted endpoint test
 includes route reads and audit writes and remains below 50 D1 statements.
-It returns snake_case fields and 503 for peer pull failures. `full: true`
+It returns snake_case fields and 502 for peer pull failures (503 only
+for this node's own `lease_lost`). `full: true`
 restarts an interrupted full sync; subsequent calls omit `full` to
 continue. An `invalid_cursor` result asks the operator to restart.
-The peer list exposes sweep and lease-expiry epoch milliseconds.
+The peer list expresses sweep and lease-expiry times as ISO-8601 instants.
 
 `POST /api/v1/publish/federation/sync` runs this bounded pull now;
 `GET`/`POST /api/v1/publish/federation/peers` list and add peers, and

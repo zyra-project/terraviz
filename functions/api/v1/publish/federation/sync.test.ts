@@ -7,7 +7,7 @@
  * Coverage: the gate, field errors, an unknown or paused peer, a
  * successful pull against a signed feed (mirror rows and audit row),
  * held rows, a refused sweep and its acceptance, and a failed pull
- * that answers 503 with its reason.
+ * that answers 502 (a peer-side fault) with its reason.
  */
 
 import { generateKeyPairSync } from 'node:crypto'
@@ -170,7 +170,7 @@ describe('POST /api/v1/publish/federation/sync', () => {
   it('reports an invalid cursor separately so the operator can restart a full sync', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":"invalid_cursor"}', { status: 400, headers: { 'content-type': 'application/json' } })))
     const res = await onRequestPost(ctx({ body: { peer_id: PEER_ID } }))
-    expect(res.status).toBe(503)
+    expect(res.status).toBe(502)
     expect(await res.json()).toMatchObject({ result: { error: 'invalid_cursor', upstream_status: 400 } })
   })
 
@@ -219,7 +219,7 @@ describe('POST /api/v1/publish/federation/sync', () => {
       complete: true,
       upserted: 2,
       tombstoned: 0,
-      held: 0,
+      held_count: 0,
       reconciled: 0,
       reconcile_pending: true,
     })
@@ -230,9 +230,9 @@ describe('POST /api/v1/publish/federation/sync', () => {
     serveFeed([{ id: 'a', originNode: PEER_ID }], false, { held: ['x'] })
     const res = await onRequestPost(ctx({ body: { peer_id: PEER_ID } }))
     expect(res.status).toBe(200)
-    expect(await res.json()).toMatchObject({ result: { ok: true, upserted: 1, held: 1 } })
+    expect(await res.json()).toMatchObject({ result: { ok: true, upserted: 1, held_count: 1 } })
     expect(sqlite.prepare("SELECT payload_json FROM federated_datasets WHERE remote_id = 'x'").get()).toEqual({ payload_json: '{}' })
-    expect(JSON.parse(auditRows()[0].metadata_json)).toMatchObject({ held: 1 })
+    expect(JSON.parse(auditRows()[0].metadata_json)).toMatchObject({ held_count: 1 })
   })
 
   it('answers 409 while another pull holds the lease', async () => {
@@ -386,7 +386,7 @@ describe('POST /api/v1/publish/federation/sync', () => {
     const prepare = vi.spyOn(sqlite, 'prepare')
     const res = await onRequestPost(ctx({ body: { peer_id: PEER_ID, accept_sweep: { sweep_id: 'RUN1', dropped: 2 } } }))
     expect(res.status).toBe(200)
-    expect(await res.json()).toMatchObject({ result: { held: 25, reconciled: 2, accept_sweep_result: 'ran' } })
+    expect(await res.json()).toMatchObject({ result: { held_count: 25, reconciled: 2, accept_sweep_result: 'ran' } })
     expect(prepare.mock.calls.length).toBeLessThan(50)
     prepare.mockRestore()
   })
@@ -421,13 +421,13 @@ describe('POST /api/v1/publish/federation/sync', () => {
     expect(fn).not.toHaveBeenCalled()
   })
 
-  it('answers 503 with the reason when the peer fails', async () => {
+  it('answers 502 with the reason when the peer feed fails (the peer gave the 503, not us)', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => new Response('down', { status: 503 })),
     )
     const res = await onRequestPost(ctx({ body: { peer_id: PEER_ID, full: true } }))
-    expect(res.status).toBe(503)
+    expect(res.status).toBe(502)
     expect(await res.json()).toMatchObject({ result: { ok: false, error: 'http_status', upstream_status: 503 } })
     expect(JSON.parse(auditRows()[0].metadata_json)).toMatchObject({ ok: false, error: 'http-status' })
     const peer = await d1FederationPeerStore(asD1(sqlite)).getPeer(PEER_ID)

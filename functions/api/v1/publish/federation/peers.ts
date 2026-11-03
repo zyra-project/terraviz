@@ -84,8 +84,10 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
       reconcile_pending: p.sweepRun !== null,
       sweep_refused: isSweepRefused(p),
       sweep_flagged: p.sweepRun !== null && p.sweepFlagged,
-      sweep_after: p.sweepAfterMs,
-      sync_lease_expires: p.syncLeaseExpiresMs ?? null,
+      // ISO-8601, like every other time field in /api/v1 (the internal
+      // peer record keeps these as epoch-ms for the sweep/lease math).
+      sweep_after: p.sweepAfterMs === null ? null : new Date(p.sweepAfterMs).toISOString(),
+      sync_lease_expires: p.syncLeaseExpiresMs == null ? null : new Date(p.syncLeaseExpiresMs).toISOString(),
       mirrored_count: p.mirroredCount,
     })),
   })

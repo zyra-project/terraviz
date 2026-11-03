@@ -274,7 +274,7 @@ describe('GET /api/v1/publish/federation/peers', () => {
     await onRequestPost(ctx({ method: 'POST', body: input() }))
     sqlite.prepare("UPDATE federation_peers SET sweep_run = 'RUN1', sweep_after = 5 WHERE id = ?").run(PEER_ID)
     const due = (await (await onRequestGet(ctx({ method: 'GET' }))).json()) as { peers: Array<Record<string, unknown>> }
-    expect(due.peers[0]).toMatchObject({ reconcile_pending: true, sweep_refused: false, sweep_after: 5 })
+    expect(due.peers[0]).toMatchObject({ reconcile_pending: true, sweep_refused: false, sweep_after: '1970-01-01T00:00:00.005Z' })
     sqlite.prepare('UPDATE federation_peers SET sweep_after = NULL WHERE id = ?').run(PEER_ID)
     const refused = (await (await onRequestGet(ctx({ method: 'GET' }))).json()) as { peers: Array<Record<string, unknown>> }
     expect(refused.peers[0]).toMatchObject({ reconcile_pending: true, sweep_refused: true, sweep_after: null })

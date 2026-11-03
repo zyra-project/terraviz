@@ -7,10 +7,11 @@
  * Metadata Phase 5, step 5b. Body
  * `{ peer_id, full?, page_size?, accept_sweep? }`. Reads one page of
  * at most `page_size` entries (1-25, default 25) and returns
- * snake_case fields, including `held`: how many rows the peer listed as
- * ones it could not serve. There is no scheduler yet, so this is how a
- * mirror is refreshed; a full sync that runs out of pages resumes on
- * the next call. Admin-only, and a 404 unless `FEDERATION_ENABLED` is
+ * snake_case fields, including `held_count`: how many rows the peer
+ * listed as ones it could not serve — a count, named apart from the
+ * feed's own `held`, which is a list of ids. There is no scheduler yet,
+ * so this is how a mirror is refreshed; a full sync that runs out of
+ * pages resumes on the next call. Admin-only, and a 404 unless `FEDERATION_ENABLED` is
  * `'true'`, by the same gate as `peers.ts`.
  *
  * **Two envelopes.** A `result` means a pull ran and may have applied a
@@ -27,10 +28,14 @@
  *   never acknowledged can have run unseen.) 500 `audit_failed`: the audit row an
  *   `accept_sweep` needs could not be written, so nothing ran.
  * - 200 with `result.ok: true`.
- * - 503 with `result.error`: the pull failed. Most codes are the peer's
- *   (`http_status` with `upstream_status`, `bad_signature`, …);
- *   `lease_lost` is this node's. The peer's `last_sync_error` stores the
- *   same failure in kebab-case, with any status appended (`http-status:503`).
+ * - 502 with `result.error`: the pull ran but the peer's feed was
+ *   unreachable or bad (`http_status` with `upstream_status`,
+ *   `bad_signature`, `timeout`, `invalid_cursor`, …) — the peer's fault,
+ *   not this node's, so do not retry a permanent one (e.g. `bad_signature`)
+ *   on a loop. The peer's `last_sync_error` stores the same failure in
+ *   kebab-case, with any status appended (`http-status:503`).
+ * - 503 with `result.error: 'lease_lost'`: this node's own transient
+ *   fault; retry once the lease expires.
  * - 409 with `result.error: 'sweep_refused'`, below. Stop and have a
  *   person look; never retry it on a loop.
  *
@@ -204,7 +209,7 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
     complete: result.complete,
     upserted: result.upserted,
     tombstoned: result.tombstoned,
-    held: result.held,
+    held_count: result.held,
     reconciled: result.reconciled,
     reconcile_pending: result.reconcilePending,
     ...acceptMeta,
@@ -212,7 +217,17 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
     ...(result.sweepRefused ? { sweep_refused: sweepJson(result.sweepRefused) } : {}),
     ...(result.sweepAccepted ? { sweep_accepted: sweepJson(result.sweepAccepted) } : {}),
   })
-  const status = result.ok ? 200 : result.error === 'sweep-refused' ? 409 : 503
+  // A peer/upstream fault is 502: the pull reached us, but the peer's
+  // feed was unreachable or bad, so retrying a permanent one (e.g.
+  // bad_signature) on a loop is pointless. Only this node's own transient
+  // fault (lease-lost) is 503; sweep-refused is 409.
+  const status = result.ok
+    ? 200
+    : result.error === 'sweep-refused'
+      ? 409
+      : result.error === 'lease-lost'
+        ? 503
+        : 502
   return json(status, { result: {
     ok: result.ok,
     full: result.full,
@@ -220,7 +235,7 @@ export const onRequestPost: PagesFunction<CatalogEnv> = async context => {
     pages: result.pages,
     upserted: result.upserted,
     tombstoned: result.tombstoned,
-    held: result.held,
+    held_count: result.held,
     reconciled: result.reconciled,
     reconcile_pending: result.reconcilePending,
     ...(result.error ? { error: result.error.replaceAll('-', '_') } : {}),

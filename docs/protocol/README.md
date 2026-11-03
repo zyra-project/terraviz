@@ -383,10 +383,14 @@ If that last write fails, the peer's `last_sync_at` and
 `last_sync_error` keep their previous values; the audit row has the
 outcome. 409 `sync_in_progress` is another pull holding
 the lease: retry once it expires. 409 `peer_not_active` is a paused or
-blocked peer: stop. A pull that fails answers 503 with `result.error`;
-most codes are the peer's, but `lease_lost` is this node's. Results are
-snake_case, with `upstream_status`, `reconcile_pending` and `held` (rows
-the page held). The peer's `last_sync_error` stores the same failure in
+blocked peer: stop. A pull that fails answers 502 when the peer's feed
+was unreachable or bad (`http_status` with `upstream_status`,
+`bad_signature`, `timeout`, …) — the peer's fault, so do not retry a
+permanent one on a loop — and 503 only for `lease_lost`, this node's own
+transient fault, which clears once the lease expires. Results are
+snake_case, with `upstream_status`, `reconcile_pending` and `held_count`
+(how many rows the page held — a count, unlike the feed's `held`, which
+is a list of ids). The peer's `last_sync_error` stores the same failure in
 kebab-case, with any status appended (`http-status:503`).
 
 A refused sweep answers 409 with `result.error` `sweep_refused` and
@@ -431,8 +435,9 @@ settled. Every complete pull recounts a refused sweep's rows, so a
 scheduler, when one exists, should back off such a peer. A full
 sync replaces a refused sweep only when it completes. Until then the
 refused sweep cannot be accepted, and a full sync cannot be abandoned,
-so start one only for a peer whose feed can be read to its end. Peer lists expose `sweep_after`
-and `sync_lease_expires` as epoch milliseconds. A cancelled invocation
+so start one only for a peer whose feed can be read to its end. Peer lists express `sweep_after`
+and `sync_lease_expires` as ISO-8601 instants (like every other time
+field), or null. A cancelled invocation
 may leave its lease held for up to five minutes. GET `mirrored_count`
 counts present rows; DELETE `removed_rows` counts rows actually removed.
 Bodies over 4 MiB, individual rows over 1 MiB, or invalid row ids stop
