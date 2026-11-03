@@ -18,6 +18,7 @@ import { asD1, makeKV, seedFixtures } from '../_lib/test-helpers'
 import {
   NODE_PROFILE_CACHE_KEY,
   PROFILE_TAGLINE_MAX_LEN,
+  getNodeProfile,
   toPublicProfile,
   type NodeProfileRow,
 } from '../_lib/node-profile-store'
@@ -123,8 +124,22 @@ describe('/api/v1/publish/node-profile', () => {
     expect(profile.orgName).toBe('Renamed Center')
     // Optional fields omitted in the second write are cleared, not kept.
     expect(profile.mission).toBeNull()
-    expect(profile.tagline).toBeNull()
     expect(profile.links).toEqual([])
+    // ...except the tagline, added after them: a writer that predates
+    // it omits it without meaning to clear it.
+    expect(profile.tagline).toBe('Gulf Coast Science')
+  })
+
+  it('clears the tagline on an explicit null or empty string', async () => {
+    for (const cleared of [null, '']) {
+      const { env } = setupEnv()
+      await onRequestPut(ctx({ env, method: 'PUT', body: VALID_BODY }))
+      await onRequestPut(ctx({ env, method: 'PUT', body: { ...VALID_BODY, tagline: cleared } }))
+      const { profile } = await readJson<{ profile: Record<string, unknown> }>(
+        await onRequestGet(ctx({ env, method: 'GET' })),
+      )
+      expect(profile.tagline).toBeNull()
+    }
   })
 
   it('PUT busts the public profile cache, so a new tagline reaches the splash', async () => {
@@ -181,24 +196,46 @@ describe('/api/v1/publish/node-profile', () => {
   })
 
   it('on a database without migration 0060: saves without a tagline, refuses one with 409', async () => {
+    // (The read side of the same database is in node-profile.test.ts.)
     const { env, sqlite } = setupEnv()
     sqlite.prepare('ALTER TABLE node_profile DROP COLUMN tagline').run()
 
     const refused = await onRequestPut(ctx({ env, method: 'PUT', body: VALID_BODY }))
     expect(refused.status).toBe(409)
     const { errors } = await readJson<{ errors: Array<{ field: string; code: string }> }>(refused)
-    expect(errors).toEqual([expect.objectContaining({ field: 'tagline', code: 'migration_pending' })])
+    expect(errors).toEqual([expect.objectContaining({ field: 'tagline', code: 'migration_missing' })])
     // Refused whole: nothing written.
     const none = await onRequestGet(ctx({ env, method: 'GET' }))
     expect((await readJson<{ profile: unknown }>(none)).profile).toBeNull()
 
-    const saved = await onRequestPut(ctx({ env, method: 'PUT', body: { ...VALID_BODY, tagline: null } }))
-    expect(saved.status).toBe(200)
+    for (const body of [{ ...VALID_BODY, tagline: null }, { orgName: 'Coastal Science Center' }]) {
+      const saved = await onRequestPut(ctx({ env, method: 'PUT', body }))
+      expect(saved.status).toBe(200)
+    }
     const { profile } = await readJson<{ profile: Record<string, unknown> }>(
       await onRequestGet(ctx({ env, method: 'GET' })),
     )
     expect(profile.orgName).toBe('Coastal Science Center')
     expect(profile.tagline).toBeNull()
+  })
+
+  it('does not mistake a one-off database error for a missing column', async () => {
+    const { env } = setupEnv()
+    await onRequestPut(ctx({ env, method: 'PUT', body: VALID_BODY }))
+    const db = env.CATALOG_DB as D1Database
+    let failNext = true
+    const flaky = {
+      prepare(sql: string) {
+        if (failNext && sql.includes('tagline')) {
+          failNext = false
+          throw new Error('D1_ERROR: Network connection lost.')
+        }
+        return db.prepare(sql)
+      },
+    } as unknown as D1Database
+    await expect(getNodeProfile(flaky)).rejects.toThrow('Network connection lost')
+    // The retry reads the real tagline, not a fallback null.
+    expect((await getNodeProfile(flaky))?.tagline).toBe('Gulf Coast Science')
   })
 
   it('400 with field errors for a missing orgName and a non-http link', async () => {

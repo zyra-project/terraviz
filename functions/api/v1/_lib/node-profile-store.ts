@@ -109,9 +109,11 @@ const BASE_COLUMNS = `org_name, mission, about_md, region_focus, default_tone,
  * public identity read, whose fallback turns every feature back on,
  * Orbit included, on a node that turned it off — the hazard
  * `node-settings-store` keeps 0057 off its hot path for. So the full
- * read is tried first and, if it fails for any reason, the pre-0060
- * columns, reading `tagline` as null. A failure that is not the
- * schema fails the second query too and propagates.
+ * read is tried first and, **only** if it fails for a missing column,
+ * the pre-0060 columns, reading `tagline` as null. Any other failure
+ * propagates: a one-off error answered with the fallback would cache
+ * "no tagline" for the TTL, and hand the portal an empty field whose
+ * next Save clears the real one.
  */
 export async function getNodeProfile(db: D1Database): Promise<NodeProfileRow | null> {
   try {
@@ -119,7 +121,8 @@ export async function getNodeProfile(db: D1Database): Promise<NodeProfileRow | n
       .prepare(`SELECT ${BASE_COLUMNS}, tagline FROM node_profile WHERE id = 1 LIMIT 1`)
       .first<NodeProfileRow>()
     return row ?? null
-  } catch {
+  } catch (err) {
+    if (!isMissingColumn(err)) throw err
     const row = await db
       .prepare(`SELECT ${BASE_COLUMNS} FROM node_profile WHERE id = 1 LIMIT 1`)
       .first<Omit<NodeProfileRow, 'tagline'>>()
@@ -127,13 +130,22 @@ export async function getNodeProfile(db: D1Database): Promise<NodeProfileRow | n
   }
 }
 
-/** True when this database has 0060's `tagline` column. */
+/** SQLite's error for a column the table does not have, as D1 and
+ *  better-sqlite3 both word it. */
+function isMissingColumn(err: unknown): boolean {
+  return err instanceof Error && /no such column/i.test(err.message)
+}
+
+/** True when this database has 0060's `tagline` column. Any failure
+ *  other than the missing column propagates, so a one-off error is
+ *  not reported as a pending migration. */
 async function hasTaglineColumn(db: D1Database): Promise<boolean> {
   try {
     await db.prepare('SELECT tagline FROM node_profile LIMIT 0').all()
     return true
-  } catch {
-    return false
+  } catch (err) {
+    if (isMissingColumn(err)) return false
+    throw err
   }
 }
 
@@ -203,16 +215,20 @@ export interface ValidatedProfileInput {
   region_focus: string | null
   default_tone: string | null
   links_json: string | null
-  tagline: string | null
+  /** `undefined` (the body did not name it) keeps the stored value;
+   *  null clears it. */
+  tagline: string | null | undefined
 }
 
 /** Upsert the singleton profile. `logo_ref` is deliberately absent
  *  from the column list — the text-fields PUT must not clear a logo
  *  set through the dedicated upload route.
  *
- *  `tagline` is named only where 0060 has been applied, so the rest of
- *  the profile still saves on a database without it
- *  ({@link getNodeProfile}). A tagline given there throws
+ *  `tagline` is named only when the body named it, so a writer that
+ *  predates the field leaves it as it was (see
+ *  {@link validateProfileInput}), and only where 0060 has been
+ *  applied, so the rest of the profile still saves on a database
+ *  without it ({@link getNodeProfile}). A tagline given there throws
  *  {@link TaglineMigrationPendingError} before anything is written,
  *  rather than saving the rest and dropping it. The column names are
  *  fixed strings chosen here, never input; every value is bound. */
@@ -222,8 +238,9 @@ export async function setNodeProfile(
   input: ValidatedProfileInput,
   now: string = new Date().toISOString(),
 ): Promise<NodeProfileRow> {
-  const withTagline = await hasTaglineColumn(db)
-  if (!withTagline && input.tagline != null) throw new TaglineMigrationPendingError()
+  const named = input.tagline !== undefined
+  const withTagline = named && (await hasTaglineColumn(db))
+  if (named && !withTagline && input.tagline != null) throw new TaglineMigrationPendingError()
   const columns = [
     'org_name',
     'mission',
@@ -339,9 +356,16 @@ function isHttpUrl(value: string): boolean {
 
 /**
  * Validate a `PUT /api/v1/publish/node-profile` body. Only `orgName`
- * is mandatory — a node can fill in the rest over time. `tagline` is
- * optional like the other prose fields, and like them is cleared by a
- * PUT that omits it (the PUT replaces the whole profile). Links are
+ * is mandatory — a node can fill in the rest over time.
+ *
+ * The PUT replaces the text fields 0028 created, so omitting one of
+ * those clears it: every writer has always sent them. A field added
+ * since is different — a writer coded before it omits it because it
+ * does not know it, not to clear it — so a later field is **kept when
+ * omitted** and cleared by an explicit null or empty string, the rule
+ * `logo_ref` (0030) and node-settings' sections already follow.
+ * `tagline` (0060) is the first such text field; any further one
+ * should follow it. Links are
  * validated as `{label, url}` pairs with http(s) urls; anything else
  * is a field error rather than a silent drop, so the operator sees
  * what the form refused.
@@ -366,11 +390,12 @@ export function validateProfileInput(
   const aboutMd = optionalText(body, 'aboutMd', PROFILE_ABOUT_MAX_LEN, errors)
   const regionFocus = optionalText(body, 'regionFocus', PROFILE_REGION_MAX_LEN, errors)
   const defaultTone = optionalText(body, 'defaultTone', PROFILE_TONE_MAX_LEN, errors)
-  const tagline = optionalText(body, 'tagline', PROFILE_TAGLINE_MAX_LEN, errors)
+  const tagline =
+    body.tagline === undefined ? undefined : optionalText(body, 'tagline', PROFILE_TAGLINE_MAX_LEN, errors)
   if (tagline != null && !hasOnlyTaglineChars(tagline)) {
     errors.push({
       field: 'tagline',
-      code: 'invalid',
+      code: 'invalid_chars',
       message: '`tagline` must be a single line of visible text, with no tabs, line breaks or invisible characters.',
     })
   }

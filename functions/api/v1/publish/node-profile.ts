@@ -10,11 +10,13 @@
  *       generated drafts every author sees), writes are privileged.
  * PUT → Upsert the profile. Body:
  *       `{ orgName, mission?, aboutMd?, regionFocus?, defaultTone?,
- *          tagline?, links? }` — only `orgName` is mandatory, and an
- *       omitted optional field is cleared (the PUT replaces the
- *       whole profile; the logo, set through its own route, is
- *       kept). 409 `{ errors }` with code `migration_pending` for a
- *       tagline on a database without migration 0060. 400 `{ errors }`
+ *          tagline?, links? }` — only `orgName` is mandatory. An
+ *       omitted `mission` / `aboutMd` / `regionFocus` /
+ *       `defaultTone` / `links` is cleared; an omitted `tagline`, a
+ *       later field, is kept (null or "" clears it), and so is the
+ *       logo, which has its own route. 409 `{ errors }` with code
+ *       `migration_missing` for a tagline on a database without
+ *       migration 0060. 400 `{ errors }`
  *       for body problems (the publisher-API field-error envelope).
  *
  * Writes require a privileged caller (admin / service) and are
@@ -97,7 +99,7 @@ export const onRequestPut: PagesFunction<CatalogEnv> = async context => {
         errors: [
           {
             field: 'tagline',
-            code: 'migration_pending',
+            code: 'migration_missing',
             message:
               'This node cannot store a tagline until catalog migration 0060 is applied. Apply pending migrations, or save with the tagline empty.',
           },
