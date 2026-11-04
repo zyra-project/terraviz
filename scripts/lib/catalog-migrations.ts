@@ -7,13 +7,15 @@
  * apply them to an in-memory DB" guarantees the dump and the test
  * see byte-identical SQL.
  *
- * Wrangler's D1 migration runner strips inline `-- comment` text
- * before submitting CREATE statements to SQLite, while `db.exec()`
- * preserves them in `sqlite_master.sql`. We standardise on the
+ * What Wrangler's D1 migration runner stores in `sqlite_master.sql`
+ * depends on its version: 4.112 stripped inline `-- comment` text
+ * from CREATE statements, and 4.153 keeps it, as `db.exec()` does.
+ * The structure is the same either way. We standardise on the
  * `db.exec()` path because it works without Wrangler — contributors
  * running the test or the dump don't need a local D1 in
- * `.wrangler/`. The on-disk Wrangler D1 file is therefore *not* the
- * canonical schema source; the migrations on disk are.
+ * `.wrangler/` — and because it does not move with Wrangler. The
+ * on-disk Wrangler D1 file is therefore *not* the canonical schema
+ * source; the migrations on disk are.
  */
 
 import { readFileSync, readdirSync } from 'node:fs'

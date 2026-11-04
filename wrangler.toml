@@ -1,7 +1,20 @@
 # Cloudflare Pages configuration
 
 name = "terraviz"
-compatibility_date = "2024-12-01"
+# Keep equal to the Pages project's own date (dashboard: Settings →
+# Runtime, production and preview). This file has no
+# `pages_build_output_dir`, so `pages deploy` ignores it and takes the
+# project's date and bindings. Only `pages dev` reads this date, so a
+# gap means local dev runs a runtime the edge does not. The rest of
+# the file is not local-only: wrangler's D1 commands read the D1
+# blocks below, CI's remote migrations included. Adding that key
+# would make this file production's config instead, dropping the AI
+# binding that is deliberately not declared below. From 2025-06-01
+# the runtime allows code generation from strings during startup
+# (never inside a request), which ajv needs to compile its schemas at
+# module load; before it, `pages dev` fails to start.
+# scripts/offline-dev-loop.test.ts guards the key and the date.
+compatibility_date = "2026-04-24"
 
 # Workers AI — deliberately NOT declared here.
 #
