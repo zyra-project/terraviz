@@ -36,7 +36,10 @@ tauri-plugin-apple-intelligence = { path = "plugins/apple-intelligence" }
 # updates). See docs/MOBILE_APP_PLAN.md.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
-tauri-plugin-updater = "2"
+# 2.14.1 is the first release on zip ^9; earlier 2.x pin zip ^4, which
+# carries GHSA-m665-v7pm-7grj (critical) and five more extraction
+# advisories. The floor keeps a lock regeneration from going back.
+tauri-plugin-updater = "2.14.1"
 
 # iOS keeps the real keychain backend (apple-native covers macOS + iOS) but
 # does not get the updater plugin.
