@@ -22,12 +22,13 @@
  * in-memory and compares to the on-disk file byte-for-byte.
  *
  * The dump runs against in-memory SQLite, *not* the Wrangler
- * `.wrangler/state` file. Wrangler's migration runner strips
- * inline comments before executing CREATE statements, so the SQL
- * stored in the on-disk database differs from what `db.exec()`
- * preserves. Standardising on the in-memory path keeps the dump
- * working for contributors who haven't run `npm run db:migrate`
- * yet and keeps the dump and the test definitionally identical.
+ * `.wrangler/state` file. Whether Wrangler's migration runner keeps
+ * inline comments in the stored CREATE statements has changed
+ * between versions (4.112 stripped them, 4.153 keeps them), so the
+ * on-disk SQL text is not a stable thing to snapshot. Standardising
+ * on the in-memory path keeps the dump working for contributors who
+ * haven't run `npm run db:migrate` yet and keeps the dump and the
+ * test definitionally identical.
  */
 
 import { writeFileSync } from 'node:fs'
