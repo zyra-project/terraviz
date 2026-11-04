@@ -1,7 +1,13 @@
 # Cloudflare Pages configuration
 
 name = "terraviz"
-compatibility_date = "2024-12-01"
+# Keep equal to the Pages project's own date (dashboard: Settings →
+# Runtime, production and preview). `pages deploy` reads the project's
+# date, not this one, and only `pages dev` reads this file's, so a gap
+# means local dev runs a runtime the edge does not. Before 2025-06-01
+# the runtime refuses code generation from strings, which ajv needs to
+# compile its schemas at module load, and `pages dev` fails to start.
+compatibility_date = "2026-04-24"
 
 # Workers AI — deliberately NOT declared here.
 #
