@@ -310,12 +310,15 @@ describe('voice stream relay', () => {
   let pairs: Array<{ client: FakeSocket; server: FakeSocket }>
   let upstream: FakeSocket
   let fetched: Array<{ url: string; headers: Record<string, string> }>
+  // What the stand-in gateway answers: a socket by default, or a refusal.
+  let gatewayAnswer: () => Promise<{ webSocket: FakeSocket | null; status?: number }>
   let ipCounter = 0
 
   beforeEach(() => {
     pairs = []
     upstream = new FakeSocket()
     fetched = []
+    gatewayAnswer = async () => ({ webSocket: upstream, status: 101 })
     vi.stubGlobal('WebSocketPair', class {
       0: FakeSocket
       1: FakeSocket
@@ -329,7 +332,7 @@ describe('voice stream relay', () => {
     vi.stubGlobal('fetch', async (url: string, init?: { headers?: Record<string, string> }) => {
       if (!/^https?:\/\//.test(url)) throw new TypeError(`Fetch API cannot load: ${url}`)
       fetched.push({ url, headers: init?.headers ?? {} })
-      return { webSocket: upstream }
+      return gatewayAnswer()
     })
     vi.stubGlobal('Response', class {
       status: number
@@ -357,7 +360,13 @@ describe('voice stream relay', () => {
     const { res, server } = await open()
     expect(fetched).toHaveLength(1)
     expect(fetched[0].url.startsWith('https://gateway.ai.cloudflare.com/v1/a/g/workers-ai?')).toBe(true)
-    expect(fetched[0].headers).toMatchObject({ Upgrade: 'websocket', 'cf-aig-authorization': 'tok' })
+    // Exactly these: nothing of the visitor's request (cookies, Origin, IP)
+    // is forwarded, and the gateway is asked not to log the session.
+    expect(fetched[0].headers).toEqual({
+      Upgrade: 'websocket',
+      'cf-aig-authorization': 'tok',
+      'cf-aig-collect-log': 'false',
+    })
     // A refusal sends one error frame and closes; the relay sends nothing yet.
     expect(pairs).toHaveLength(1)
     expect(server.sent).toEqual([])
@@ -390,5 +399,41 @@ describe('voice stream relay', () => {
     expect(server.sent).toHaveLength(1)
     expect(server.sent[0]).toBeInstanceOf(ArrayBuffer)
     expect(Array.from(new Uint8Array(server.sent[0] as ArrayBuffer))).toEqual([9, 8, 7])
+  })
+
+  // A refused upgrade must still reach the client as an error frame, and
+  // must now leave a trace in the server log, since a silent refusal is
+  // what hid the wss:// bug. The trace names the status and nothing else:
+  // not the token, not the account path in the URL.
+  it('reports a gateway that refuses the upgrade, logging only its status', async () => {
+    gatewayAnswer = async () => ({ webSocket: null, status: 401 })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const { server } = await open()
+      expect(server.sent).toEqual([JSON.stringify({ type: 'error', code: 'upstream_unavailable' })])
+      expect(server.closed).toBe(true)
+      expect(warn).toHaveBeenCalledTimes(1)
+      const logged = warn.mock.calls[0].join(' ')
+      expect(logged).toContain('HTTP 401')
+      expect(logged).not.toContain('tok')
+      expect(logged).not.toContain('/v1/a/g')
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('reports a gateway fetch that throws, logging the error name but not its message', async () => {
+    gatewayAnswer = async () => { throw new TypeError('network down for https://gateway.ai.cloudflare.com/v1/a/g/') }
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const { server } = await open()
+      expect(server.sent).toEqual([JSON.stringify({ type: 'error', code: 'upstream_unavailable' })])
+      expect(warn).toHaveBeenCalledTimes(1)
+      const logged = warn.mock.calls[0].join(' ')
+      expect(logged).toContain('TypeError')
+      expect(logged).not.toContain('/v1/a/g')
+    } finally {
+      warn.mockRestore()
+    }
   })
 })

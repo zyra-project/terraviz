@@ -159,13 +159,29 @@ export const onRequest: PagesFunction<StreamEnv> = async (context) => {
   const lang = new URL(request.url).searchParams.get('lang') ?? 'en'
 
   // Open the upstream gateway socket (server-side, with the secret).
+  // A fresh header set, so nothing of the visitor's request (cookies,
+  // Origin, IP, user agent) reaches the gateway; the test pins it to
+  // exactly these three. `cf-aig-collect-log: false` because a gateway
+  // logs requests and responses by default, and docs/ORBIT_VOICE_PLAN.md
+  // §6 says no audio is ever persisted. Cloudflare documents the header
+  // for HTTP requests; whether it covers a WebSocket session is part of
+  // the plan's pending live validation (check the gateway's Logs page).
   let upstream: WebSocket | null = null
   try {
     const resp = await fetch(buildGatewayUrl(env, lang), {
-      headers: { Upgrade: 'websocket', 'cf-aig-authorization': gatewayConfig(env).token ?? '' },
+      headers: {
+        Upgrade: 'websocket',
+        'cf-aig-authorization': gatewayConfig(env).token ?? '',
+        'cf-aig-collect-log': 'false',
+      },
     })
     upstream = resp.webSocket
-  } catch {
+    // Say why, in the server log only: a refusal that left no trace is
+    // how this route went unnoticed while it relayed nothing. Status
+    // only; never the URL's account path, the token, or a body.
+    if (!upstream) console.warn(`[voice/stream] gateway did not upgrade: HTTP ${resp.status}`)
+  } catch (err) {
+    console.warn('[voice/stream] gateway fetch failed:', err instanceof Error ? err.name : 'UnknownError')
     upstream = null
   }
   // Same reasoning: a 502 is unreadable by a browser WS. Report the
