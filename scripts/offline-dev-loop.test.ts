@@ -50,6 +50,41 @@ describe('the offline dev loop', () => {
     ).toEqual([])
   })
 
+  // `pages deploy` ignores this file only because it has no
+  // `pages_build_output_dir`: with one, wrangler reads it as the
+  // project's config, and production loses the AI binding that the
+  // test above keeps out of it. wrangler prints a hint suggesting the
+  // key on every deploy, which is how it would get added.
+  it('wrangler.toml stays a local-dev file, not the deploy config', () => {
+    const offending = read('wrangler.toml')
+      .split('\n')
+      .map((line, i) => ({ line: line.trim(), n: i + 1 }))
+      .filter(({ line }) => /^pages_build_output_dir\s*=/.test(line))
+
+    expect(
+      offending,
+      '`pages_build_output_dir` makes `wrangler pages deploy` treat wrangler.toml as the ' +
+        "production config, replacing the dashboard's bindings with this file's, which " +
+        'leave out AI on purpose. Configure the deployed project in the dashboard instead.',
+    ).toEqual([])
+  })
+
+  // Before 2025-06-01 the Workers runtime refuses code generation from
+  // strings even at startup, and functions/api/v1/_lib/stac-query.ts
+  // compiles an ajv schema at module load, so `pages dev` dies with an
+  // EvalError before serving anything. It did, from 2024-12-01, until
+  // the date was raised to match the Pages project's.
+  it('wrangler.toml sets a compatibility date pages dev can start on', () => {
+    const date = /^compatibility_date\s*=\s*"(\d{4}-\d{2}-\d{2})"/m.exec(read('wrangler.toml'))?.[1]
+    expect(date, 'wrangler.toml has no compatibility_date').toBeDefined()
+    expect(
+      date! >= '2025-06-01',
+      `compatibility_date ${date} is before 2025-06-01, where the runtime refuses ajv's ` +
+        'startup code generation and `npm run dev:functions` fails to start. Match the ' +
+        "Pages project's date (dashboard: Settings → Runtime).",
+    ).toBe(true)
+  })
+
   // Removing the block without leaving a way back would trade one
   // broken path for another: with no binding at all there is no way
   // to exercise Orbit chat, voice or live embeddings against the real

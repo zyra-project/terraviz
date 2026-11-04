@@ -2,11 +2,16 @@
 
 name = "terraviz"
 # Keep equal to the Pages project's own date (dashboard: Settings →
-# Runtime, production and preview). `pages deploy` reads the project's
-# date, not this one, and only `pages dev` reads this file's, so a gap
-# means local dev runs a runtime the edge does not. Before 2025-06-01
-# the runtime refuses code generation from strings, which ajv needs to
-# compile its schemas at module load, and `pages dev` fails to start.
+# Runtime, production and preview). This file has no
+# `pages_build_output_dir`, so `pages deploy` ignores it and takes the
+# project's date and bindings; only `pages dev` reads it, and a gap
+# means local dev runs a runtime the edge does not. Adding that key
+# would make this file production's config instead, dropping the AI
+# binding that is deliberately not declared below. From 2025-06-01
+# the runtime allows code generation from strings during startup
+# (never inside a request), which ajv needs to compile its schemas at
+# module load; before it, `pages dev` fails to start.
+# scripts/offline-dev-loop.test.ts guards both.
 compatibility_date = "2026-04-24"
 
 # Workers AI — deliberately NOT declared here.
