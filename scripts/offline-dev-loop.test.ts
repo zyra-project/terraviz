@@ -2,7 +2,7 @@
 // Copyright 2026 The Zyra Project
 
 import { describe, expect, it } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -54,12 +54,13 @@ describe('the offline dev loop', () => {
   // `pages_build_output_dir`: with one, wrangler reads it as the
   // project's config, and production loses the AI binding that the
   // test above keeps out of it. wrangler prints a hint suggesting the
-  // key on every deploy, which is how it would get added.
+  // key on every deploy, which is how it would get added. TOML allows
+  // the key quoted, and wrangler honours that too.
   it('wrangler.toml stays a local-dev file, not the deploy config', () => {
     const offending = read('wrangler.toml')
       .split('\n')
       .map((line, i) => ({ line: line.trim(), n: i + 1 }))
-      .filter(({ line }) => /^pages_build_output_dir\s*=/.test(line))
+      .filter(({ line }) => /^["']?pages_build_output_dir["']?\s*=/.test(line))
 
     expect(
       offending,
@@ -69,14 +70,38 @@ describe('the offline dev loop', () => {
     ).toEqual([])
   })
 
+  // wrangler looks for wrangler.json, then wrangler.jsonc, then
+  // wrangler.toml, so either JSON file would replace this one for both
+  // `pages dev` and `pages deploy`, and none of the guards here would
+  // see it.
+  it('no wrangler.json or wrangler.jsonc shadows wrangler.toml', () => {
+    const shadows = ['wrangler.json', 'wrangler.jsonc'].filter(f => existsSync(resolve(REPO_ROOT, f)))
+    expect(
+      shadows,
+      'wrangler reads wrangler.json / wrangler.jsonc ahead of wrangler.toml; keep the ' +
+        'configuration in wrangler.toml, where these tests can see it.',
+    ).toEqual([])
+  })
+
   // Before 2025-06-01 the Workers runtime refuses code generation from
   // strings even at startup, and functions/api/v1/_lib/stac-query.ts
   // compiles an ajv schema at module load, so `pages dev` dies with an
   // EvalError before serving anything. It did, from 2024-12-01, until
-  // the date was raised to match the Pages project's.
-  it('wrangler.toml sets a compatibility date pages dev can start on', () => {
-    const date = /^compatibility_date\s*=\s*"(\d{4}-\d{2}-\d{2})"/m.exec(read('wrangler.toml'))?.[1]
-    expect(date, 'wrangler.toml has no compatibility_date').toBeDefined()
+  // the date was raised to match the Pages project's. Only the
+  // top-level date counts (an `[env.*]` table's applies to that
+  // environment alone), so the search stops at the first table header;
+  // TOML also allows the key quoted and the date single-quoted or bare.
+  // A missing date fails too: `pages dev` would then fall back to
+  // wrangler's own default, which moves with every release and tracks
+  // nothing the Pages project runs.
+  it('wrangler.toml sets a top-level compatibility date of 2025-06-01 or later', () => {
+    const topLevel = read('wrangler.toml').split(/^\s*\[/m)[0]
+    const date = /^\s*["']?compatibility_date["']?\s*=\s*["']?(\d{4}-\d{2}-\d{2})["']?\s*(?:#.*)?$/m.exec(topLevel)?.[1]
+    expect(
+      date,
+      'wrangler.toml sets no top-level compatibility_date. Set it to the Pages ' +
+        "project's date (dashboard: Settings → Runtime).",
+    ).toBeDefined()
     expect(
       date! >= '2025-06-01',
       `compatibility_date ${date} is before 2025-06-01, where the runtime refuses ajv's ` +
