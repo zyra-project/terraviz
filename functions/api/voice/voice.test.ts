@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Zyra Project
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultFeatures } from '../../../src/types/node-features'
 import { NODE_FEATURES_CACHE_KEY } from '../v1/_lib/node-settings-store'
 import { makeKV } from '../v1/_lib/test-helpers'
@@ -243,7 +243,8 @@ describe('voice stream proxy helpers', () => {
 
   it('buildGatewayUrl targets Nova-3 linear16 16k with interim results + language', () => {
     const url = buildGatewayUrl({ CF_ACCOUNT_ID: 'acct', CF_AI_GATEWAY: 'gw', CF_AIG_TOKEN: 't' }, 'es-MX')
-    expect(url).toContain('wss://gateway.ai.cloudflare.com/v1/acct/gw/workers-ai?')
+    // https, not wss: the URL goes to fetch(), which refuses wss:// in a Worker.
+    expect(url.startsWith('https://gateway.ai.cloudflare.com/v1/acct/gw/workers-ai?')).toBe(true)
     expect(url).toContain('model=%40cf%2Fdeepgram%2Fnova-3')
     expect(url).toContain('encoding=linear16')
     expect(url).toContain('sample_rate=16000')
@@ -263,7 +264,131 @@ describe('voice stream proxy helpers', () => {
       { CF_ACCOUNT_ID: ' acct\n', CF_AI_GATEWAY: 'gw ', CF_AIG_TOKEN: 't', VOICE_STREAM_MODEL: ' @cf/deepgram/flux\n' },
       'en',
     )
-    expect(url).toContain('wss://gateway.ai.cloudflare.com/v1/acct/gw/workers-ai?')
+    expect(url.startsWith('https://gateway.ai.cloudflare.com/v1/acct/gw/workers-ai?')).toBe(true)
     expect(url).toContain('model=%40cf%2Fdeepgram%2Fflux')
+  })
+})
+
+/**
+ * The relay itself, which nothing exercised until it turned out never to
+ * have relayed. Node has no workerd, so the stand-ins carry the two
+ * runtime behaviours that broke it, each checked against workerd 1.20261023
+ * through Miniflare:
+ *
+ * - `fetch()` refuses a `wss://` URL ("Fetch API cannot load"); an outbound
+ *   WebSocket is `https://` plus `Upgrade: websocket`.
+ * - From compatibility date 2026-03-17 a socket delivers a binary message as
+ *   a `Blob` unless its `binaryType` is `'arraybuffer'`, and `send()` turns a
+ *   Blob into the text "[object Blob]".
+ *
+ * `Response` is stubbed too: Node's refuses status 101.
+ */
+describe('voice stream relay', () => {
+  class FakeSocket {
+    binaryType: 'blob' | 'arraybuffer' = 'blob'
+    accepted = false
+    closed = false
+    sent: unknown[] = []
+    private listeners = new Map<string, Array<(ev: { data?: unknown }) => void>>()
+    accept(): void { this.accepted = true }
+    addEventListener(type: string, fn: (ev: { data?: unknown }) => void): void {
+      this.listeners.set(type, [...(this.listeners.get(type) ?? []), fn])
+    }
+    // The runtime's send() stringifies a Blob; record what it would put on the wire.
+    send(data: unknown): void { this.sent.push(data instanceof Blob ? String(data) : data) }
+    close(): void { this.closed = true }
+    /** A frame arriving from the far end, typed as the runtime would type it. */
+    receive(data: Uint8Array | string): void {
+      const ev = typeof data === 'string' || this.binaryType === 'arraybuffer'
+        ? { data: typeof data === 'string' ? data : data.slice().buffer }
+        : { data: new Blob([data.slice()]) }
+      for (const fn of this.listeners.get('message') ?? []) fn(ev)
+    }
+  }
+
+  const CONFIGURED = { CF_ACCOUNT_ID: 'a', CF_AI_GATEWAY: 'g', CF_AIG_TOKEN: 'tok' }
+  let pairs: Array<{ client: FakeSocket; server: FakeSocket }>
+  let upstream: FakeSocket
+  let fetched: Array<{ url: string; headers: Record<string, string> }>
+  let ipCounter = 0
+
+  beforeEach(() => {
+    pairs = []
+    upstream = new FakeSocket()
+    fetched = []
+    vi.stubGlobal('WebSocketPair', class {
+      0: FakeSocket
+      1: FakeSocket
+      constructor() {
+        const pair = { client: new FakeSocket(), server: new FakeSocket() }
+        pairs.push(pair)
+        this[0] = pair.client
+        this[1] = pair.server
+      }
+    })
+    vi.stubGlobal('fetch', async (url: string, init?: { headers?: Record<string, string> }) => {
+      if (!/^https?:\/\//.test(url)) throw new TypeError(`Fetch API cannot load: ${url}`)
+      fetched.push({ url, headers: init?.headers ?? {} })
+      return { webSocket: upstream }
+    })
+    vi.stubGlobal('Response', class {
+      status: number
+      webSocket: unknown
+      constructor(_body: unknown, init?: { status?: number; webSocket?: unknown }) {
+        this.status = init?.status ?? 200
+        this.webSocket = init?.webSocket
+      }
+    })
+  })
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  async function open(): Promise<{ res: { status: number; webSocket: unknown }; server: FakeSocket }> {
+    const request = fakeReq({
+      url: `${ORIGIN}/api/voice/stream?lang=en`,
+      origin: ORIGIN,
+      // A fresh address per case: the per-IP rate limiter is module state.
+      headers: { Upgrade: 'websocket', 'CF-Connecting-IP': `203.0.113.${++ipCounter}` },
+    })
+    const res = await stream({ request, env: CONFIGURED } as unknown as Parameters<typeof stream>[0])
+    return { res: res as unknown as { status: number; webSocket: unknown }, server: pairs[0]?.server }
+  }
+
+  it('opens the gateway socket over https with the secret, and relays rather than refusing', async () => {
+    const { res, server } = await open()
+    expect(fetched).toHaveLength(1)
+    expect(fetched[0].url.startsWith('https://gateway.ai.cloudflare.com/v1/a/g/workers-ai?')).toBe(true)
+    expect(fetched[0].headers).toMatchObject({ Upgrade: 'websocket', 'cf-aig-authorization': 'tok' })
+    // A refusal sends one error frame and closes; the relay sends nothing yet.
+    expect(pairs).toHaveLength(1)
+    expect(server.sent).toEqual([])
+    expect(server.closed).toBe(false)
+    expect(res.status).toBe(101)
+    expect(res.webSocket).toBe(pairs[0].client)
+    expect(upstream.accepted).toBe(true)
+  })
+
+  it('relays an audio frame to the gateway as bytes, not as "[object Blob]"', async () => {
+    const { server } = await open()
+    server.receive(new Uint8Array([1, 2, 3]))
+    expect(upstream.sent).toHaveLength(1)
+    expect(upstream.sent[0]).toBeInstanceOf(ArrayBuffer)
+    expect(Array.from(new Uint8Array(upstream.sent[0] as ArrayBuffer))).toEqual([1, 2, 3])
+  })
+
+  it('relays a transcript back to the client unchanged', async () => {
+    const { server } = await open()
+    const transcript = JSON.stringify({ channel: { alternatives: [{ transcript: 'hello' }] }, is_final: true })
+    upstream.receive(transcript)
+    expect(server.sent).toEqual([transcript])
+  })
+
+  // Deepgram answers in JSON text, but the relay is an opaque pass-through,
+  // so a binary frame coming back must arrive as bytes too.
+  it('relays a binary frame from the gateway back as bytes', async () => {
+    const { server } = await open()
+    upstream.receive(new Uint8Array([9, 8, 7]))
+    expect(server.sent).toHaveLength(1)
+    expect(server.sent[0]).toBeInstanceOf(ArrayBuffer)
+    expect(Array.from(new Uint8Array(server.sent[0] as ArrayBuffer))).toEqual([9, 8, 7])
   })
 })

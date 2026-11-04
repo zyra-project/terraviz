@@ -38,6 +38,14 @@ streaming path (Deepgram Nova-3/Flux via the AI Gateway realtime
 endpoint) has now landed too — the `/api/voice/stream` proxy + a client
 WS engine for **live interim transcripts**, flag-gated
 (`VITE_VOICE_WS_STREAMING`) and pending live AI-Gateway validation.
+Until November 2026 that path could not have worked at all: the proxy
+fetched the gateway's `wss://` URL, which a Worker's `fetch()` refuses,
+so every client got `upstream_unavailable` and fell back to batch
+Whisper without a word; and from compatibility date 2026-03-17 it would
+have relayed each audio frame as the text `"[object Blob]"`. Both are
+fixed in `functions/api/voice/stream.ts` (`https://` plus
+`binaryType = 'arraybuffer'`), with a relay test in `voice.test.ts`, so
+a live validation now tests the gateway rather than the proxy.
 **Phase 3.5 wake-word** has now landed as well: the on-device
 `WakeWordDetector` + the **openWakeWord ONNX scorer** (built-in `hey
 jarvis`; lazy onnxruntime-web, operator-hosted models, runbook +

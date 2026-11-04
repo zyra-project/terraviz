@@ -92,7 +92,17 @@ export function streamConfigured(env: StreamEnv): boolean {
   return !!(accountId && gateway && token)
 }
 
-/** Build the AI Gateway realtime WS URL for a locale. Pure — tested. */
+/**
+ * Build the AI Gateway realtime URL for a locale. Pure — tested.
+ *
+ * `https://`, not the `wss://` the gateway's docs show for a browser
+ * client: a Worker opens an outbound WebSocket by `fetch()` with an
+ * `Upgrade: websocket` header, and the Workers runtime refuses a
+ * `wss://` URL outright ("Fetch API cannot load"). With `wss://` here
+ * the upstream fetch always threw, the handler reported
+ * `upstream_unavailable`, and every client fell back to batch Whisper
+ * without a word.
+ */
 export function buildGatewayUrl(env: StreamEnv, lang: string): string {
   const params = new URLSearchParams({
     model: env.VOICE_STREAM_MODEL?.trim() || '@cf/deepgram/nova-3',
@@ -103,7 +113,7 @@ export function buildGatewayUrl(env: StreamEnv, lang: string): string {
   const base = baseLang(lang)
   if (base) params.set('language', base)
   const { accountId, gateway } = gatewayConfig(env)
-  return `wss://gateway.ai.cloudflare.com/v1/${accountId}/${gateway}/workers-ai?${params.toString()}`
+  return `https://gateway.ai.cloudflare.com/v1/${accountId}/${gateway}/workers-ai?${params.toString()}`
 }
 
 /**
@@ -167,6 +177,14 @@ export const onRequest: PagesFunction<StreamEnv> = async (context) => {
   const server = pair[1]
   server.accept()
   upstream.accept()
+  // From compatibility date 2026-03-17 (`websocket_standard_binary_type`)
+  // a Worker-held socket delivers binary messages as a `Blob`, and
+  // `send()` takes no Blob: it stringifies it, so the gateway received
+  // the text "[object Blob]" in place of every audio frame, and nothing
+  // threw. Ask both sockets for bytes. The project runs a date past that
+  // one (wrangler.toml says which, and why it must match).
+  server.binaryType = 'arraybuffer'
+  upstream.binaryType = 'arraybuffer'
 
   // Audio up (binary), transcripts down (JSON) — opaque pass-through.
   server.addEventListener('message', (ev) => { try { upstream!.send(ev.data) } catch { /* closing */ } })
