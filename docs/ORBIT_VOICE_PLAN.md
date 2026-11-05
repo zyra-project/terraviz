@@ -492,6 +492,12 @@ explicitly:
   or on-device path, never Web Speech.** Decision #2 (browser-API
   MVP) and decision #5 (hands-free exhibit) therefore target
   *different deployments*, not one escalating build.
+  **The code does not enforce this.** A hands-free mode with the
+  default `auto` engine resolves to `browserStreamingSttEngine`, so
+  an exhibit that leaves the Voice engine on Automatic streams
+  visitors' speech to the browser maker. Until it is enforced, the
+  rule is the operator's, and `docs/PRIVACY.md` §9 asks exhibit
+  operators to pin **Cloud (Cloudflare)**.
 - **Wake-word must be on-device.** "Hey Orbit" requires
   continuously processing mic audio. That detection runs **locally**
   (Porcupine / openWakeWord class) and **never streams raw audio to
