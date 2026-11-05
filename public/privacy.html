@@ -361,8 +361,8 @@ footer.site-footer {
       spoken reply, which voice engine handled it, how it started (the
       microphone button, which hands-free mode, Orbit reading a reply
       aloud on its own, or you tapping a reply&#39;s speaker button), the
-      language, how long listening took, whether it worked (a wake phrase
-      followed by no question counts as not working), and whether you
+      language, how long listening took, whether it worked (after a wake
+      phrase, whether the 8 seconds ran out), and whether you
       interrupted a spoken reply. Never the audio, and never the words</li>
       <li>When something goes wrong: a sanitized stack frame list — function
       names from our own code and from libraries we ship (MapLibre,
@@ -463,7 +463,7 @@ footer.site-footer {
       Our proxy forwards the request, streams back the response, and
       holds nothing</li>
       <li><strong>Your chat history stays on your device</strong>, in your browser&#39;s
-      localStorage (or in the desktop app&#39;s local storage). Clearing the
+      session storage, which is cleared when you close the tab. Clearing the
       chat clears the history</li>
       </ul>
       <h3>Vision Mode</h3>
@@ -476,28 +476,31 @@ footer.site-footer {
       <p>Voice is optional. Orbit hears nothing until you tap the microphone
       button or turn on a <strong>Hands-free</strong> mode in Orbit settings. The first
       time, Orbit shows where your audio will go and starts nothing until
-      you choose <strong>Continue</strong>; it asks again if you switch voice engine, or
-      turn on a mode that keeps the microphone on. Your browser also asks
-      your permission before the app can use your microphone.
-      A hands-free mode stays on in this browser until you set it back to
-      Off: each time you open Terraviz after that, the microphone turns on
-      as the app loads, whether or not the Orbit panel is open. Orbit speaks
+      you choose <strong>Start listening</strong>; it asks again if you switch voice
+      engine, or turn on open mic or wake word, and for push to talk it asks
+      at your first press. Your browser also asks your permission before the
+      app can use your microphone. Open mic and wake word stay on in this
+      browser until you set <strong>Hands-free</strong> back to Off: each time you open
+      Terraviz after that, the microphone turns on as the app loads, whether
+      or not the Orbit panel is open. Orbit speaks
       its replies only if you turn on <strong>Speak replies aloud</strong> or tap a
       reply&#39;s speaker button.</p>
       <p>What you say is turned into text, and that text becomes your Orbit
       message, handled like a typed one (see above), except that it is sent
       as soon as Orbit has it, without waiting for you to press Send. In
-      open mic, that can include what other people nearby said. <strong>We do not
-      keep recordings of your voice</strong>, and we use audio only to produce the
-      text.</p>
+      open mic, that can include what other people nearby said. <strong>Our
+      service does not store recordings of your voice</strong>, and we use audio
+      only to produce the text.</p>
       <p>Where your voice goes depends on the <strong>Voice engine</strong> setting:</p>
       <ul>
       <li><strong>Automatic</strong> (the default) and <strong>Browser</strong> use your browser&#39;s
       built-in speech recognition. Most browsers do this on their maker&#39;s
       servers: Chrome sends the audio to Google, Microsoft Edge to
       Microsoft, and Safari to Apple (some Apple devices recognise speech
-      on the device). Firefox has no built-in speech recognition, so with
-      these settings the microphone button does not appear there. The browser maker&#39;s privacy
+      on the device). On iPhone and iPad every browser is built on Apple&#39;s
+      engine, so Chrome there sends the audio to Apple too. Firefox has no
+      built-in speech recognition, so with these settings the microphone
+      button does not appear there. The browser maker&#39;s privacy
       policy applies to the audio, and Terraviz&#39;s servers never receive
       it. For spoken replies, most browser voices are built into your
       device. Some are produced online, and then the browser maker
@@ -519,7 +522,8 @@ footer.site-footer {
       <li>In a hands-free mode, where this site has live transcription
       switched on, audio streams through our service and Cloudflare AI
       Gateway to a Deepgram speech model (Nova-3 by default), which
-      Cloudflare runs on Workers AI, so your words appear as you speak.
+      <a href="https://developers.cloudflare.com/changelog/2025-08-27-partner-models">Cloudflare runs on Workers AI</a>,
+      so your words appear as you speak.
       Our service asks the gateway not to keep a log of these streams,
       and each stream ends after at most 60 seconds. Without live
       transcription, each thing you say is sent as one recording, as
@@ -536,7 +540,8 @@ footer.site-footer {
       keep showing the microphone as in use until you change this setting
       or close the page; nothing is sent between presses</li>
       <li><strong>Open mic</strong>: the microphone stays on while the app is open. The
-      microphone button mutes it until you reload the page; set
+      microphone button mutes it until you reload the page or change a
+      voice setting; set
       <strong>Hands-free</strong> to Off to stop it for good. A detector on your device
       listens for sound loud enough to be speech, and sends audio to the
       voice engine only while it hears it and for about half a second
@@ -549,7 +554,8 @@ footer.site-footer {
       above, until Orbit has your question, for at most 8 seconds, and
       Orbit goes back to listening for the wake phrase. (With <strong>Cloud
       (Cloudflare)</strong> and no live transcription, it records the whole 8
-      seconds.) The microphone button mutes it until you reload the page.
+      seconds.) The microphone button mutes it until you reload the page
+      or change a voice setting.
       The wake-phrase detector is downloaded each time this mode starts:
       its model files from a location this site&#39;s operator chooses, and
       the code that runs it, unless the operator hosts that too, from the
@@ -643,12 +649,12 @@ footer.site-footer {
       profiling.</p>
       <h3>What stays only on your device</h3>
       <ul>
-      <li>Your chat history with Orbit (in browser localStorage or the
-      desktop app&#39;s local data folder)</li>
+      <li>Your chat history with Orbit (in the browser&#39;s session storage,
+      cleared when the tab closes)</li>
       <li>Your Orbit settings — API URL, model, reading level, Vision Mode
       preference, and the voice settings (voice engine, hands-free mode,
       recognition language, voice, speaking rate, and whether replies are
-      spoken)</li>
+      spoken), and which voice notices you have agreed to</li>
       <li>On desktop, any AI provider API key you enter (stored in the
       operating system keychain, not in plaintext)</li>
       <li>On desktop, any offline datasets you download (kept in the app&#39;s
@@ -702,7 +708,7 @@ footer.site-footer {
       speaking, keep <strong>Hands-free</strong> set to Off, and pick the <strong>Voice
       engine</strong> whose handling you prefer (section 4). In open-mic and
       wake-word modes, the microphone button mutes the microphone until
-      you reload the page</li>
+      you reload the page or change a voice setting</li>
       <li><strong>Avoid rating Orbit replies</strong> if you do not want the conversation
       stored for feedback. Ratings are opt-in — nothing is sent unless
       you click thumbs-up or thumbs-down</li>
@@ -735,7 +741,10 @@ footer.site-footer {
       kiosk with a hands-free mode to post signs saying the microphone is
       on, since an in-app notice cannot reach everyone within range of it,
       and to set the <strong>Voice engine</strong> to <strong>Cloud (Cloudflare)</strong>, so that
-      visitors&#39; voices do not go to a browser maker.</p>
+      visitors&#39; voices do not go to a browser maker (the desktop app has no
+      Cloud engine). At an exhibit, its operator may already have chosen
+      <strong>Start listening</strong>, so you may not see Orbit&#39;s notice; the sign is
+      how you are told.</p>
       <hr>
       <h2>10. International users</h2>
       <p>This app is developed in the United States. Cloudflare&#39;s global

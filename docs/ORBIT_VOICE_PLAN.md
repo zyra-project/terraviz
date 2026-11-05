@@ -462,7 +462,8 @@ analytics model (`docs/ANALYTICS.md`, `docs/PRIVACY.md`).
 
 - **No audio persisted, ever.** Captured audio is streamed/posted
   for transcription and dropped. Transcripts live only in the
-  in-memory chat history already used for typed chat.
+  chat history already used for typed chat, which is kept in
+  `sessionStorage` and so lasts until the tab closes.
 - **New Tier B event `voice_interaction`** (research-tier, opt-in
   — add to `TIER_B_EVENT_TYPES` in `src/types/index.ts`):
   `{ mode: 'stt' | 'tts', provider: 'cloud'|'local'|'browser',
@@ -479,14 +480,17 @@ analytics model (`docs/ANALYTICS.md`, `docs/PRIVACY.md`).
   by `check:privacy-page`) describing the voice data flow per
   provider. **Landed** in November 2026 as §4 "Talking to Orbit by
   voice", with matching lines in its summary and §2, §3, §6, §8
-  and §9. The first-use explainer above landed with it
+  and §9. The first-use explainer above landed later in the same PR
   (`src/ui/voiceNotice.ts`), as a **gate** rather than a banner:
-  nothing captures until the user presses Continue, per engine, with
-  open mic and wake word as their own notice. Declining a hands-free
-  notice sets Hands-free back to Off. A mode stored before the notice
-  existed asks once, on load, so an exhibit set up earlier stops
-  listening until someone at it presses Continue. It covers the
-  microphone only; spoken replies are not gated.
+  nothing captures until the user presses Start listening. It is
+  remembered per engine (Cloud's live path is its own), with open mic
+  and wake word each a notice of their own, and versioned so a change
+  of fact asks again. Declining a hands-free notice sets Hands-free
+  back to Off. Push to talk asks at its first press; open mic and
+  wake word stored before the notice existed ask once, on load, after
+  the splash, so an exhibit set up earlier stops listening until
+  someone at it answers. It covers the microphone only; spoken
+  replies are not gated.
 
 ### 6.1 The exhibit changes the privacy calculus
 

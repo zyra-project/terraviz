@@ -2306,14 +2306,20 @@ Visitors reach the route only with Orbit's **Voice engine** set to
 **Off**.
 
 **Exhibits and kiosks.** The first time a browser uses voice, Orbit
-says where the audio will go and listens only after **Continue**. It
-asks again for each voice engine, and for open mic or wake word. A
-kiosk set up before this notice existed shows it on its next load and
-stays silent until someone presses Continue. So press it yourself
-while setting up, with the voice engine and Hands-free mode the
-exhibit will use. Pin **Cloud (Cloudflare)** there, so visitors'
-voices do not go to a browser maker, and post a sign saying the
-microphone is on.
+says where the audio will go and listens only after **Start
+listening**. It asks again for each voice engine, and for each of
+open mic and wake word; push to talk asks at its first press. A kiosk
+set up before this notice existed shows it on its next load and stays
+silent until someone answers it. If a visitor chooses **Not now**,
+Hands-free is set to Off on that kiosk. So answer it yourself while
+setting up, with the voice engine and Hands-free mode the exhibit will
+use, and tell exhibit operators before you deploy this.
+
+Once you have pressed Start listening, visitors at that kiosk never
+see the notice. Post a sign saying the microphone is on: it is how
+they are told. Pin **Cloud (Cloudflare)** there too, so visitors'
+voices do not go to a browser maker. The desktop app has no Cloud
+engine.
 
 **Turning voice off.** `KILL_VOICE=1` stops only the Cloud engine.
 The default engine is the visitor's browser, which sends audio to the
