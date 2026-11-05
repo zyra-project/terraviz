@@ -124,6 +124,78 @@ export function stopPlaybackLoop(state: PlaybackState): void {
   }
 }
 
+// --- Keyboard shortcuts ---
+
+/** A playback action a bare key stands for (see `playbackShortcutFor`). */
+export type PlaybackShortcut = 'toggle' | 'step-back' | 'step-forward' | 'start' | 'end'
+
+const SHORTCUT_BY_CODE: Readonly<Record<string, PlaybackShortcut>> = {
+  Space: 'toggle',
+  ArrowLeft: 'step-back',
+  ArrowRight: 'step-forward',
+  Home: 'start',
+  End: 'end',
+}
+
+const EDITABLE = 'input, textarea, select, [contenteditable]:not([contenteditable="false"])'
+
+/** What moves its caret, selection or value by the arrows, Home and End.
+ *  A `role="toolbar"` is not here: the transport bar is one, moves
+ *  between its buttons by Tab, and keeps the arrows for stepping. */
+const ARROW_OWNERS = [
+  EDITABLE,
+  ...['listbox', 'menu', 'menubar', 'radiogroup', 'tablist', 'tree', 'treegrid', 'grid',
+    'slider', 'spinbutton', 'scrollbar', 'combobox', 'textbox', 'searchbox'].map((role) => `[role="${role}"]`),
+].join(', ')
+
+/** What Space presses, ticks, opens or types into: every arrow owner
+ *  (a focused list or grid acts on its current item), and controls. */
+const SPACE_OWNERS = [
+  ARROW_OWNERS,
+  'button, a[href], summary',
+  ...['button', 'link', 'checkbox', 'switch', 'radio', 'tab', 'option', 'menuitem',
+    'menuitemcheckbox', 'menuitemradio', 'treeitem', 'gridcell'].map((role) => `[role="${role}"]`),
+].join(', ')
+
+const DIALOGS = 'dialog, [role="dialog"], [role="alertdialog"]'
+
+/** The parts of a `KeyboardEvent` the decision reads. */
+export type ShortcutKeyEvent = Pick<
+  KeyboardEvent,
+  'code' | 'target' | 'defaultPrevented' | 'isComposing' | 'altKey' | 'ctrlKey' | 'metaKey' | 'shiftKey'
+>
+
+/**
+ * The playback action a key press stands for, or `null` when the key
+ * belongs to something else. Space toggles playback; the arrows step
+ * a frame, Home rewinds and End fast-forwards.
+ *
+ * The page-wide handler once took these keys everywhere but a text
+ * field and the browse panel, and cancelled their default action. So
+ * Space did nothing on any focused button, link or switch (Space
+ * presses a button through that default action) and toggled the
+ * dataset behind it instead; arrow keys stepped the dataset from
+ * inside the Help panel; and Alt+Left, the browser's Back, stepped a
+ * frame. A key is left alone when:
+ *   - it has a modifier, or is part of an IME composition, or a
+ *     handler before this one already took it;
+ *   - focus is inside a dialog, whose keys are its own;
+ *   - for Space, focus is on something Space presses or types into;
+ *   - for the others, focus is in a field or a widget that moves by
+ *     arrow (a list, a menu, a tab list, a slider).
+ */
+export function playbackShortcutFor(event: ShortcutKeyEvent): PlaybackShortcut | null {
+  const shortcut = SHORTCUT_BY_CODE[event.code]
+  if (!shortcut) return null
+  if (event.defaultPrevented || event.isComposing) return null
+  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return null
+  const target = event.target
+  if (!(target instanceof Element)) return shortcut
+  if (target.closest(DIALOGS)) return null
+  if (target.closest(shortcut === 'toggle' ? SPACE_OWNERS : ARROW_OWNERS)) return null
+  return shortcut
+}
+
 // --- Transport controls ---
 
 /** Toggle between play and pause, updating the button icon and app state. */

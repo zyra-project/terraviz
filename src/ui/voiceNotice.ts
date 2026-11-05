@@ -33,9 +33,10 @@
  * browser makes the rest of the page inert, traps focus and turns
  * Escape into `cancel`, which here means "Not now". Focus opens on the
  * heading, not on Start listening, so the text is in view and agreeing
- * is not the default. Keys typed in it stop at the dialog, because
- * `main.ts`'s document shortcuts take Space and the arrows for
- * playback, which cancelled Space on both buttons. Only one notice is
+ * is not the default. Keys typed in it stop at the dialog: the
+ * playback shortcuts once cancelled Space on both buttons, and while
+ * `playbackShortcutFor` now leaves a dialog's keys alone, a key typed
+ * in a consent gate should reach nothing behind it. Only one notice is
  * open at a time; a second request while one is open answers `false`,
  * so two callers cannot both act on one agreement.
  */

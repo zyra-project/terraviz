@@ -70,7 +70,7 @@ import {
 } from './analytics'
 import {
   createPlaybackState, startPlaybackLoop, stopPlaybackLoop,
-  togglePlayPause, rewind, fastForward, stepFrame, onScrub,
+  togglePlayPause, rewind, fastForward, stepFrame, onScrub, playbackShortcutFor,
   updatePlayButton, toggleCaptions, resetPlaybackState, initPlaybackPositioning,
   seekToDate,
   checkSeekToDate,
@@ -4068,27 +4068,23 @@ class InteractiveSphere {
       })
     }
 
-    // Keyboard shortcuts
+    // Keyboard shortcuts. Which keys are playback's, and which belong
+    // to a focused control, a dialog or the browser, is decided by
+    // `playbackShortcutFor`.
     document.addEventListener('keydown', (e) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
       const browseOverlay = document.getElementById('browse-overlay')
       if (browseOverlay && !browseOverlay.classList.contains('hidden') && browseOverlay.contains(e.target as Node)) return
 
-      if (e.code === 'Space') {
-        e.preventDefault()
-        togglePlayPause(this.hlsService, this.appState, (m) => this.announce(m))
-      } else if (e.code === 'ArrowLeft') {
-        e.preventDefault()
-        stepFrame(-1, this.hlsService, this.appState, this.playback, (m) => this.announce(m))
-      } else if (e.code === 'ArrowRight') {
-        e.preventDefault()
-        stepFrame(1, this.hlsService, this.appState, this.playback, (m) => this.announce(m))
-      } else if (e.code === 'Home') {
-        e.preventDefault()
-        rewind(this.hlsService, this.appState, this.playback, (m) => this.announce(m))
-      } else if (e.code === 'End') {
-        e.preventDefault()
-        fastForward(this.hlsService, this.appState, this.playback, (m) => this.announce(m))
+      const shortcut = playbackShortcutFor(e)
+      if (!shortcut) return
+      e.preventDefault()
+      const announce = (m: string): void => this.announce(m)
+      switch (shortcut) {
+        case 'toggle': togglePlayPause(this.hlsService, this.appState, announce); break
+        case 'step-back': stepFrame(-1, this.hlsService, this.appState, this.playback, announce); break
+        case 'step-forward': stepFrame(1, this.hlsService, this.appState, this.playback, announce); break
+        case 'start': rewind(this.hlsService, this.appState, this.playback, announce); break
+        case 'end': fastForward(this.hlsService, this.appState, this.playback, announce); break
       }
     })
   }
