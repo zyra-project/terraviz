@@ -48,9 +48,9 @@ fixed in `functions/api/voice/stream.ts` (`https://` plus
 a live validation now tests the gateway rather than the proxy. That
 validation should also open the gateway's **Logs** page after a session
 and confirm nothing was stored: the proxy sends `cf-aig-collect-log:
-false`, which Cloudflare documents for HTTP requests but not for a
+false`, and Cloudflare does not say whether that header covers a
 WebSocket session, so until it is seen to hold, a gateway with Logs
-turned off is the control (docs/SELF_HOSTING.md, the voice row).
+turned off is the control (docs/SELF_HOSTING.md §14.5).
 **Phase 3.5 wake-word** has now landed as well: the on-device
 `WakeWordDetector` + the **openWakeWord ONNX scorer** (built-in `hey
 jarvis`; lazy onnxruntime-web, operator-hosted models, runbook +

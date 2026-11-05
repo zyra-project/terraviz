@@ -191,9 +191,10 @@ export const onRequest: PagesFunction<StreamEnv> = async (context) => {
   // Origin, IP, user agent) reaches the gateway; the test pins it to
   // exactly these three. `cf-aig-collect-log: false` because a gateway
   // logs requests and responses by default, and docs/ORBIT_VOICE_PLAN.md
-  // §6 says no audio is ever persisted. Cloudflare documents the header
-  // for HTTP requests; whether it covers a WebSocket session is part of
-  // the plan's pending live validation (check the gateway's Logs page).
+  // §6 says no audio is ever persisted. Cloudflare does not say whether
+  // the header covers a WebSocket session, so the plan's live validation
+  // checks the gateway's Logs page, and docs/SELF_HOSTING.md §14.5 has
+  // operators turn the gateway's logs off rather than rely on it.
   let upstream: WebSocket | null = null
   try {
     const resp = await fetch(buildGatewayUrl(env, lang), {
