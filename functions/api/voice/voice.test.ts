@@ -7,7 +7,15 @@ import { NODE_FEATURES_CACHE_KEY } from '../v1/_lib/node-settings-store'
 import { makeKV } from '../v1/_lib/test-helpers'
 import { onRequestPost as transcribe } from './transcribe'
 import { onRequestPost as synthesize } from './synthesize'
-import { isVoiceKilled, arrayBufferToBase64, isAllowedOrigin, type VoiceEnv } from './_voice-lib'
+import {
+  isVoiceKilled,
+  arrayBufferToBase64,
+  isAllowedOrigin,
+  makeRateLimiter,
+  RATE_MAP_MAX,
+  RATE_WINDOW_MS,
+  type VoiceEnv,
+} from './_voice-lib'
 import {
   streamConfigured,
   buildGatewayUrl,
@@ -79,6 +87,46 @@ describe('_voice-lib', () => {
     const b64 = arrayBufferToBase64(bytes.buffer)
     const back = Uint8Array.from(atob(b64), c => c.charCodeAt(0))
     expect([...back]).toEqual([...bytes])
+  })
+
+  describe('makeRateLimiter', () => {
+    it('counts each caller over a window, then starts again', () => {
+      const limited = makeRateLimiter(2)
+      expect([limited('192.0.2.1', 0), limited('192.0.2.1', 1), limited('192.0.2.1', 2)]).toEqual([false, false, true])
+      expect(limited('192.0.2.2', 2)).toBe(false)
+      expect(limited('192.0.2.1', RATE_WINDOW_MS)).toBe(true)
+      expect(limited('192.0.2.1', RATE_WINDOW_MS + 1)).toBe(false)
+    })
+
+    // Keyed by raw address, a client rotating through its /64 had a fresh
+    // count on every request.
+    it('counts every address in one IPv6 /64 as one caller', () => {
+      const limited = makeRateLimiter(2)
+      expect(limited('2001:db8::1', 0)).toBe(false)
+      expect(limited('2001:db8::2', 0)).toBe(false)
+      expect(limited('2001:db8:0:0:ffff::3', 0)).toBe(true)
+      expect(limited('2001:db8:0:1::1', 0)).toBe(false)
+    })
+
+    it('counts an IPv4-mapped address as the IPv4 address it carries', () => {
+      const limited = makeRateLimiter(1)
+      expect(limited('192.0.2.1', 0)).toBe(false)
+      expect(limited('::ffff:192.0.2.1', 0)).toBe(true)
+    })
+
+    it(`holds at most ${RATE_MAP_MAX} callers, dropping the oldest`, () => {
+      // `others` distinct callers after the first, all in one window.
+      const after = (others: number): ReturnType<typeof makeRateLimiter> => {
+        const limited = makeRateLimiter(1)
+        limited('192.0.2.1', 0)
+        for (let i = 0; i < others; i++) limited(`10.${(i >> 16) & 255}.${(i >> 8) & 255}.${i & 255}`, 0)
+        return limited
+      }
+      // Full but not over: the first caller is still counted.
+      expect(after(RATE_MAP_MAX - 1)('192.0.2.1', 0)).toBe(true)
+      // One more: the first was dropped to make room, so it counts afresh.
+      expect(after(RATE_MAP_MAX)('192.0.2.1', 0)).toBe(false)
+    })
   })
 })
 
@@ -321,6 +369,10 @@ describe('voice stream relay', () => {
         : { data: new Blob([data.slice()]) }
       for (const fn of this.listeners.get('message') ?? []) fn(ev)
     }
+    /** A frame whose data is exactly `data`, whatever `binaryType` says. */
+    deliver(data: unknown): void {
+      for (const fn of this.listeners.get('message') ?? []) fn({ data })
+    }
   }
 
   const CONFIGURED = { CF_ACCOUNT_ID: 'a', CF_AI_GATEWAY: 'g', CF_AIG_TOKEN: 'tok' }
@@ -328,7 +380,11 @@ describe('voice stream relay', () => {
   let upstream: FakeSocket
   let fetched: Array<{ url: string; headers: Record<string, string> }>
   // What the stand-in gateway answers: a socket by default, or a refusal.
-  let gatewayAnswer: () => Promise<{ webSocket: FakeSocket | null; status?: number }>
+  let gatewayAnswer: () => Promise<{
+    webSocket: FakeSocket | null
+    status?: number
+    body?: { cancel(): Promise<void> } | null
+  }>
   let ipCounter = 0
 
   beforeEach(() => {
@@ -423,12 +479,15 @@ describe('voice stream relay', () => {
   // what hid the wss:// bug. The trace names the status and nothing else:
   // not the token, not the account path in the URL.
   it('reports a gateway that refuses the upgrade, logging only its status', async () => {
-    gatewayAnswer = async () => ({ webSocket: null, status: 401 })
+    const cancel = vi.fn(async () => {})
+    gatewayAnswer = async () => ({ webSocket: null, status: 401, body: { cancel } })
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
       const { server } = await open()
       expect(server.sent).toEqual([JSON.stringify({ type: 'error', code: 'upstream_unavailable' })])
       expect(server.closed).toBe(true)
+      // Left unread, the refusal's body would hold its connection open.
+      expect(cancel).toHaveBeenCalledTimes(1)
       expect(warn).toHaveBeenCalledTimes(1)
       const logged = warn.mock.calls[0].join(' ')
       expect(logged).toContain('HTTP 401')
@@ -479,6 +538,44 @@ describe('voice stream relay', () => {
         // Nothing moves after the close, in either direction.
         upstream.receive('{"late":true}')
         expect(server.sent.some((m) => m === '{"late":true}')).toBe(false)
+      } finally {
+        warn.mockRestore()
+      }
+    })
+
+    // The real client sends only binary PCM. Text forwarded upstream would
+    // reach Deepgram's control channel, where a KeepAlive holds an idle
+    // stream open and Finalize / CloseStream act on the session.
+    it('closes on a text frame from the client with 1003, forwarding nothing', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        const { server } = await open()
+        server.receive(new Uint8Array([1, 2]))
+        server.receive('{"type":"KeepAlive"}')
+        expect(upstream.sent).toHaveLength(1)
+        expect([server.closeCode, server.closeReason]).toEqual([1003, 'binary_only'])
+        expect(upstream.closed).toBe(true)
+        expect(server.sent.some((m) => typeof m === 'string' && ERROR_FRAME.test(m))).toBe(false)
+        expect(warn.mock.calls.map((c) => c.join(' '))).toEqual(['[voice/stream] closed on a text frame from the client'])
+        // Closed for good: later audio is not forwarded either.
+        server.receive(new Uint8Array([3]))
+        expect(upstream.sent).toHaveLength(1)
+      } finally {
+        warn.mockRestore()
+      }
+    })
+
+    // With binaryType 'arraybuffer' only bytes or text should arrive. A
+    // frame of any other type cannot be measured, so it must not pass
+    // the cap uncounted.
+    it('closes on a frame it cannot measure, rather than relaying it uncounted', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        const { server } = await open()
+        server.deliver(new Blob([new Uint8Array(8)]))
+        expect(upstream.sent).toEqual([])
+        expect([server.closeCode, server.closeReason]).toEqual([1008, 'stream_limit'])
+        expect(upstream.closed).toBe(true)
       } finally {
         warn.mockRestore()
       }

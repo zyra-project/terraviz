@@ -64,20 +64,37 @@ const isRateLimited = makeRateLimiter(20)
  * The lifetime also bounds how long a socket outlives a `KILL_VOICE` or
  * an Orbit switch-off, which are checked only at connect.
  *
- * Hitting either closes both sockets with 1008 and no error frame: the
- * client ends that turn and listens on, where an error frame would put
- * the realtime path into cooldown for the rest of the page's session.
+ * Hitting either closes the client's socket with 1008 and no error frame
+ * (the gateway's is closed plainly): the client ends that turn and
+ * listens on, where an error frame would put the realtime path into
+ * cooldown for the rest of the page's session.
  */
 export const MAX_STREAM_MS = 60_000
 /** 60 s of linear16 PCM, 16 kHz mono: 2 bytes × 16,000 samples/s. */
 export const MAX_STREAM_BYTES = 2 * 16_000 * (MAX_STREAM_MS / 1000)
 
+/**
+ * The bytes a binary frame carries. Anything else counts as over the
+ * cap: with `binaryType = 'arraybuffer'` nothing else should arrive, and
+ * a type this does not recognise must not cross the cap uncounted.
+ */
 function frameBytes(data: unknown): number {
-  if (data instanceof ArrayBuffer) return data.byteLength
-  if (ArrayBuffer.isView(data)) return data.byteLength
-  if (typeof data === 'string') return data.length
-  return 0
+  if (data instanceof ArrayBuffer || ArrayBuffer.isView(data)) return data.byteLength
+  return Number.POSITIVE_INFINITY
 }
+
+/**
+ * How the client's socket is closed for each reason the proxy ends a
+ * stream itself. A text frame closes with 1003: the real client sends
+ * only binary PCM, and text upstream reaches Deepgram's control channel,
+ * where `{"type":"KeepAlive"}` would hold an idle stream open to the
+ * lifetime cap and `Finalize` / `CloseStream` would act on the session.
+ */
+const PROXY_CLOSE = {
+  time: { code: 1008, reason: 'stream_limit', log: 'closed at the stream limit (time)' },
+  bytes: { code: 1008, reason: 'stream_limit', log: 'closed at the stream limit (bytes)' },
+  text: { code: 1003, reason: 'binary_only', log: 'closed on a text frame from the client' },
+} as const
 
 /**
  * Accept the WebSocket and hand the client a single JSON error frame
@@ -208,7 +225,11 @@ export const onRequest: PagesFunction<StreamEnv> = async (context) => {
     // Say why, in the server log only: a refusal that left no trace is
     // how this route went unnoticed while it relayed nothing. Status
     // only; never the URL's account path, the token, or a body.
-    if (!upstream) console.warn(`[voice/stream] gateway did not upgrade: HTTP ${resp.status}`)
+    if (!upstream) {
+      console.warn(`[voice/stream] gateway did not upgrade: HTTP ${resp.status}`)
+      // Unread, it would hold the subrequest's connection until collected.
+      resp.body?.cancel().catch(() => { /* already closed */ })
+    }
   } catch (err) {
     console.warn('[voice/stream] gateway fetch failed:', err instanceof Error ? err.name : 'UnknownError')
     upstream = null
@@ -233,14 +254,15 @@ export const onRequest: PagesFunction<StreamEnv> = async (context) => {
 
   let closed = false
   let bytesUp = 0
-  const closeBoth = (limit?: string): void => {
+  const closeBoth = (why?: keyof typeof PROXY_CLOSE): void => {
     if (closed) return
     closed = true
     clearTimeout(lifetime)
-    if (limit) {
-      // Server log only, and no more than which limit: no audio, no IP.
-      console.warn(`[voice/stream] closed at the stream limit (${limit})`)
-      try { server.close(1008, 'stream_limit') } catch { /* already closed */ }
+    if (why) {
+      const { code, reason, log } = PROXY_CLOSE[why]
+      // Server log only, and no more than why: no audio, no IP.
+      console.warn(`[voice/stream] ${log}`)
+      try { server.close(code, reason) } catch { /* already closed */ }
     } else {
       try { server.close() } catch { /* already closed */ }
     }
@@ -248,11 +270,12 @@ export const onRequest: PagesFunction<StreamEnv> = async (context) => {
   }
   const lifetime = setTimeout(() => closeBoth('time'), MAX_STREAM_MS)
 
-  // Audio up (binary), transcripts down (JSON) — opaque pass-through,
-  // with the audio counted against MAX_STREAM_BYTES. A frame that would
-  // cross it is dropped, not sent in part.
+  // Audio up (binary only), transcripts down (JSON). The audio is counted
+  // against MAX_STREAM_BYTES; a frame that would cross it is dropped, not
+  // sent in part.
   server.addEventListener('message', (ev) => {
     if (closed) return
+    if (typeof ev.data === 'string') { closeBoth('text'); return }
     bytesUp += frameBytes(ev.data)
     if (bytesUp > MAX_STREAM_BYTES) { closeBoth('bytes'); return }
     try { upstream!.send(ev.data) } catch { /* closing */ }

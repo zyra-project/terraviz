@@ -13,6 +13,7 @@
  */
 
 import type { OrbitGateEnv } from '../_lib/orbit-gate'
+import { clientRateKey } from '../_lib/client-rate-key'
 
 /** Workers AI binding (subset we use), plus the catalog bindings the
  *  per-node `orbit` gate reads (`_lib/orbit-gate.ts`). */
@@ -95,16 +96,32 @@ export function voiceError(
 
 interface RateEntry { count: number; resetAt: number }
 export const RATE_WINDOW_MS = 60_000
+/** The most callers one limiter holds before it drops the oldest. */
+export const RATE_MAP_MAX = 10_000
 
+/**
+ * `limit` requests per caller per minute. A caller is
+ * `clientRateKey(ip)`, not the raw address: keyed raw, an IPv6 client
+ * rotating through its /64 never tripped the limit, and grew the map by
+ * one entry per request. Entries are re-inserted when their window
+ * restarts, so the map stays in expiry order and the sweep stops at the
+ * first live entry. The hard cap is the federation feed's: past it the
+ * oldest caller is dropped, which costs that caller its count rather
+ * than costing the isolate its memory.
+ */
 export function makeRateLimiter(limit: number) {
   const map = new Map<string, RateEntry>()
   return function isRateLimited(ip: string, now: number = Date.now()): boolean {
-    const entry = map.get(ip)
+    const key = clientRateKey(ip)
+    const entry = map.get(key)
     if (!entry || now > entry.resetAt) {
-      map.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS })
-      if (map.size > 1000) {
-        for (const [k, v] of map) if (now > v.resetAt) map.delete(k)
+      if (entry) map.delete(key)
+      for (const [k, v] of map) {
+        if (now <= v.resetAt) break
+        map.delete(k)
       }
+      if (map.size >= RATE_MAP_MAX) map.delete(map.keys().next().value!)
+      map.set(key, { count: 1, resetAt: now + RATE_WINDOW_MS })
       return false
     }
     entry.count++
