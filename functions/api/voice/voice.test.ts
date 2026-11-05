@@ -422,7 +422,7 @@ describe('voice stream relay', () => {
     const request = fakeReq({
       url: `${ORIGIN}/api/voice/stream?lang=en`,
       origin: ORIGIN,
-      // A fresh address per case: the per-IP rate limiter is module state.
+      // A fresh address per case: the per-caller rate limiter is module state.
       headers: { Upgrade: 'websocket', 'CF-Connecting-IP': `203.0.113.${++ipCounter}` },
     })
     const res = await stream({ request, env: CONFIGURED } as unknown as Parameters<typeof stream>[0])
@@ -493,6 +493,43 @@ describe('voice stream relay', () => {
       expect(logged).toContain('HTTP 401')
       expect(logged).not.toContain('tok')
       expect(logged).not.toContain('/v1/a/g')
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  // A refusal can come with no body at all, and cancelling one that has
+  // been read rejects. Neither may add a second, misleading log line or
+  // leave a rejection unhandled.
+  it('reports a refusal with no body once, as a refusal', async () => {
+    gatewayAnswer = async () => ({ webSocket: null, status: 502, body: null })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const { server } = await open()
+      expect(server.sent).toEqual([JSON.stringify({ type: 'error', code: 'upstream_unavailable' })])
+      expect(warn.mock.calls.map((c) => c.join(' '))).toEqual(['[voice/stream] gateway did not upgrade: HTTP 502'])
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('absorbs a cancel that rejects', async () => {
+    // A plain function, not vi.fn: a mock records how its promise settles,
+    // which marks the rejection handled and would hide a missing catch.
+    let cancels = 0
+    const cancel = async (): Promise<void> => {
+      cancels++
+      throw new TypeError('This ReadableStream is currently locked to a reader.')
+    }
+    gatewayAnswer = async () => ({ webSocket: null, status: 401, body: { cancel } })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const { server } = await open()
+      expect(cancels).toBe(1)
+      expect(server.sent).toEqual([JSON.stringify({ type: 'error', code: 'upstream_unavailable' })])
+      // One turn for the rejection to settle; unhandled, it fails the run.
+      await new Promise((r) => setTimeout(r, 0))
+      expect(warn).toHaveBeenCalledTimes(1)
     } finally {
       warn.mockRestore()
     }
@@ -574,8 +611,10 @@ describe('voice stream relay', () => {
         const { server } = await open()
         server.deliver(new Blob([new Uint8Array(8)]))
         expect(upstream.sent).toEqual([])
-        expect([server.closeCode, server.closeReason]).toEqual([1008, 'stream_limit'])
+        expect([server.closeCode, server.closeReason]).toEqual([1003, 'unsupported_frame'])
         expect(upstream.closed).toBe(true)
+        // Its own line, so an operator does not chase a byte cap it never hit.
+        expect(warn.mock.calls.map((c) => c.join(' '))).toEqual(['[voice/stream] closed on a frame it could not measure'])
       } finally {
         warn.mockRestore()
       }

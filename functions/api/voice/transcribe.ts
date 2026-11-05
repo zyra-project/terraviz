@@ -26,7 +26,7 @@ import {
   arrayBufferToBase64,
 } from './_voice-lib'
 
-const isRateLimited = makeRateLimiter(30) // 30 transcriptions / min / IP
+const isRateLimited = makeRateLimiter(30) // 30 transcriptions / min / caller (IPv4, or IPv6 /64)
 
 export const onRequestOptions: PagesFunction<VoiceEnv> = async (context) => {
   const origin = context.request.headers.get('Origin')

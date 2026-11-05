@@ -15,7 +15,7 @@
  * secret): `CF_ACCOUNT_ID`, `CF_AI_GATEWAY` (gateway name),
  * `CF_AIG_TOKEN` (AI Gateway authorization). Absent any of them — or
  * with `KILL_VOICE` set, the node's `orbit` feature off, or over the
- * per-IP rate cap — the proxy
+ * per-caller rate cap — the proxy
  * accepts the socket and sends a JSON error frame
  * (`{ type: 'error', code }`) before closing, since a browser
  * WebSocket can't read an HTTP status. The client cools down on that
@@ -45,10 +45,13 @@ function baseLang(lang: string): string {
   return (lang || '').toLowerCase().split('-')[0]?.trim() ?? ''
 }
 
-// Per-IP new-connection cap. Streaming sockets are long-lived, so the
-// abuse vector is opening many of them; 20 fresh connections/min/IP is
-// generous for a real user (a few barge-in reopens) but caps a flood.
-// In-memory per-isolate, like the POST voice routes.
+// Per-caller new-connection cap, a caller being an IPv4 address or an
+// IPv6 /64 (`clientRateKey`). Streaming sockets are long-lived, so the
+// abuse vector is opening many of them; 20 fresh connections a minute
+// is generous for a real user (a few barge-in reopens) but caps a flood.
+// In-memory per-isolate, like the POST voice routes, so it bounds one
+// isolate's share rather than a caller's total: what bounds each
+// connection is the per-stream cap below.
 const isRateLimited = makeRateLimiter(20)
 
 /**
@@ -74,26 +77,38 @@ export const MAX_STREAM_MS = 60_000
 export const MAX_STREAM_BYTES = 2 * 16_000 * (MAX_STREAM_MS / 1000)
 
 /**
- * The bytes a binary frame carries. Anything else counts as over the
- * cap: with `binaryType = 'arraybuffer'` nothing else should arrive, and
- * a type this does not recognise must not cross the cap uncounted.
+ * The bytes a binary frame carries, or `null` for a frame of any other
+ * type. With `binaryType = 'arraybuffer'` workerd delivers only an
+ * `ArrayBuffer` or a string, so `null` is defence: a type this cannot
+ * measure must not cross the cap uncounted, so it ends the stream.
  */
-function frameBytes(data: unknown): number {
+function frameBytes(data: unknown): number | null {
   if (data instanceof ArrayBuffer || ArrayBuffer.isView(data)) return data.byteLength
-  return Number.POSITIVE_INFINITY
+  return null
 }
 
 /**
  * How the client's socket is closed for each reason the proxy ends a
- * stream itself. A text frame closes with 1003: the real client sends
- * only binary PCM, and text upstream reaches Deepgram's control channel,
- * where `{"type":"KeepAlive"}` would hold an idle stream open to the
- * lifetime cap and `Finalize` / `CloseStream` would act on the session.
+ * stream itself.
+ *
+ * A text frame closes with 1003. The real client sends only binary PCM
+ * (`src/services/voiceWsStreaming.ts`), and this keeps the relay's
+ * interface to that, so nothing can drive Deepgram's control messages
+ * through it. It is defence in depth, **not** what bounds an idle
+ * stream: Deepgram closes a stream after about 10 s with neither audio
+ * nor a `KeepAlive`, and any binary frame resets that clock as a
+ * `KeepAlive` would, so a few bytes of PCM every few seconds hold a
+ * stream open just as well. `MAX_STREAM_MS` is what bounds that, and
+ * this rule is no reason to loosen it. If the client is ever changed to
+ * send `CloseStream` or `Finalize` to flush its last transcript
+ * (Deepgram's documented clean end), this rule will close those streams,
+ * and needs an exact-match allowlist first.
  */
 const PROXY_CLOSE = {
   time: { code: 1008, reason: 'stream_limit', log: 'closed at the stream limit (time)' },
   bytes: { code: 1008, reason: 'stream_limit', log: 'closed at the stream limit (bytes)' },
   text: { code: 1003, reason: 'binary_only', log: 'closed on a text frame from the client' },
+  unmeasured: { code: 1003, reason: 'unsupported_frame', log: 'closed on a frame it could not measure' },
 } as const
 
 /**
@@ -276,7 +291,9 @@ export const onRequest: PagesFunction<StreamEnv> = async (context) => {
   server.addEventListener('message', (ev) => {
     if (closed) return
     if (typeof ev.data === 'string') { closeBoth('text'); return }
-    bytesUp += frameBytes(ev.data)
+    const bytes = frameBytes(ev.data)
+    if (bytes === null) { closeBoth('unmeasured'); return }
+    bytesUp += bytes
     if (bytesUp > MAX_STREAM_BYTES) { closeBoth('bytes'); return }
     try { upstream!.send(ev.data) } catch { /* closing */ }
   })

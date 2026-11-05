@@ -92,7 +92,7 @@ export function voiceError(
   })
 }
 
-// --- Rate limiting (in-memory, per-isolate) — the practical per-IP cap ---
+// --- Rate limiting (in-memory, per-isolate) — the practical per-caller cap ---
 
 interface RateEntry { count: number; resetAt: number }
 export const RATE_WINDOW_MS = 60_000
@@ -103,11 +103,17 @@ export const RATE_MAP_MAX = 10_000
  * `limit` requests per caller per minute. A caller is
  * `clientRateKey(ip)`, not the raw address: keyed raw, an IPv6 client
  * rotating through its /64 never tripped the limit, and grew the map by
- * one entry per request. Entries are re-inserted when their window
- * restarts, so the map stays in expiry order and the sweep stops at the
- * first live entry. The hard cap is the federation feed's: past it the
- * oldest caller is dropped, which costs that caller its count rather
- * than costing the isolate its memory.
+ * one entry per request. So devices sharing one IPv6 /64 now share one
+ * count, as devices behind one IPv4 NAT always have.
+ *
+ * Every window is the same length, so inserting in arrival order keeps
+ * the map in expiry order and the sweep can stop at the first live
+ * entry. Under a steady clock the sweep has already removed a
+ * restarting entry, since everything ahead of an expired entry has
+ * expired too; deleting it first is what keeps the order when the clock
+ * steps back. The hard cap is the federation feed's: past it the oldest
+ * caller is dropped, which costs that caller its count rather than
+ * costing the isolate its memory.
  */
 export function makeRateLimiter(limit: number) {
   const map = new Map<string, RateEntry>()
