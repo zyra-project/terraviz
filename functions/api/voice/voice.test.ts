@@ -8,7 +8,14 @@ import { makeKV } from '../v1/_lib/test-helpers'
 import { onRequestPost as transcribe } from './transcribe'
 import { onRequestPost as synthesize } from './synthesize'
 import { isVoiceKilled, arrayBufferToBase64, isAllowedOrigin, type VoiceEnv } from './_voice-lib'
-import { streamConfigured, buildGatewayUrl, streamRefusal, onRequest as stream } from './stream'
+import {
+  streamConfigured,
+  buildGatewayUrl,
+  streamRefusal,
+  onRequest as stream,
+  MAX_STREAM_BYTES,
+  MAX_STREAM_MS,
+} from './stream'
 import { resetOrbitGateForTests } from '../_lib/orbit-gate'
 
 // The gate memoises per module instance; each case starts cold.
@@ -296,7 +303,17 @@ describe('voice stream relay', () => {
     }
     // The runtime's send() stringifies a Blob; record what it would put on the wire.
     send(data: unknown): void { this.sent.push(data instanceof Blob ? String(data) : data) }
-    close(): void { this.closed = true }
+    closeCode?: number
+    closeReason?: string
+    close(code?: number, reason?: string): void {
+      this.closed = true
+      this.closeCode = code
+      this.closeReason = reason
+    }
+    /** The far end hanging up, or the socket erroring. */
+    emit(type: 'close' | 'error'): void {
+      for (const fn of this.listeners.get(type) ?? []) fn({})
+    }
     /** A frame arriving from the far end, typed as the runtime would type it. */
     receive(data: Uint8Array | string): void {
       const ev = typeof data === 'string' || this.binaryType === 'arraybuffer'
@@ -420,6 +437,70 @@ describe('voice stream relay', () => {
     } finally {
       warn.mockRestore()
     }
+  })
+
+  describe('the per-stream cap', () => {
+    afterEach(() => { vi.useRealTimers() })
+    const ERROR_FRAME = /"type":"error"/
+
+    it(`closes both sockets ${MAX_STREAM_MS} ms after opening, with 1008 and no error frame`, async () => {
+      vi.useFakeTimers()
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        const { server } = await open()
+        vi.advanceTimersByTime(MAX_STREAM_MS - 1)
+        expect(server.closed).toBe(false)
+        vi.advanceTimersByTime(1)
+        expect(server.closed).toBe(true)
+        expect([server.closeCode, server.closeReason]).toEqual([1008, 'stream_limit'])
+        expect(upstream.closed).toBe(true)
+        // No error frame: that would cool the client down for the session.
+        expect(server.sent.some((m) => typeof m === 'string' && ERROR_FRAME.test(m))).toBe(false)
+        expect(warn.mock.calls.map((c) => c.join(' '))).toEqual(['[voice/stream] closed at the stream limit (time)'])
+      } finally {
+        warn.mockRestore()
+      }
+    })
+
+    it(`relays audio up to ${MAX_STREAM_BYTES} bytes and closes on the frame that would cross it`, async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        const { server } = await open()
+        const second = 2 * 16_000 // one second of linear16 at 16 kHz
+        expect(MAX_STREAM_BYTES % second).toBe(0)
+        for (let i = 0; i < MAX_STREAM_BYTES / second; i++) server.receive(new Uint8Array(second))
+        expect(upstream.sent).toHaveLength(MAX_STREAM_BYTES / second)
+        expect(server.closed).toBe(false)
+        server.receive(new Uint8Array(1))
+        expect(upstream.sent).toHaveLength(MAX_STREAM_BYTES / second) // the crossing frame is dropped
+        expect([server.closeCode, server.closeReason]).toEqual([1008, 'stream_limit'])
+        expect(upstream.closed).toBe(true)
+        expect(warn.mock.calls.map((c) => c.join(' '))).toEqual(['[voice/stream] closed at the stream limit (bytes)'])
+        // Nothing moves after the close, in either direction.
+        upstream.receive('{"late":true}')
+        expect(server.sent.some((m) => m === '{"late":true}')).toBe(false)
+      } finally {
+        warn.mockRestore()
+      }
+    })
+
+    it('treats an ordinary hang-up as one: plain close, timer cancelled, nothing logged', async () => {
+      vi.useFakeTimers()
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        const { server } = await open()
+        server.emit('close')
+        expect(upstream.closed).toBe(true)
+        expect(upstream.closeCode).toBeUndefined()
+        expect(server.closeCode).toBeUndefined()
+        // The lifetime timer is gone, so the limit never fires afterwards.
+        vi.advanceTimersByTime(MAX_STREAM_MS * 2)
+        expect(server.closeCode).toBeUndefined()
+        expect(warn).not.toHaveBeenCalled()
+      } finally {
+        warn.mockRestore()
+      }
+    })
   })
 
   it('reports a gateway fetch that throws, logging the error name but not its message', async () => {

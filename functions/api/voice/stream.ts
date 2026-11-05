@@ -52,6 +52,34 @@ function baseLang(lang: string): string {
 const isRateLimited = makeRateLimiter(20)
 
 /**
+ * The most one stream may cost: 60 seconds open, and 60 seconds' worth of
+ * audio. The client opens one socket per spoken turn, bounded by the
+ * voice detector in open mic, the button in push-to-talk and 8 s after a
+ * wake word, so a real turn never comes near either. Without them a
+ * socket ran for as long as anyone kept it open, and the Origin check
+ * stops only browsers: a script that sets its own Origin could stream
+ * audio through the operator's gateway, on the operator's bill, for as
+ * long as it liked. The byte cap is the half a script cannot outrun,
+ * since it can send an hour of recorded audio inside the first minute.
+ * The lifetime also bounds how long a socket outlives a `KILL_VOICE` or
+ * an Orbit switch-off, which are checked only at connect.
+ *
+ * Hitting either closes both sockets with 1008 and no error frame: the
+ * client ends that turn and listens on, where an error frame would put
+ * the realtime path into cooldown for the rest of the page's session.
+ */
+export const MAX_STREAM_MS = 60_000
+/** 60 s of linear16 PCM, 16 kHz mono: 2 bytes × 16,000 samples/s. */
+export const MAX_STREAM_BYTES = 2 * 16_000 * (MAX_STREAM_MS / 1000)
+
+function frameBytes(data: unknown): number {
+  if (data instanceof ArrayBuffer) return data.byteLength
+  if (ArrayBuffer.isView(data)) return data.byteLength
+  if (typeof data === 'string') return data.length
+  return 0
+}
+
+/**
  * Accept the WebSocket and hand the client a single JSON error frame
  * (`{ type: 'error', code }`) before closing. A browser WebSocket can't
  * read an HTTP status, so this is how the client learns the route is
@@ -202,17 +230,43 @@ export const onRequest: PagesFunction<StreamEnv> = async (context) => {
   server.binaryType = 'arraybuffer'
   upstream.binaryType = 'arraybuffer'
 
-  // Audio up (binary), transcripts down (JSON) — opaque pass-through.
-  server.addEventListener('message', (ev) => { try { upstream!.send(ev.data) } catch { /* closing */ } })
-  upstream.addEventListener('message', (ev) => { try { server.send(ev.data) } catch { /* closing */ } })
-  const closeBoth = (): void => {
-    try { server.close() } catch { /* already closed */ }
+  let closed = false
+  let bytesUp = 0
+  const closeBoth = (limit?: string): void => {
+    if (closed) return
+    closed = true
+    clearTimeout(lifetime)
+    if (limit) {
+      // Server log only, and no more than which limit: no audio, no IP.
+      console.warn(`[voice/stream] closed at the stream limit (${limit})`)
+      try { server.close(1008, 'stream_limit') } catch { /* already closed */ }
+    } else {
+      try { server.close() } catch { /* already closed */ }
+    }
     try { upstream!.close() } catch { /* already closed */ }
   }
-  server.addEventListener('close', closeBoth)
-  server.addEventListener('error', closeBoth)
-  upstream.addEventListener('close', closeBoth)
-  upstream.addEventListener('error', closeBoth)
+  const lifetime = setTimeout(() => closeBoth('time'), MAX_STREAM_MS)
+
+  // Audio up (binary), transcripts down (JSON) — opaque pass-through,
+  // with the audio counted against MAX_STREAM_BYTES. A frame that would
+  // cross it is dropped, not sent in part.
+  server.addEventListener('message', (ev) => {
+    if (closed) return
+    bytesUp += frameBytes(ev.data)
+    if (bytesUp > MAX_STREAM_BYTES) { closeBoth('bytes'); return }
+    try { upstream!.send(ev.data) } catch { /* closing */ }
+  })
+  upstream.addEventListener('message', (ev) => {
+    if (closed) return
+    try { server.send(ev.data) } catch { /* closing */ }
+  })
+  // Wrapped, not passed bare: a bare closeBoth would take the event as its
+  // `limit` argument and report every ordinary hang-up as a limit hit.
+  const hangUp = (): void => closeBoth()
+  server.addEventListener('close', hangUp)
+  server.addEventListener('error', hangUp)
+  upstream.addEventListener('close', hangUp)
+  upstream.addEventListener('error', hangUp)
 
   return new Response(null, { status: 101, webSocket: client })
 }
