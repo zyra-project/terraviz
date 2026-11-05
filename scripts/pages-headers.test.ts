@@ -287,6 +287,23 @@ describe('public/_headers: the public app stays embeddable by default', () => {
   )
 })
 
+describe('public/_headers: the microphone is the app\'s own, and nothing else is', () => {
+  // Orbit's voice input needs the microphone. Until November 2026 this
+  // was `microphone=()`, under which Chromium refuses getUserMedia
+  // without a prompt, so on every node that kept this file the Cloud
+  // engine and every hands-free mode failed in Chrome and Edge.
+  // `(self)` is the narrowest value that lets voice work: the app's own
+  // documents may ask, a cross-origin frame inside the app (a tour's
+  // video embed) may not, and a site embedding the app gets nothing
+  // unless it also delegates with `allow="microphone"`. The camera and
+  // location stay off; nothing in the app uses them.
+  it.each(['/', '/dataset/x', '/orbit', '/publish/datasets', '/assets/x.js'])('%s', path => {
+    expect(headersFor(rules, path).get('permissions-policy')).toEqual([
+      'camera=(), microphone=(self), geolocation=()',
+    ])
+  })
+})
+
 describe('reading frame-ancestors the way a browser does', () => {
   it('takes the first directive in a policy and ignores a repeat', () => {
     // Permissive first, restrictive second: the browser allows anyone.

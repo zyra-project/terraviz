@@ -45,7 +45,14 @@ Whisper without a word; and from compatibility date 2026-03-17 it would
 have relayed each audio frame as the text `"[object Blob]"`. Both are
 fixed in `functions/api/voice/stream.ts` (`https://` plus
 `binaryType = 'arraybuffer'`), with a relay test in `voice.test.ts`, so
-a live validation now tests the gateway rather than the proxy. That
+a live validation now tests the gateway rather than the proxy.
+Nor could any voice input that needs `getUserMedia` (the Cloud engine
+and every hands-free mode, since the local voice detector needs it)
+work in Chrome or Edge on a node serving the repo's `public/_headers`:
+from the repository's first commit until November 2026 it sent
+`Permissions-Policy: microphone=()`, under which Chromium refuses the
+microphone without a prompt. It now sends `microphone=(self)`, and
+`scripts/pages-headers.test.ts` pins it. That
 validation should also open the gateway's **Logs** page after a session
 and confirm nothing was stored: the proxy sends `cf-aig-collect-log:
 false`, and Cloudflare does not say whether that header covers a

@@ -1984,7 +1984,9 @@ thing you may genuinely skip.
 
 **The repo ships no CSP for the app.** `src/index.html` has no
 `<meta>` policy, and `public/_headers` sets `X-Content-Type-Options`,
-`Referrer-Policy` and `Permissions-Policy` everywhere. Its only CSP
+`Referrer-Policy` and `Permissions-Policy` everywhere. The last turns
+the camera and location off and allows the microphone only to the
+app's own pages, for Orbit's voice input. Its only CSP
 is `frame-ancestors 'self'` on `/publish`, so no other site can
 frame the publisher portal. Keep that rule if you edit the file.
 Upstream's production deploy enforces a strict `connect-src` policy
