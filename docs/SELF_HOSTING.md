@@ -1984,11 +1984,12 @@ thing you may genuinely skip.
 
 **The repo ships no CSP for the app.** `src/index.html` has no
 `<meta>` policy, and `public/_headers` sets `X-Content-Type-Options`,
-`Referrer-Policy` and `Permissions-Policy` everywhere. The last turns
-the camera and location off and allows the microphone only to the
-app's own pages, for Orbit's voice input. Its only CSP
-is `frame-ancestors 'self'` on `/publish`, so no other site can
-frame the publisher portal. Keep that rule if you edit the file.
+`Referrer-Policy` and `Permissions-Policy` everywhere.
+`Permissions-Policy` turns off the camera and location, and lets only
+this site's own pages ask for the microphone, which Orbit's voice
+input needs (to turn voice off, see 14.5). The file's only CSP is
+`frame-ancestors 'self'` on `/publish`, so no other site can frame
+the publisher portal. Keep that rule if you edit the file.
 Upstream's production deploy enforces a strict `connect-src` policy
 **at the Cloudflare edge** via Transform Rules — which a fork does
 **not** inherit. Your node works without one; you should still add your
@@ -2272,7 +2273,7 @@ with `root_selector: "data"`.
 
 | Feature | Variables | Notes |
 |---|---|---|
-| Orbit voice (batch speech-to-text and text-to-speech) | none | Runs on the `AI` binding. `KILL_VOICE=1` is the kill switch. |
+| Orbit voice (batch speech-to-text and text-to-speech) | none | Runs on the `AI` binding. `KILL_VOICE=1` stops these and the realtime route, but not the browser's own speech engine; see **Turning voice off** below. |
 | Realtime streaming STT | `CF_ACCOUNT_ID`, `CF_AI_GATEWAY`, `CF_AIG_TOKEN` (**secret**), optional `VOICE_STREAM_MODEL`; `VITE_VOICE_WS_STREAMING=true` (build-time) | Opt-in. Without the three server variables, `/api/voice/stream` sends a JSON error frame and the client falls back to batch Whisper. Set up the gateway as described under this table first. See [`ORBIT_VOICE_PLAN.md`](ORBIT_VOICE_PLAN.md) §3. |
 | Wake word | `VITE_VOICE_WAKEWORD_MODEL_URL` (build-time) | [`ORBIT_WAKEWORD.md`](ORBIT_WAKEWORD.md) |
 | YouTube media suggestions | `YOUTUBE_API_KEY` (**secret**) | Absent = source stays off, nothing errors. [`YOUTUBE_API_KEY.md`](YOUTUBE_API_KEY.md) |
@@ -2303,6 +2304,17 @@ That also limits how long an open stream outlasts `KILL_VOICE=1`.
 Visitors reach the route only with Orbit's **Voice engine** set to
 **Cloud (Cloudflare)** and **Hands-free** set to anything but
 **Off**.
+
+**Turning voice off.** `KILL_VOICE=1` stops only the Cloud engine.
+The default engine is the visitor's browser, which sends audio to the
+browser's maker rather than to your node. To block more, change
+`microphone=(self)` to `microphone=()` in `public/_headers`. Chrome
+and Edge then refuse the microphone to the Cloud engine and every
+hands-free mode. Whether they also refuse their own speech
+recognition, which the default engine uses, has not been tested.
+Either way the microphone button still shows, and fails when pressed.
+Other browsers may ignore the header. Turning Orbit off on the
+**Features** card removes voice along with the rest of Orbit.
 
 # Phase 15 — Desktop app fork (Tier 3)
 
