@@ -316,7 +316,7 @@ code{overflow-wrap:anywhere}
 <!--
   GENERATED FILE — do not edit.
 
-  Produced by scripts/build-setup-page.ts on 2026-11-03.
+  Produced by scripts/build-setup-page.ts on 2026-11-05.
   Prose lives in scripts/setup-page/content.ts; every binding,
   prerequisite and validator is imported from the modules the setup
   tool itself uses, so this page cannot disagree with `npm run setup`.
@@ -1995,7 +1995,7 @@ npm run terraviz -- import-snapshot \
           <span style="flex:none;font:500 11px/1 var(--tv-font-mono);color:var(--tv-accent)">per-feature</span>
         </div>
         <p style="margin:0;font-size:13.5px;line-height:1.55;color:var(--tv-text-muted);text-wrap:pretty">Orbit voice runs on the <code style="font-family:var(--tv-font-mono);font-size:.92em;background:var(--tv-surface-3);padding:1px 5px;border-radius:3px">AI</code> binding with nothing set. Realtime streaming STT, the wake word and YouTube media suggestions each want their own variables. Each degrades quietly when those are absent rather than erroring, so turning one on is additive and turning it off is safe.</p>
-        <p style="margin:8px 0 0;font-size:13.5px;line-height:1.55;color:var(--tv-text-muted);text-wrap:pretty"><b style="font-weight:600;color:var(--tv-text)">What it takes:</b> nothing for Orbit voice or the events/blog feeds — both already run. Realtime streaming STT wants three variables plus an AI Gateway token, the wake word wants a build-time model URL, and YouTube suggestions want an API key. Each is independent, and each stays off rather than erroring when its variables are absent.</p>
+        <p style="margin:8px 0 0;font-size:13.5px;line-height:1.55;color:var(--tv-text-muted);text-wrap:pretty"><b style="font-weight:600;color:var(--tv-text)">What it takes:</b> nothing for Orbit voice or the events/blog feeds — both already run. Realtime streaming STT wants three variables plus an AI Gateway token. Give it a gateway of its own with <b style="font-weight:600;color:var(--tv-text)">Logs</b> turned off: visitors' microphone audio passes through it, and a gateway logs by default. The wake word wants a build-time model URL, and YouTube suggestions want an API key. Each is independent, and each stays off rather than erroring when its variables are absent.</p>
       </div></div>
   <div style="background:var(--tv-accent-bg);border:1px solid var(--tv-accent-border);border-left:3px solid var(--tv-accent);border-radius:6px;padding:14px 16px;margin:0 0 14px">
     <div style="font:600 10.5px/1.35 var(--tv-font-sans);letter-spacing:.13em;text-transform:uppercase;color:var(--tv-accent);margin:0 0 7px">Gate</div>
