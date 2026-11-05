@@ -196,12 +196,17 @@ index_name = "terraviz-datasets"
 # The voice Pages Functions (/api/voice/transcribe, /api/voice/synthesize)
 # run STT/TTS on the same `AI` binding above — no extra binding needed.
 #
-# KILL_VOICE is a plain environment variable (not a binding) and a
-# kill switch: set it to a deny value (`1` / `true` / `on` /
-# `disabled`) in the Pages dashboard (Settings → Variables) to make
-# both voice endpoints return 503 so clients cool down and fall back
-# to the browser engine. Absent / any other value = voice enabled.
-# See docs/ORBIT_VOICE_PLAN.md §6, §8 (decision 4).
+# KILL_VOICE is a plain environment variable (not a binding): set it
+# to a deny value (`1` / `true` / `on` / `disabled`) in the Pages
+# dashboard (Settings → Variables) and all three voice routes refuse
+# (transcribe and synthesize with 503, stream with an error frame), so
+# Cloud-engine clients cool down. They do not fall back to the browser
+# engine: a user who pinned Cloud has no voice until the cooldown ends.
+# It does not turn off the default engine either, which is the
+# visitor's own browser and never reaches these routes; see
+# docs/SELF_HOSTING.md §14.5 "Turning voice off". Absent / any other
+# value = these routes enabled. See docs/ORBIT_VOICE_PLAN.md §6, §8
+# (decision 4).
 #
 # --- Orbit voice realtime streaming (Phase 3) ---
 #
@@ -218,5 +223,10 @@ index_name = "terraviz-datasets"
 #   CF_AIG_TOKEN      - AI Gateway authorization, the `cf-aig-authorization`
 #                       value (store as an ENCRYPTED secret, never plaintext)
 #   VOICE_STREAM_MODEL - optional override, defaults to @cf/deepgram/nova-3
+# Give it an AI Gateway of its own with Logs turned off: visitors'
+# microphone audio passes through it, and a gateway logs by default
+# (docs/SELF_HOSTING.md §14.5). The route also needs a build with
+# VITE_VOICE_WS_STREAMING=true before visitors can reach it, but it
+# answers any client that sends this site's Origin once these are set.
 # See docs/ORBIT_VOICE_PLAN.md §3 and
 # https://developers.cloudflare.com/ai-gateway/usage/websockets-api/realtime-api/

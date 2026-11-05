@@ -38,6 +38,26 @@ streaming path (Deepgram Nova-3/Flux via the AI Gateway realtime
 endpoint) has now landed too — the `/api/voice/stream` proxy + a client
 WS engine for **live interim transcripts**, flag-gated
 (`VITE_VOICE_WS_STREAMING`) and pending live AI-Gateway validation.
+Until November 2026 that path could not have worked at all: the proxy
+fetched the gateway's `wss://` URL, which a Worker's `fetch()` refuses,
+so every client got `upstream_unavailable` and fell back to batch
+Whisper without a word; and from compatibility date 2026-03-17 it would
+have relayed each audio frame as the text `"[object Blob]"`. Both are
+fixed in `functions/api/voice/stream.ts` (`https://` plus
+`binaryType = 'arraybuffer'`), with a relay test in `voice.test.ts`, so
+a live validation now tests the gateway rather than the proxy.
+Nor could any voice input that needs `getUserMedia` (the Cloud engine
+and every hands-free mode, since the local voice detector needs it)
+work in Chrome or Edge on a node serving the repo's `public/_headers`:
+from the repository's first commit until November 2026 it sent
+`Permissions-Policy: microphone=()`, under which Chromium refuses the
+microphone without a prompt. It now sends `microphone=(self)`, and
+`scripts/pages-headers.test.ts` pins it. That
+validation should also open the gateway's **Logs** page after a session
+and confirm nothing was stored: the proxy sends `cf-aig-collect-log:
+false`, and Cloudflare does not say whether that header covers a
+WebSocket session, so until it is seen to hold, a gateway with Logs
+turned off is the control (docs/SELF_HOSTING.md §14.5).
 **Phase 3.5 wake-word** has now landed as well: the on-device
 `WakeWordDetector` + the **openWakeWord ONNX scorer** (built-in `hey
 jarvis`; lazy onnxruntime-web, operator-hosted models, runbook +
@@ -442,7 +462,8 @@ analytics model (`docs/ANALYTICS.md`, `docs/PRIVACY.md`).
 
 - **No audio persisted, ever.** Captured audio is streamed/posted
   for transcription and dropped. Transcripts live only in the
-  in-memory chat history already used for typed chat.
+  chat history already used for typed chat, which is kept in
+  `sessionStorage` and so lasts until the tab closes.
 - **New Tier B event `voice_interaction`** (research-tier, opt-in
   — add to `TIER_B_EVENT_TYPES` in `src/types/index.ts`):
   `{ mode: 'stt' | 'tts', provider: 'cloud'|'local'|'browser',
@@ -457,7 +478,19 @@ analytics model (`docs/ANALYTICS.md`, `docs/PRIVACY.md`).
 - **Privacy-policy update** (`docs/PRIVACY.md` →
   `public/privacy.html` via `npm run build:privacy-page`, guarded
   by `check:privacy-page`) describing the voice data flow per
-  provider.
+  provider. **Landed** in November 2026 as §4 "Talking to Orbit by
+  voice", with matching lines in its summary and §2, §3, §6, §8
+  and §9. The first-use explainer above landed later in the same PR
+  (`src/ui/voiceNotice.ts`), as a **gate** rather than a banner:
+  nothing captures until the user presses Start listening. It is
+  remembered per engine (Cloud's live path is its own), with open mic
+  and wake word each a notice of their own, and versioned so a change
+  of fact asks again. Declining a hands-free notice sets Hands-free
+  back to Off. Push to talk asks at its first press; open mic and
+  wake word stored before the notice existed ask once, on load, after
+  the splash, so an exhibit set up earlier stops listening until
+  someone at it answers. It covers the microphone only; spoken
+  replies are not gated.
 
 ### 6.1 The exhibit changes the privacy calculus
 
@@ -474,6 +507,12 @@ explicitly:
   or on-device path, never Web Speech.** Decision #2 (browser-API
   MVP) and decision #5 (hands-free exhibit) therefore target
   *different deployments*, not one escalating build.
+  **The code does not enforce this.** A hands-free mode with the
+  default `auto` engine resolves to `browserStreamingSttEngine`, so
+  an exhibit that leaves the Voice engine on Automatic streams
+  visitors' speech to the browser maker. Until it is enforced, the
+  rule is the operator's, and `docs/PRIVACY.md` §9 asks exhibit
+  operators to pin **Cloud (Cloudflare)**.
 - **Wake-word must be on-device.** "Hey Orbit" requires
   continuously processing mic audio. That detection runs **locally**
   (Porcupine / openWakeWord class) and **never streams raw audio to

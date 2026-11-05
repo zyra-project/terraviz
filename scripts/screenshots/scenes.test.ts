@@ -6,9 +6,14 @@ import { describe, expect, it } from 'vitest'
 import { scenes, pointClearOfPanel } from './scenes'
 
 describe('screenshot scene manifest', () => {
-  it('covers the high-traffic surface (~15–30 scenes)', () => {
+  // A budget, not a rule about coverage: CLAUDE.md asks for a scene
+  // per UI surface, and every scene costs capture time on every PR.
+  // Raised from 40 to 45 for the first-use voice notice, a privacy
+  // disclosure whose strings translators need to see in place. Raise
+  // it again deliberately, not to make room by default.
+  it('covers the high-traffic surface within the scene budget', () => {
     expect(scenes.length).toBeGreaterThanOrEqual(15)
-    expect(scenes.length).toBeLessThanOrEqual(40)
+    expect(scenes.length).toBeLessThanOrEqual(45)
   })
 
   it('every scene has a unique name', () => {

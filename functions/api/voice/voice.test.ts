@@ -1,14 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Zyra Project
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultFeatures } from '../../../src/types/node-features'
 import { NODE_FEATURES_CACHE_KEY } from '../v1/_lib/node-settings-store'
 import { makeKV } from '../v1/_lib/test-helpers'
 import { onRequestPost as transcribe } from './transcribe'
 import { onRequestPost as synthesize } from './synthesize'
-import { isVoiceKilled, arrayBufferToBase64, isAllowedOrigin, type VoiceEnv } from './_voice-lib'
-import { streamConfigured, buildGatewayUrl, streamRefusal, onRequest as stream } from './stream'
+import {
+  isVoiceKilled,
+  arrayBufferToBase64,
+  isAllowedOrigin,
+  makeRateLimiter,
+  RATE_MAP_MAX,
+  RATE_WINDOW_MS,
+  type VoiceEnv,
+} from './_voice-lib'
+import {
+  streamConfigured,
+  buildGatewayUrl,
+  streamRefusal,
+  onRequest as stream,
+  MAX_STREAM_BYTES,
+  MAX_STREAM_MS,
+} from './stream'
 import { resetOrbitGateForTests } from '../_lib/orbit-gate'
 
 // The gate memoises per module instance; each case starts cold.
@@ -72,6 +87,46 @@ describe('_voice-lib', () => {
     const b64 = arrayBufferToBase64(bytes.buffer)
     const back = Uint8Array.from(atob(b64), c => c.charCodeAt(0))
     expect([...back]).toEqual([...bytes])
+  })
+
+  describe('makeRateLimiter', () => {
+    it('counts each caller over a window, then starts again', () => {
+      const limited = makeRateLimiter(2)
+      expect([limited('192.0.2.1', 0), limited('192.0.2.1', 1), limited('192.0.2.1', 2)]).toEqual([false, false, true])
+      expect(limited('192.0.2.2', 2)).toBe(false)
+      expect(limited('192.0.2.1', RATE_WINDOW_MS)).toBe(true)
+      expect(limited('192.0.2.1', RATE_WINDOW_MS + 1)).toBe(false)
+    })
+
+    // Keyed by raw address, a client rotating through its /64 had a fresh
+    // count on every request.
+    it('counts every address in one IPv6 /64 as one caller', () => {
+      const limited = makeRateLimiter(2)
+      expect(limited('2001:db8::1', 0)).toBe(false)
+      expect(limited('2001:db8::2', 0)).toBe(false)
+      expect(limited('2001:db8:0:0:ffff::3', 0)).toBe(true)
+      expect(limited('2001:db8:0:1::1', 0)).toBe(false)
+    })
+
+    it('counts an IPv4-mapped address as the IPv4 address it carries', () => {
+      const limited = makeRateLimiter(1)
+      expect(limited('192.0.2.1', 0)).toBe(false)
+      expect(limited('::ffff:192.0.2.1', 0)).toBe(true)
+    })
+
+    it(`holds at most ${RATE_MAP_MAX} callers, dropping the oldest`, () => {
+      // `others` distinct callers after the first, all in one window.
+      const after = (others: number): ReturnType<typeof makeRateLimiter> => {
+        const limited = makeRateLimiter(1)
+        limited('192.0.2.1', 0)
+        for (let i = 0; i < others; i++) limited(`10.${(i >> 16) & 255}.${(i >> 8) & 255}.${i & 255}`, 0)
+        return limited
+      }
+      // Full but not over: the first caller is still counted.
+      expect(after(RATE_MAP_MAX - 1)('192.0.2.1', 0)).toBe(true)
+      // One more: the first was dropped to make room, so it counts afresh.
+      expect(after(RATE_MAP_MAX)('192.0.2.1', 0)).toBe(false)
+    })
   })
 })
 
@@ -243,7 +298,8 @@ describe('voice stream proxy helpers', () => {
 
   it('buildGatewayUrl targets Nova-3 linear16 16k with interim results + language', () => {
     const url = buildGatewayUrl({ CF_ACCOUNT_ID: 'acct', CF_AI_GATEWAY: 'gw', CF_AIG_TOKEN: 't' }, 'es-MX')
-    expect(url).toContain('wss://gateway.ai.cloudflare.com/v1/acct/gw/workers-ai?')
+    // https, not wss: the URL goes to fetch(), which refuses wss:// in a Worker.
+    expect(url.startsWith('https://gateway.ai.cloudflare.com/v1/acct/gw/workers-ai?')).toBe(true)
     expect(url).toContain('model=%40cf%2Fdeepgram%2Fnova-3')
     expect(url).toContain('encoding=linear16')
     expect(url).toContain('sample_rate=16000')
@@ -263,7 +319,338 @@ describe('voice stream proxy helpers', () => {
       { CF_ACCOUNT_ID: ' acct\n', CF_AI_GATEWAY: 'gw ', CF_AIG_TOKEN: 't', VOICE_STREAM_MODEL: ' @cf/deepgram/flux\n' },
       'en',
     )
-    expect(url).toContain('wss://gateway.ai.cloudflare.com/v1/acct/gw/workers-ai?')
+    expect(url.startsWith('https://gateway.ai.cloudflare.com/v1/acct/gw/workers-ai?')).toBe(true)
     expect(url).toContain('model=%40cf%2Fdeepgram%2Fflux')
+  })
+})
+
+/**
+ * The relay itself, which nothing exercised until it turned out never to
+ * have relayed. Node has no workerd, so the stand-ins carry the two
+ * runtime behaviours that broke it, each checked against workerd 1.20261023
+ * through Miniflare:
+ *
+ * - `fetch()` refuses a `wss://` URL ("Fetch API cannot load"); an outbound
+ *   WebSocket is `https://` plus `Upgrade: websocket`.
+ * - From compatibility date 2026-03-17 a socket delivers a binary message as
+ *   a `Blob` unless its `binaryType` is `'arraybuffer'`, and `send()` turns a
+ *   Blob into the text "[object Blob]".
+ *
+ * `Response` is stubbed too: Node's refuses status 101.
+ */
+describe('voice stream relay', () => {
+  class FakeSocket {
+    binaryType: 'blob' | 'arraybuffer' = 'blob'
+    accepted = false
+    closed = false
+    sent: unknown[] = []
+    private listeners = new Map<string, Array<(ev: { data?: unknown }) => void>>()
+    accept(): void { this.accepted = true }
+    addEventListener(type: string, fn: (ev: { data?: unknown }) => void): void {
+      this.listeners.set(type, [...(this.listeners.get(type) ?? []), fn])
+    }
+    // The runtime's send() stringifies a Blob; record what it would put on the wire.
+    send(data: unknown): void { this.sent.push(data instanceof Blob ? String(data) : data) }
+    closeCode?: number
+    closeReason?: string
+    close(code?: number, reason?: string): void {
+      this.closed = true
+      this.closeCode = code
+      this.closeReason = reason
+    }
+    /** The far end hanging up, or the socket erroring. */
+    emit(type: 'close' | 'error'): void {
+      for (const fn of this.listeners.get(type) ?? []) fn({})
+    }
+    /** A frame arriving from the far end, typed as the runtime would type it. */
+    receive(data: Uint8Array | string): void {
+      const ev = typeof data === 'string' || this.binaryType === 'arraybuffer'
+        ? { data: typeof data === 'string' ? data : data.slice().buffer }
+        : { data: new Blob([data.slice()]) }
+      for (const fn of this.listeners.get('message') ?? []) fn(ev)
+    }
+    /** A frame whose data is exactly `data`, whatever `binaryType` says. */
+    deliver(data: unknown): void {
+      for (const fn of this.listeners.get('message') ?? []) fn({ data })
+    }
+  }
+
+  const CONFIGURED = { CF_ACCOUNT_ID: 'a', CF_AI_GATEWAY: 'g', CF_AIG_TOKEN: 'tok' }
+  let pairs: Array<{ client: FakeSocket; server: FakeSocket }>
+  let upstream: FakeSocket
+  let fetched: Array<{ url: string; headers: Record<string, string> }>
+  // What the stand-in gateway answers: a socket by default, or a refusal.
+  let gatewayAnswer: () => Promise<{
+    webSocket: FakeSocket | null
+    status?: number
+    body?: { cancel(): Promise<void> } | null
+  }>
+  let ipCounter = 0
+
+  beforeEach(() => {
+    pairs = []
+    upstream = new FakeSocket()
+    fetched = []
+    gatewayAnswer = async () => ({ webSocket: upstream, status: 101 })
+    vi.stubGlobal('WebSocketPair', class {
+      0: FakeSocket
+      1: FakeSocket
+      constructor() {
+        const pair = { client: new FakeSocket(), server: new FakeSocket() }
+        pairs.push(pair)
+        this[0] = pair.client
+        this[1] = pair.server
+      }
+    })
+    vi.stubGlobal('fetch', async (url: string, init?: { headers?: Record<string, string> }) => {
+      if (!/^https?:\/\//.test(url)) throw new TypeError(`Fetch API cannot load: ${url}`)
+      fetched.push({ url, headers: init?.headers ?? {} })
+      return gatewayAnswer()
+    })
+    vi.stubGlobal('Response', class {
+      status: number
+      webSocket: unknown
+      constructor(_body: unknown, init?: { status?: number; webSocket?: unknown }) {
+        this.status = init?.status ?? 200
+        this.webSocket = init?.webSocket
+      }
+    })
+  })
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  async function open(): Promise<{ res: { status: number; webSocket: unknown }; server: FakeSocket }> {
+    const request = fakeReq({
+      url: `${ORIGIN}/api/voice/stream?lang=en`,
+      origin: ORIGIN,
+      // A fresh address per case: the per-caller rate limiter is module state.
+      headers: { Upgrade: 'websocket', 'CF-Connecting-IP': `203.0.113.${++ipCounter}` },
+    })
+    const res = await stream({ request, env: CONFIGURED } as unknown as Parameters<typeof stream>[0])
+    return { res: res as unknown as { status: number; webSocket: unknown }, server: pairs[0]?.server }
+  }
+
+  it('opens the gateway socket over https with the secret, and relays rather than refusing', async () => {
+    const { res, server } = await open()
+    expect(fetched).toHaveLength(1)
+    expect(fetched[0].url.startsWith('https://gateway.ai.cloudflare.com/v1/a/g/workers-ai?')).toBe(true)
+    // Exactly these: nothing of the visitor's request (cookies, Origin, IP)
+    // is forwarded, and the gateway is asked not to log the session.
+    expect(fetched[0].headers).toEqual({
+      Upgrade: 'websocket',
+      'cf-aig-authorization': 'tok',
+      'cf-aig-collect-log': 'false',
+    })
+    // A refusal sends one error frame and closes; the relay sends nothing yet.
+    expect(pairs).toHaveLength(1)
+    expect(server.sent).toEqual([])
+    expect(server.closed).toBe(false)
+    expect(res.status).toBe(101)
+    expect(res.webSocket).toBe(pairs[0].client)
+    expect(upstream.accepted).toBe(true)
+  })
+
+  it('relays an audio frame to the gateway as bytes, not as "[object Blob]"', async () => {
+    const { server } = await open()
+    server.receive(new Uint8Array([1, 2, 3]))
+    expect(upstream.sent).toHaveLength(1)
+    expect(upstream.sent[0]).toBeInstanceOf(ArrayBuffer)
+    expect(Array.from(new Uint8Array(upstream.sent[0] as ArrayBuffer))).toEqual([1, 2, 3])
+  })
+
+  it('relays a transcript back to the client unchanged', async () => {
+    const { server } = await open()
+    const transcript = JSON.stringify({ channel: { alternatives: [{ transcript: 'hello' }] }, is_final: true })
+    upstream.receive(transcript)
+    expect(server.sent).toEqual([transcript])
+  })
+
+  // Deepgram answers in JSON text, but the relay is an opaque pass-through,
+  // so a binary frame coming back must arrive as bytes too.
+  it('relays a binary frame from the gateway back as bytes', async () => {
+    const { server } = await open()
+    upstream.receive(new Uint8Array([9, 8, 7]))
+    expect(server.sent).toHaveLength(1)
+    expect(server.sent[0]).toBeInstanceOf(ArrayBuffer)
+    expect(Array.from(new Uint8Array(server.sent[0] as ArrayBuffer))).toEqual([9, 8, 7])
+  })
+
+  // A refused upgrade must still reach the client as an error frame, and
+  // must now leave a trace in the server log, since a silent refusal is
+  // what hid the wss:// bug. The trace names the status and nothing else:
+  // not the token, not the account path in the URL.
+  it('reports a gateway that refuses the upgrade, logging only its status', async () => {
+    const cancel = vi.fn(async () => {})
+    gatewayAnswer = async () => ({ webSocket: null, status: 401, body: { cancel } })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const { server } = await open()
+      expect(server.sent).toEqual([JSON.stringify({ type: 'error', code: 'upstream_unavailable' })])
+      expect(server.closed).toBe(true)
+      // Left unread, the refusal's body would hold its connection open.
+      expect(cancel).toHaveBeenCalledTimes(1)
+      expect(warn).toHaveBeenCalledTimes(1)
+      const logged = warn.mock.calls[0].join(' ')
+      expect(logged).toContain('HTTP 401')
+      expect(logged).not.toContain('tok')
+      expect(logged).not.toContain('/v1/a/g')
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  // A refusal can come with no body at all, and cancelling one that has
+  // been read rejects. Neither may add a second, misleading log line or
+  // leave a rejection unhandled.
+  it('reports a refusal with no body once, as a refusal', async () => {
+    gatewayAnswer = async () => ({ webSocket: null, status: 502, body: null })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const { server } = await open()
+      expect(server.sent).toEqual([JSON.stringify({ type: 'error', code: 'upstream_unavailable' })])
+      expect(warn.mock.calls.map((c) => c.join(' '))).toEqual(['[voice/stream] gateway did not upgrade: HTTP 502'])
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('absorbs a cancel that rejects', async () => {
+    // A plain function, not vi.fn: a mock records how its promise settles,
+    // which marks the rejection handled and would hide a missing catch.
+    let cancels = 0
+    const cancel = async (): Promise<void> => {
+      cancels++
+      throw new TypeError('This ReadableStream is currently locked to a reader.')
+    }
+    gatewayAnswer = async () => ({ webSocket: null, status: 401, body: { cancel } })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const { server } = await open()
+      expect(cancels).toBe(1)
+      expect(server.sent).toEqual([JSON.stringify({ type: 'error', code: 'upstream_unavailable' })])
+      // One turn for the rejection to settle; unhandled, it fails the run.
+      await new Promise((r) => setTimeout(r, 0))
+      expect(warn).toHaveBeenCalledTimes(1)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  describe('the per-stream cap', () => {
+    afterEach(() => { vi.useRealTimers() })
+    const ERROR_FRAME = /"type":"error"/
+
+    it(`closes both sockets ${MAX_STREAM_MS} ms after opening, with 1008 and no error frame`, async () => {
+      vi.useFakeTimers()
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        const { server } = await open()
+        vi.advanceTimersByTime(MAX_STREAM_MS - 1)
+        expect(server.closed).toBe(false)
+        vi.advanceTimersByTime(1)
+        expect(server.closed).toBe(true)
+        expect([server.closeCode, server.closeReason]).toEqual([1008, 'stream_limit'])
+        expect(upstream.closed).toBe(true)
+        // No error frame: that would cool the client down for the session.
+        expect(server.sent.some((m) => typeof m === 'string' && ERROR_FRAME.test(m))).toBe(false)
+        expect(warn.mock.calls.map((c) => c.join(' '))).toEqual(['[voice/stream] closed at the stream limit (time)'])
+      } finally {
+        warn.mockRestore()
+      }
+    })
+
+    it(`relays audio up to ${MAX_STREAM_BYTES} bytes and closes on the frame that would cross it`, async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        const { server } = await open()
+        const second = 2 * 16_000 // one second of linear16 at 16 kHz
+        expect(MAX_STREAM_BYTES % second).toBe(0)
+        for (let i = 0; i < MAX_STREAM_BYTES / second; i++) server.receive(new Uint8Array(second))
+        expect(upstream.sent).toHaveLength(MAX_STREAM_BYTES / second)
+        expect(server.closed).toBe(false)
+        server.receive(new Uint8Array(1))
+        expect(upstream.sent).toHaveLength(MAX_STREAM_BYTES / second) // the crossing frame is dropped
+        expect([server.closeCode, server.closeReason]).toEqual([1008, 'stream_limit'])
+        expect(upstream.closed).toBe(true)
+        expect(warn.mock.calls.map((c) => c.join(' '))).toEqual(['[voice/stream] closed at the stream limit (bytes)'])
+        // Nothing moves after the close, in either direction.
+        upstream.receive('{"late":true}')
+        expect(server.sent.some((m) => m === '{"late":true}')).toBe(false)
+      } finally {
+        warn.mockRestore()
+      }
+    })
+
+    // The real client sends only binary PCM. Text forwarded upstream would
+    // reach Deepgram's control channel, where a KeepAlive holds an idle
+    // stream open and Finalize / CloseStream act on the session.
+    it('closes on a text frame from the client with 1003, forwarding nothing', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        const { server } = await open()
+        server.receive(new Uint8Array([1, 2]))
+        server.receive('{"type":"KeepAlive"}')
+        expect(upstream.sent).toHaveLength(1)
+        expect([server.closeCode, server.closeReason]).toEqual([1003, 'binary_only'])
+        expect(upstream.closed).toBe(true)
+        expect(server.sent.some((m) => typeof m === 'string' && ERROR_FRAME.test(m))).toBe(false)
+        expect(warn.mock.calls.map((c) => c.join(' '))).toEqual(['[voice/stream] closed on a text frame from the client'])
+        // Closed for good: later audio is not forwarded either.
+        server.receive(new Uint8Array([3]))
+        expect(upstream.sent).toHaveLength(1)
+      } finally {
+        warn.mockRestore()
+      }
+    })
+
+    // With binaryType 'arraybuffer' only bytes or text should arrive. A
+    // frame of any other type cannot be measured, so it must not pass
+    // the cap uncounted.
+    it('closes on a frame it cannot measure, rather than relaying it uncounted', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        const { server } = await open()
+        server.deliver(new Blob([new Uint8Array(8)]))
+        expect(upstream.sent).toEqual([])
+        expect([server.closeCode, server.closeReason]).toEqual([1003, 'unsupported_frame'])
+        expect(upstream.closed).toBe(true)
+        // Its own line, so an operator does not chase a byte cap it never hit.
+        expect(warn.mock.calls.map((c) => c.join(' '))).toEqual(['[voice/stream] closed on a frame it could not measure'])
+      } finally {
+        warn.mockRestore()
+      }
+    })
+
+    it('treats an ordinary hang-up as one: plain close, timer cancelled, nothing logged', async () => {
+      vi.useFakeTimers()
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        const { server } = await open()
+        server.emit('close')
+        expect(upstream.closed).toBe(true)
+        expect(upstream.closeCode).toBeUndefined()
+        expect(server.closeCode).toBeUndefined()
+        // The lifetime timer is gone, so the limit never fires afterwards.
+        vi.advanceTimersByTime(MAX_STREAM_MS * 2)
+        expect(server.closeCode).toBeUndefined()
+        expect(warn).not.toHaveBeenCalled()
+      } finally {
+        warn.mockRestore()
+      }
+    })
+  })
+
+  it('reports a gateway fetch that throws, logging the error name but not its message', async () => {
+    gatewayAnswer = async () => { throw new TypeError('network down for https://gateway.ai.cloudflare.com/v1/a/g/') }
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const { server } = await open()
+      expect(server.sent).toEqual([JSON.stringify({ type: 'error', code: 'upstream_unavailable' })])
+      expect(warn).toHaveBeenCalledTimes(1)
+      const logged = warn.mock.calls[0].join(' ')
+      expect(logged).toContain('TypeError')
+      expect(logged).not.toContain('/v1/a/g')
+    } finally {
+      warn.mockRestore()
+    }
   })
 })

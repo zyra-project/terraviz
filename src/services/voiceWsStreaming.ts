@@ -111,6 +111,7 @@ export function createWsStreamingSttEngine(deps: WsStreamingEngineDeps = {}): St
   const startCapture = deps.startCapture ?? defaultStartPcmCapture
   return {
     provider: 'cloud',
+    live: true,
     supportsLanguage: (lang) => CLOUD_STT_LANGUAGES.has(baseLanguage(lang)),
     // Needs Web Audio + a live mic stream (the session provides it) and
     // a same-origin proxy — so web-only, like the batch cloud engine.

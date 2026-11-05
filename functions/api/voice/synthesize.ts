@@ -34,7 +34,7 @@ interface SynthesizeBody {
 }
 
 // TTS is sentence-chunked, so a single reply can issue several calls.
-const isRateLimited = makeRateLimiter(120) // 120 sentences / min / IP
+const isRateLimited = makeRateLimiter(120) // 120 sentences / min / caller (IPv4, or IPv6 /64)
 
 export const onRequestOptions: PagesFunction<VoiceEnv> = async (context) => {
   const origin = context.request.headers.get('Origin')

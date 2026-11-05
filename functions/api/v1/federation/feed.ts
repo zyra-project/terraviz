@@ -32,6 +32,7 @@
  */
 
 import type { CatalogEnv } from '../_lib/env'
+import { clientRateKey } from '../../_lib/client-rate-key'
 import { IDENTITY_MISSING_MESSAGE } from '../_lib/catalog-store'
 import { serializeDataset } from '../_lib/dataset-serializer'
 import { makeDataRefResolver } from '../_lib/data-ref-resolver'
@@ -63,25 +64,10 @@ export function resetFeedSigningKeyCache(): void {
 
 /** The rate-limit key for a caller: an IPv6 address by its /64 (any
  *  spelling of it), an IPv4-mapped one as its IPv4 address, and an IPv4
- *  address as it is. */
-export function feedRateKey(address: string): string {
-  if (!address.includes(':')) return address
-  try {
-    const host = new URL(`http://[${address}]/`).hostname.slice(1, -1)
-    const [left, right = ''] = host.split('::')
-    const prefix = left ? left.split(':') : []
-    const suffix = right ? right.split(':') : []
-    const groups = host.includes('::') ? [...prefix, ...Array(8 - prefix.length - suffix.length).fill('0'), ...suffix] : prefix
-    if (groups.length !== 8) return 'unknown'
-    const words = groups.map(group => parseInt(group, 16))
-    // An IPv4-mapped address (`::ffff:a.b.c.d`) is one IPv4 client, and
-    // its /64 is the same for every one of them, so key it as IPv4.
-    if (words.slice(0, 5).every(word => word === 0) && words[5] === 0xffff) {
-      return [words[6] >> 8, words[6] & 0xff, words[7] >> 8, words[7] & 0xff].join('.')
-    }
-    return words.slice(0, 4).map(word => word.toString(16)).join(':') + '::/64'
-  } catch { return 'unknown' }
-}
+ *  address as it is. Moved to `functions/api/_lib/client-rate-key.ts`
+ *  when the voice routes needed the same key; exported here under its
+ *  old name. */
+export const feedRateKey = clientRateKey
 
 function rateLimited(request: Request): boolean {
   const now = Date.now()
