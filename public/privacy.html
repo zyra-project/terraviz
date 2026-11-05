@@ -191,9 +191,15 @@ footer.site-footer {
       <li>A richer &quot;research&quot; mode is available, <strong>opt-in only</strong>, that helps
       us understand how people explore Earth data and improves the Orbit
       AI docent.</li>
+      <li>Talking to Orbit by voice is <strong>optional</strong>. With the default voice
+      setting, your browser&#39;s own speech recognition hears you, and some
+      browsers do that on their maker&#39;s servers (Chrome sends the audio
+      to Google). See section 4.</li>
       </ul>
-      <p>All data we collect stays on Cloudflare infrastructure. Nothing is
-      sold, shared with advertisers, or used for profiling.</p>
+      <p>All data we collect stays on Cloudflare infrastructure. What you send
+      to an AI provider, or to your browser&#39;s speech service, is covered in
+      section 4. Nothing is sold, shared with advertisers, or used for
+      profiling.</p>
       <hr>
       <h2>1. Who runs this</h2>
       <p>Terraviz is developed by <a href="https://github.com/zyra-project">Zyra Project</a>.
@@ -351,6 +357,11 @@ footer.site-footer {
       authored by the tour writer; we identify each one by an
       author-set ID and never transmit the question text or image
       content</li>
+      <li>When you use voice with Orbit: whether it was speech-to-text or a
+      spoken reply, which voice engine handled it, how it started (the
+      microphone button, a hands-free mode, or a spoken reply), the
+      language, how long it took, whether it worked, and whether you
+      interrupted a spoken reply. Never the audio, and never the words</li>
       <li>When something goes wrong: a sanitized stack frame list — function
       names from our own code and from libraries we ship (MapLibre,
       HLS.js, Three.js), with all URLs, file paths, line numbers, and
@@ -380,6 +391,9 @@ footer.site-footer {
       provider to generate responses, and rating a response explicitly
       submits that conversation for feedback. See sections 4 and 5 for
       the full picture)</li>
+      <li><strong>Your voice.</strong> Telemetry never contains audio or the words you
+      spoke. (Speaking to Orbit sends audio to a speech service to turn
+      it into text; section 4 says which one)</li>
       <li><strong>The text of browse searches.</strong> We hash your query client-side
       before it leaves your device, so telemetry sees typing patterns
       and repeat frequencies but never the words</li>
@@ -456,6 +470,66 @@ footer.site-footer {
       describe what you are looking at. The screenshot goes to whichever
       AI provider is configured (see above). We do not store screenshots
       on our servers.</p>
+      <h3>Talking to Orbit by voice</h3>
+      <p>Voice is optional. Orbit hears nothing until you tap the microphone
+      button or turn on a <strong>Hands-free</strong> mode in Orbit settings, and your
+      browser asks your permission before the app can use your microphone.
+      Orbit speaks its replies only if you turn on <strong>Speak replies aloud</strong>
+      or tap a reply&#39;s speaker button.</p>
+      <p>What you say is turned into text, and that text becomes your Orbit
+      message, handled exactly like a typed one (see above). <strong>We do not
+      keep recordings of your voice.</strong> Audio is used only to produce the
+      text.</p>
+      <p>Where your voice goes depends on the <strong>Voice engine</strong> setting:</p>
+      <ul>
+      <li><strong>Automatic</strong> (the default) and <strong>Browser</strong> use your browser&#39;s
+      built-in speech recognition. Some browsers do this on their maker&#39;s
+      servers: Chrome, for example, sends the audio to Google. The browser
+      maker&#39;s privacy policy applies to it, and Terraviz never receives
+      the audio. For spoken replies, most browser voices are built into
+      your device. Some are produced online (in Chrome, the voices named
+      &quot;Google …&quot;), and then the browser maker receives the text of
+      Orbit&#39;s reply</li>
+      <li><strong>Cloud (Cloudflare)</strong> sends your audio to our voice service on
+      Cloudflare, which has Cloudflare Workers AI turn it into text. For
+      spoken replies, it sends the text of Orbit&#39;s reply to Workers AI to
+      make the audio. Cloudflare processes these only to produce the text
+      or the audio, and does not use them to train models; Cloudflare&#39;s
+      published policy applies in addition to this one. This engine is not
+      available in the desktop app<ul>
+      <li>A recording made with the microphone button lasts up to 15
+      seconds, and OpenAI&#39;s Whisper speech model, running on Workers AI,
+      turns it into text</li>
+      <li>In a hands-free mode, where this site has live transcription
+      switched on, audio streams through our service and Cloudflare AI
+      Gateway to Deepgram&#39;s Nova-3 speech model, which Cloudflare runs on
+      Workers AI, so your words appear as you speak. Our gateway is set
+      not to keep logs, and each stream ends after at most 60 seconds.
+      Without live transcription, each thing you say is sent as one
+      recording, as above</li>
+      </ul>
+      </li>
+      </ul>
+      <p>The <strong>Hands-free</strong> setting decides when the microphone is on:</p>
+      <ul>
+      <li><strong>Off</strong> (the default): only while you are using the microphone
+      button</li>
+      <li><strong>Push to talk</strong>: only while you hold the talk button</li>
+      <li><strong>Open mic</strong>: the microphone stays on while the app is open, and the
+      microphone button mutes it. A detector on your device listens for
+      the sound of speech and sends audio to the voice engine only while
+      it hears someone talking. That can include other people nearby, or
+      loud background noise</li>
+      <li><strong>Wake word</strong> (only where this site has set it up; not in the
+      desktop app): the microphone stays on, but the wake phrase is
+      recognised entirely on your device, and nothing is sent until it is
+      heard. Then your question goes to the voice engine, as above. If
+      nobody speaks within 8 seconds, Orbit goes back to listening for the
+      wake phrase. The wake-phrase detector is downloaded when you choose
+      this mode: its model files from a location this site&#39;s operator
+      chooses, and the code that runs it from the jsDelivr content
+      network, which sees your IP address as any website you load does</li>
+      </ul>
       <h3>If you rate an Orbit reply (thumbs up / thumbs down)</h3>
       <p>Rating a reply is a feedback action, <strong>not</strong> telemetry. See section
       5 — it explains exactly what a rating submits.</p>
@@ -523,6 +597,13 @@ footer.site-footer {
       reply back. The proxy does not log or store message contents. If
       you configure a different AI provider in Orbit settings, messages
       bypass our proxy entirely and go directly to that provider</li>
+      <li><strong>Orbit voice service</strong> (only with the <strong>Cloud (Cloudflare)</strong> voice
+      engine): our Cloudflare Workers endpoints pass your audio to Workers
+      AI to turn it into text, and Orbit&#39;s reply text to Workers AI to
+      make spoken audio. Live transcription goes through Cloudflare AI
+      Gateway, set not to keep logs. None of these store the audio, the
+      text, or the spoken reply. With the default voice engine, audio
+      goes to your browser&#39;s speech service instead (section 4)</li>
       <li>Served by <strong>Cloudflare Pages</strong></li>
       </ul>
       <p>We do not use Google Analytics, PostHog, Segment, Amplitude,
@@ -538,7 +619,9 @@ footer.site-footer {
       <li>Your chat history with Orbit (in browser localStorage or the
       desktop app&#39;s local data folder)</li>
       <li>Your Orbit settings — API URL, model, reading level, Vision Mode
-      preference</li>
+      preference, and the voice settings (voice engine, hands-free mode,
+      recognition language, voice, speaking rate, and whether replies are
+      spoken)</li>
       <li>On desktop, any AI provider API key you enter (stored in the
       operating system keychain, not in plaintext)</li>
       <li>On desktop, any offline datasets you download (kept in the app&#39;s
@@ -587,6 +670,10 @@ footer.site-footer {
       <li><strong>Use Orbit with a self-hosted AI</strong> (for example, Ollama on your
       own computer) so chat messages never leave your network. Configure
       this under Orbit settings</li>
+      <li><strong>Choose where your voice goes, or don&#39;t use it.</strong> Type instead of
+      speaking, keep <strong>Hands-free</strong> set to Off, and pick the <strong>Voice
+      engine</strong> whose handling you prefer (section 4). In open-mic and
+      wake-word modes, the microphone button mutes the microphone</li>
       <li><strong>Avoid rating Orbit replies</strong> if you do not want the conversation
       stored for feedback. Ratings are opt-in — nothing is sent unless
       you click thumbs-up or thumbs-down</li>
@@ -612,6 +699,12 @@ footer.site-footer {
       whether their policies permit them. The Orbit AI docent sends
       messages to a third-party AI provider to generate replies; school
       administrators should evaluate that too.</p>
+      <p>Voice needs the same care. With the default voice engine, a browser
+      such as Chrome sends what a student says to its maker&#39;s servers
+      (section 4), and a hands-free mode keeps the microphone on in a room
+      full of people. Where Terraviz runs as a public exhibit or kiosk with
+      a hands-free mode, post signs saying the microphone is on: an in-app
+      notice cannot reach everyone within range of it.</p>
       <hr>
       <h2>10. International users</h2>
       <p>This app is developed in the United States. Cloudflare&#39;s global

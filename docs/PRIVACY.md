@@ -35,9 +35,15 @@ off.
 - A richer "research" mode is available, **opt-in only**, that helps
   us understand how people explore Earth data and improves the Orbit
   AI docent.
+- Talking to Orbit by voice is **optional**. With the default voice
+  setting, your browser's own speech recognition hears you, and some
+  browsers do that on their maker's servers (Chrome sends the audio
+  to Google). See section 4.
 
-All data we collect stays on Cloudflare infrastructure. Nothing is
-sold, shared with advertisers, or used for profiling.
+All data we collect stays on Cloudflare infrastructure. What you send
+to an AI provider, or to your browser's speech service, is covered in
+section 4. Nothing is sold, shared with advertisers, or used for
+profiling.
 
 ---
 
@@ -195,6 +201,11 @@ If you turn Research mode on, we additionally record:
   authored by the tour writer; we identify each one by an
   author-set ID and never transmit the question text or image
   content
+- When you use voice with Orbit: whether it was speech-to-text or a
+  spoken reply, which voice engine handled it, how it started (the
+  microphone button, a hands-free mode, or a spoken reply), the
+  language, how long it took, whether it worked, and whether you
+  interrupted a spoken reply. Never the audio, and never the words
 - When something goes wrong: a sanitized stack frame list — function
   names from our own code and from libraries we ship (MapLibre,
   HLS.js, Three.js), with all URLs, file paths, line numbers, and
@@ -230,6 +241,9 @@ covered in sections 4 and 5:
   provider to generate responses, and rating a response explicitly
   submits that conversation for feedback. See sections 4 and 5 for
   the full picture)
+- **Your voice.** Telemetry never contains audio or the words you
+  spoke. (Speaking to Orbit sends audio to a speech service to turn
+  it into text; section 4 says which one)
 - **The text of browse searches.** We hash your query client-side
   before it leaves your device, so telemetry sees typing patterns
   and repeat frequencies but never the words
@@ -315,6 +329,67 @@ describe what you are looking at. The screenshot goes to whichever
 AI provider is configured (see above). We do not store screenshots
 on our servers.
 
+### Talking to Orbit by voice
+
+Voice is optional. Orbit hears nothing until you tap the microphone
+button or turn on a **Hands-free** mode in Orbit settings, and your
+browser asks your permission before the app can use your microphone.
+Orbit speaks its replies only if you turn on **Speak replies aloud**
+or tap a reply's speaker button.
+
+What you say is turned into text, and that text becomes your Orbit
+message, handled exactly like a typed one (see above). **We do not
+keep recordings of your voice.** Audio is used only to produce the
+text.
+
+Where your voice goes depends on the **Voice engine** setting:
+
+- **Automatic** (the default) and **Browser** use your browser's
+  built-in speech recognition. Some browsers do this on their maker's
+  servers: Chrome, for example, sends the audio to Google. The browser
+  maker's privacy policy applies to it, and Terraviz never receives
+  the audio. For spoken replies, most browser voices are built into
+  your device. Some are produced online (in Chrome, the voices named
+  "Google …"), and then the browser maker receives the text of
+  Orbit's reply
+- **Cloud (Cloudflare)** sends your audio to our voice service on
+  Cloudflare, which has Cloudflare Workers AI turn it into text. For
+  spoken replies, it sends the text of Orbit's reply to Workers AI to
+  make the audio. Cloudflare processes these only to produce the text
+  or the audio, and does not use them to train models; Cloudflare's
+  published policy applies in addition to this one. This engine is not
+  available in the desktop app
+  - A recording made with the microphone button lasts up to 15
+    seconds, and OpenAI's Whisper speech model, running on Workers AI,
+    turns it into text
+  - In a hands-free mode, where this site has live transcription
+    switched on, audio streams through our service and Cloudflare AI
+    Gateway to Deepgram's Nova-3 speech model, which Cloudflare runs on
+    Workers AI, so your words appear as you speak. Our gateway is set
+    not to keep logs, and each stream ends after at most 60 seconds.
+    Without live transcription, each thing you say is sent as one
+    recording, as above
+
+The **Hands-free** setting decides when the microphone is on:
+
+- **Off** (the default): only while you are using the microphone
+  button
+- **Push to talk**: only while you hold the talk button
+- **Open mic**: the microphone stays on while the app is open, and the
+  microphone button mutes it. A detector on your device listens for
+  the sound of speech and sends audio to the voice engine only while
+  it hears someone talking. That can include other people nearby, or
+  loud background noise
+- **Wake word** (only where this site has set it up; not in the
+  desktop app): the microphone stays on, but the wake phrase is
+  recognised entirely on your device, and nothing is sent until it is
+  heard. Then your question goes to the voice engine, as above. If
+  nobody speaks within 8 seconds, Orbit goes back to listening for the
+  wake phrase. The wake-phrase detector is downloaded when you choose
+  this mode: its model files from a location this site's operator
+  chooses, and the code that runs it from the jsDelivr content
+  network, which sees your IP address as any website you load does
+
 ### If you rate an Orbit reply (thumbs up / thumbs down)
 
 Rating a reply is a feedback action, **not** telemetry. See section
@@ -394,6 +469,13 @@ Everything we store runs on **Cloudflare**:
   reply back. The proxy does not log or store message contents. If
   you configure a different AI provider in Orbit settings, messages
   bypass our proxy entirely and go directly to that provider
+- **Orbit voice service** (only with the **Cloud (Cloudflare)** voice
+  engine): our Cloudflare Workers endpoints pass your audio to Workers
+  AI to turn it into text, and Orbit's reply text to Workers AI to
+  make spoken audio. Live transcription goes through Cloudflare AI
+  Gateway, set not to keep logs. None of these store the audio, the
+  text, or the spoken reply. With the default voice engine, audio
+  goes to your browser's speech service instead (section 4)
 - Served by **Cloudflare Pages**
 
 We do not use Google Analytics, PostHog, Segment, Amplitude,
@@ -412,7 +494,9 @@ profiling.
 - Your chat history with Orbit (in browser localStorage or the
   desktop app's local data folder)
 - Your Orbit settings — API URL, model, reading level, Vision Mode
-  preference
+  preference, and the voice settings (voice engine, hands-free mode,
+  recognition language, voice, speaking rate, and whether replies are
+  spoken)
 - On desktop, any AI provider API key you enter (stored in the
   operating system keychain, not in plaintext)
 - On desktop, any offline datasets you download (kept in the app's
@@ -464,6 +548,10 @@ profiles, or sell to third parties.
 - **Use Orbit with a self-hosted AI** (for example, Ollama on your
   own computer) so chat messages never leave your network. Configure
   this under Orbit settings
+- **Choose where your voice goes, or don't use it.** Type instead of
+  speaking, keep **Hands-free** set to Off, and pick the **Voice
+  engine** whose handling you prefer (section 4). In open-mic and
+  wake-word modes, the microphone button mutes the microphone
 - **Avoid rating Orbit replies** if you do not want the conversation
   stored for feedback. Ratings are opt-in — nothing is sent unless
   you click thumbs-up or thumbs-down
@@ -492,6 +580,13 @@ input, and school administrators deploying the app should consider
 whether their policies permit them. The Orbit AI docent sends
 messages to a third-party AI provider to generate replies; school
 administrators should evaluate that too.
+
+Voice needs the same care. With the default voice engine, a browser
+such as Chrome sends what a student says to its maker's servers
+(section 4), and a hands-free mode keeps the microphone on in a room
+full of people. Where Terraviz runs as a public exhibit or kiosk with
+a hands-free mode, post signs saying the microphone is on: an in-app
+notice cannot reach everyone within range of it.
 
 ---
 

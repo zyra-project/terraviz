@@ -470,7 +470,12 @@ analytics model (`docs/ANALYTICS.md`, `docs/PRIVACY.md`).
 - **Privacy-policy update** (`docs/PRIVACY.md` →
   `public/privacy.html` via `npm run build:privacy-page`, guarded
   by `check:privacy-page`) describing the voice data flow per
-  provider.
+  provider. **Landed** in November 2026 as §4 "Talking to Orbit by
+  voice", with matching lines in its summary and §2, §3, §6, §8
+  and §9. The first-use explainer above has **not** been built
+  (there are no strings for it in `locales/en.json`), so until it
+  is, the policy is the only place a user learns that the default
+  engine sends audio to the browser maker in Chrome.
 
 ### 6.1 The exhibit changes the privacy calculus
 
