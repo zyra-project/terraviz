@@ -2305,6 +2305,16 @@ Visitors reach the route only with Orbit's **Voice engine** set to
 **Cloud (Cloudflare)** and **Hands-free** set to anything but
 **Off**.
 
+**Exhibits and kiosks.** The first time a browser uses voice, Orbit
+says where the audio will go and listens only after **Continue**. It
+asks again for each voice engine, and for open mic or wake word. A
+kiosk set up before this notice existed shows it on its next load and
+stays silent until someone presses Continue. So press it yourself
+while setting up, with the voice engine and Hands-free mode the
+exhibit will use. Pin **Cloud (Cloudflare)** there, so visitors'
+voices do not go to a browser maker, and post a sign saying the
+microphone is on.
+
 **Turning voice off.** `KILL_VOICE=1` stops only the Cloud engine.
 The default engine is the visitor's browser, which sends audio to the
 browser's maker rather than to your node. To block more, change

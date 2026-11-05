@@ -334,8 +334,11 @@ on our servers.
 ### Talking to Orbit by voice
 
 Voice is optional. Orbit hears nothing until you tap the microphone
-button or turn on a **Hands-free** mode in Orbit settings, and your
-browser asks your permission before the app can use your microphone.
+button or turn on a **Hands-free** mode in Orbit settings. The first
+time, Orbit shows where your audio will go and starts nothing until
+you choose **Continue**; it asks again if you switch voice engine, or
+turn on a mode that keeps the microphone on. Your browser also asks
+your permission before the app can use your microphone.
 A hands-free mode stays on in this browser until you set it back to
 Off: each time you open Terraviz after that, the microphone turns on
 as the app loads, whether or not the Orbit panel is open. Orbit speaks

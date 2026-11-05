@@ -479,10 +479,14 @@ analytics model (`docs/ANALYTICS.md`, `docs/PRIVACY.md`).
   by `check:privacy-page`) describing the voice data flow per
   provider. **Landed** in November 2026 as §4 "Talking to Orbit by
   voice", with matching lines in its summary and §2, §3, §6, §8
-  and §9. The first-use explainer above has **not** been built
-  (there are no strings for it in `locales/en.json`), so until it
-  is, the policy is the only place a user learns that the default
-  engine sends audio to the browser maker in Chrome.
+  and §9. The first-use explainer above landed with it
+  (`src/ui/voiceNotice.ts`), as a **gate** rather than a banner:
+  nothing captures until the user presses Continue, per engine, with
+  open mic and wake word as their own notice. Declining a hands-free
+  notice sets Hands-free back to Off. A mode stored before the notice
+  existed asks once, on load, so an exhibit set up earlier stops
+  listening until someone at it presses Continue. It covers the
+  microphone only; spoken replies are not gated.
 
 ### 6.1 The exhibit changes the privacy calculus
 

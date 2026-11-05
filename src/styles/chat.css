@@ -889,3 +889,67 @@ body.orbit-disabled .tools-menu-section-orbit,
 body.orbit-disabled .help-guide-section-orbit {
     display: none !important;
 }
+
+/* --- First-use voice notice (src/ui/voiceNotice.ts) ---
+ * A native <dialog> opened with showModal(), so it sits in the top
+ * layer above every panel and the page behind it is inert. */
+.voice-notice {
+    /* The global reset zeroes the margin the browser centres a modal
+     * dialog with. */
+    margin: auto;
+    box-sizing: border-box;
+    width: min(calc(26rem * var(--ui-scale)), calc(100vw - 2rem));
+    max-height: calc(100vh - 2rem);
+    overflow-y: auto;
+    padding: calc(1rem * var(--ui-scale)) calc(1.1rem * var(--ui-scale));
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    color: var(--color-text);
+    border: 1px solid var(--color-surface-border);
+    border-radius: var(--radius-xl);
+    font-size: calc(0.85rem * var(--ui-scale));
+    line-height: 1.5;
+}
+.voice-notice::backdrop {
+    background: rgba(0, 0, 0, 0.55);
+}
+.voice-notice-title {
+    margin: 0 0 calc(0.5rem * var(--ui-scale));
+    font-size: calc(1rem * var(--ui-scale));
+    font-weight: 600;
+}
+.voice-notice-body p {
+    margin: 0 0 calc(0.6rem * var(--ui-scale));
+    color: var(--color-text-secondary);
+}
+.voice-notice-policy {
+    margin: 0 0 calc(0.8rem * var(--ui-scale));
+}
+.voice-notice-policy a {
+    color: var(--color-accent);
+}
+.voice-notice-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: calc(0.5rem * var(--ui-scale));
+}
+.voice-notice-actions button {
+    min-height: max(24px, calc(32px * var(--ui-scale)));
+    padding: calc(0.35rem * var(--ui-scale)) calc(0.9rem * var(--ui-scale));
+    font: inherit;
+    font-weight: 500;
+    border-radius: var(--radius-md);
+}
+.voice-notice-actions button:focus-visible {
+    outline: 2px solid var(--accent-o70);
+    outline-offset: 2px;
+}
+.voice-notice-cancel {
+    background: var(--color-surface);
+    color: var(--color-text);
+    border: 1px solid var(--color-surface-border);
+}
+.voice-notice-cancel:hover {
+    background: var(--color-surface-hover);
+}

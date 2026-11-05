@@ -10,7 +10,7 @@
  */
 
 import type { ChatMessage, ChatAction, ChatSession, DocentConfig, MapViewContext, ReadingLevel, FeedbackRating, FeedbackPayload } from '../types'
-import type { Dataset } from '../types'
+import type { Dataset, VoiceProvider } from '../types'
 import { escapeHtml, escapeAttr } from './domUtils'
 import { onOrbitWithdrawn } from '../services/orbitAvailability'
 import { createMessageId } from '../services/docentEngine'
@@ -29,6 +29,7 @@ import { emit, startDwell, type DwellHandle } from '../analytics'
 import { enMessages, t, getLocale, type MessageKey } from '../i18n'
 import { resolveSttEngine, resolveTtsEngine, resolveStreamingSttEngine, voiceSupportForLocale, splitIntoSpokenChunks, baseLanguage, listVoiceLanguageOptions, type SttSession, type TtsEngine } from '../services/voiceService'
 import { HandsFreeController, isWakeWordConfigured } from './voiceHandsFree'
+import { confirmVoiceNotice, closeVoiceNotice, hasSeenVoiceNotice, isVoiceNoticeOpen, type VoiceNoticeMode } from './voiceNotice'
 import { registerBrowserVoiceEngines, primeBrowserTts, listBrowserVoices, curateVoices, onBrowserVoicesChanged } from '../services/voiceBrowserEngines'
 import { registerCloudVoiceEngines } from '../services/voiceCloudEngines'
 
@@ -194,6 +195,9 @@ export function setOrbitAvailable(available: boolean): void {
   // A reply's fly-to or set-time waiting on its Load button would
   // otherwise run when a load already under way finishes.
   pendingGlobeActions = []
+  // A first-use voice notice still open would start the microphone on
+  // Continue; closed as Not now, it starts nothing.
+  closeVoiceNotice()
   handsFree?.teardown()
   handsFree = null
   sttSuppressAutoSend = true
@@ -818,14 +822,25 @@ function fillVoiceInput(text: string): void {
   input.style.height = Math.min(input.scrollHeight, 96) + 'px'
 }
 
-/** (Re)configure the hands-free controller from the current config. */
+/**
+ * (Re)configure the hands-free controller from the current config.
+ *
+ * A hands-free mode is held Off until the first-use voice notice for
+ * the engine that would hear the user has been agreed to (`voiceNotice`),
+ * because arming it opens the microphone: at once for open mic and wake
+ * word, on the first press for push to talk. That includes a mode
+ * stored before the notice existed, which asks once, on load.
+ */
 function syncHandsFree(): void {
   const cfg = loadConfig()
-  handsFree?.sync({
-    mode: cfg.voiceHandsFree ?? 'off',
-    lang: cfg.voiceLang || getLocale(),
-    provider: cfg.voiceProvider ?? 'auto',
-  })
+  const mode = cfg.voiceHandsFree ?? 'off'
+  const lang = cfg.voiceLang || getLocale()
+  const provider = cfg.voiceProvider ?? 'auto'
+  const armed: VoiceNoticeMode | null = mode === 'off' ? null : mode
+  const engine = armed ? resolveStreamingSttEngine(provider, lang) : null
+  const awaitingNotice = !!(armed && engine && !hasSeenVoiceNotice(engine.provider, armed))
+  handsFree?.sync({ mode: awaitingNotice ? 'off' : mode, lang, provider })
+  if (awaitingNotice && armed && engine) askHandsFreeNotice(engine.provider, armed)
   // If hands-free ended up inactive (turned off, or no streaming engine
   // resolved), make sure any ducking from a prior turn is released — the
   // send/drain path that normally un-ducks may never run again.
@@ -833,6 +848,28 @@ function syncHandsFree(): void {
     setMicListening(false)
     setVoiceAudioFocus(false)
   }
+}
+
+/**
+ * Show the first-use voice notice for a hands-free mode. Continue arms
+ * it. Not now sets Hands-free back to Off, so the settings say what is
+ * happening rather than naming a mode that is not running; it does so
+ * only if that mode is still the one stored, since it may have changed
+ * while the notice was open.
+ */
+function askHandsFreeNotice(provider: VoiceProvider, mode: VoiceNoticeMode): void {
+  if (!orbitAvailable || !handsFree || isVoiceNoticeOpen()) return
+  const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  void confirmVoiceNotice({ provider, mode, returnFocus }).then((agreed) => {
+    if (!orbitAvailable || !handsFree) return
+    if (agreed) { syncHandsFree(); return }
+    const current = loadConfig()
+    if ((current.voiceHandsFree ?? 'off') !== mode) return
+    saveConfig({ ...current, voiceHandsFree: 'off' })
+    const select = document.getElementById('chat-settings-voice-handsfree') as HTMLSelectElement | null
+    if (select) select.value = 'off'
+    callbacks?.announce(t('chat.announce.voiceNoticeDeclined'))
+  })
 }
 
 /**
@@ -939,7 +976,25 @@ function toggleListening(): void {
   if (mode === 'push-to-talk' && handsFree?.isActive()) return
   // Phase 1 single-tap path.
   if (sttSession) stopListening()
-  else startListening()
+  else startListeningAfterNotice()
+}
+
+/**
+ * Start a single-tap capture, after the first-use voice notice for the
+ * engine that will hear it. Once agreed to, capture starts inside the
+ * tap that asked for it, as it always did; the first time, it starts
+ * from the notice's Continue, which is a tap of its own.
+ */
+function startListeningAfterNotice(): void {
+  const cfg = loadConfig()
+  const engine = resolveSttEngine(cfg.voiceProvider ?? 'auto', cfg.voiceLang || getLocale())
+  // No engine: startListening says voice is unavailable.
+  if (!engine || hasSeenVoiceNotice(engine.provider, 'tap')) { startListening(); return }
+  if (isVoiceNoticeOpen()) return
+  const mic = document.getElementById('chat-mic')
+  void confirmVoiceNotice({ provider: engine.provider, mode: 'tap', returnFocus: mic }).then((agreed) => {
+    if (agreed) startListening()
+  })
 }
 
 function startListening(): void {

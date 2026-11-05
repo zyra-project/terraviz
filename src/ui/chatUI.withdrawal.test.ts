@@ -16,6 +16,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const engineStop = vi.fn()
+const engineStart = vi.fn()
 
 vi.mock('../services/voiceService', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../services/voiceService')>()
@@ -25,7 +26,7 @@ vi.mock('../services/voiceService', async (importOriginal) => {
       provider: 'browser',
       supportsLanguage: () => true,
       isAvailable: () => true,
-      start: () => ({ stop: engineStop, abort: engineStop }),
+      start: () => { engineStart(); return { stop: engineStop, abort: engineStop } },
     }),
   }
 })
@@ -45,6 +46,7 @@ const { processMessage } = await import('../services/docentService')
 const { emit } = await import('../analytics')
 const { HandsFreeController } = await import('./voiceHandsFree')
 const { withdrawOrbit, resetOrbitAvailabilityForTests } = await import('../services/orbitAvailability')
+const { markVoiceNoticeSeen, resetVoiceNoticeForTests } = await import('./voiceNotice')
 
 function setupDOM(): void {
   document.body.innerHTML = `
@@ -114,7 +116,9 @@ beforeEach(() => {
   sessionStorage.clear()
   localStorage.clear()
   resetOrbitAvailabilityForTests()
+  resetVoiceNoticeForTests()
   engineStop.mockClear()
+  engineStart.mockClear()
   announce.mockClear()
   onLoadDataset.mockClear()
   onFlyTo.mockClear()
@@ -138,6 +142,7 @@ describe('Orbit withdrawn mid-session', () => {
 
   it('stops a capture in progress, and the hands-free session', () => {
     const teardown = vi.spyOn(HandsFreeController.prototype, 'teardown')
+    markVoiceNoticeSeen('browser', 'tap')
     startChat()
     openChat()
     document.getElementById('chat-mic')!.click()
@@ -145,6 +150,19 @@ describe('Orbit withdrawn mid-session', () => {
     withdrawOrbit('voice')
     expect(engineStop).toHaveBeenCalled()
     expect(teardown).toHaveBeenCalled()
+  })
+
+  it('closes a first-use voice notice still open, so its Continue cannot start the microphone', async () => {
+    startChat()
+    openChat()
+    document.getElementById('chat-mic')!.click()
+    const notice = document.querySelector('dialog.voice-notice')
+    expect(notice).not.toBeNull()
+    withdrawOrbit('recheck')
+    expect(notice!.isConnected).toBe(false)
+    // The notice settles on a microtask; the capture it would have started must not.
+    await Promise.resolve()
+    expect(engineStart).not.toHaveBeenCalled()
   })
 
   it('refuses a new capture afterwards', () => {
