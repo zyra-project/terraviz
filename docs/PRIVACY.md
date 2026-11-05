@@ -409,8 +409,9 @@ The **Hands-free** setting decides when the microphone is on:
   noise in the room
 - **Wake word** (only where this site has set it up; not in the
   desktop app): the microphone stays on, but the wake phrase is
-  recognised entirely on your device, and nothing is sent until it is
-  heard. Then the microphone's audio goes to the voice engine, as
+  recognised entirely on your device, and no audio leaves your device
+  until Orbit hears the phrase, from you or anyone nearby. Then the
+  microphone's audio goes to the voice engine, as
   above, until Orbit has your question, for at most 8 seconds, and
   Orbit goes back to listening for the wake phrase. (With **Cloud
   (Cloudflare)** and no live transcription, it records the whole 8
