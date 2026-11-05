@@ -2270,7 +2270,7 @@ with `root_selector: "data"`.
 | Feature | Variables | Notes |
 |---|---|---|
 | Orbit voice (batch speech-to-text and text-to-speech) | none | Runs on the `AI` binding. `KILL_VOICE=1` is the kill switch. |
-| Realtime streaming STT | `CF_ACCOUNT_ID`, `CF_AI_GATEWAY`, `CF_AIG_TOKEN` (**secret**), optional `VOICE_STREAM_MODEL` | Opt-in. Absent any of them, `/api/voice/stream` sends a JSON error frame and the client falls back to batch Whisper. See [`ORBIT_VOICE_PLAN.md`](ORBIT_VOICE_PLAN.md) §3. |
+| Realtime streaming STT | `CF_ACCOUNT_ID`, `CF_AI_GATEWAY`, `CF_AIG_TOKEN` (**secret**), optional `VOICE_STREAM_MODEL` | Opt-in. Absent any of them, `/api/voice/stream` sends a JSON error frame and the client falls back to batch Whisper. Point `CF_AI_GATEWAY` at a gateway used for nothing else, with **Logs turned off** in its settings: what passes through it is visitors' microphone audio, and a gateway logs by default. The proxy also asks it not to log, but that request is documented for HTTP calls, not this WebSocket, so the setting is what to rely on. Setting all three turns the route on for any caller, not only builds with `VITE_VOICE_WS_STREAMING`; each stream is capped at 60 seconds. See [`ORBIT_VOICE_PLAN.md`](ORBIT_VOICE_PLAN.md) §3. |
 | Wake word | `VITE_VOICE_WAKEWORD_MODEL_URL` (build-time) | [`ORBIT_WAKEWORD.md`](ORBIT_WAKEWORD.md) |
 | YouTube media suggestions | `YOUTUBE_API_KEY` (**secret**) | Absent = source stays off, nothing errors. [`YOUTUBE_API_KEY.md`](YOUTUBE_API_KEY.md) |
 | Current events / blog | none beyond Phase 8 | Feeds console at `/publish/feeds`. [`CURRENT_EVENTS_PLAN.md`](CURRENT_EVENTS_PLAN.md) |
