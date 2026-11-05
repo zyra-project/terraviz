@@ -292,15 +292,39 @@ describe('public/_headers: the microphone is the app\'s own, and nothing else is
   // was `microphone=()`, under which Chromium refuses getUserMedia
   // without a prompt, so on every node that kept this file the Cloud
   // engine and every hands-free mode failed in Chrome and Edge.
-  // `(self)` is the narrowest value that lets voice work: the app's own
-  // documents may ask, a cross-origin frame inside the app (a tour's
-  // video embed) may not, and a site embedding the app gets nothing
-  // unless it also delegates with `allow="microphone"`. The camera and
-  // location stay off; nothing in the app uses them.
-  it.each(['/', '/dataset/x', '/orbit', '/publish/datasets', '/assets/x.js'])('%s', path => {
-    expect(headersFor(rules, path).get('permissions-policy')).toEqual([
-      'camera=(), microphone=(self), geolocation=()',
-    ])
+  // `(self)` is the narrowest value that lets voice work, in Chromium:
+  // the app's own documents may ask, a cross-origin frame inside the app
+  // (a tour's video embed) may not, and a site embedding the app gets
+  // nothing unless it also delegates with `allow="microphone"`. Firefox
+  // does not implement the header and Safari only partly, so there the
+  // boundary is that the app never delegates the microphone to a frame.
+  //
+  // `microphone=()` is allowed too: SELF_HOSTING §14.5 offers it to an
+  // operator who wants voice off. What must not happen is a wider value,
+  // a second value, or a path left without one.
+  it('is set by the catch-all rule alone, so no narrower rule can widen or drop it', () => {
+    const touching = rules.rules
+      .filter(rule => rule.set.has('permissions-policy') || rule.unset.includes('permissions-policy'))
+      .map(rule => rule.pattern)
+    expect(touching).toEqual(['/*'])
+  })
+
+  // The corpus, plus a path under every rule, so each block is exercised.
+  const samples = [...new Set([...PATH_CORPUS, ...rules.rules.map(rule => rule.pattern.replace(/\*$/, 'x'))])]
+
+  it.each(samples)('%s gets one well-formed policy, with the microphone at most the app\'s own', path => {
+    const values = headersFor(rules, path).get('permissions-policy') ?? []
+    expect(values).toHaveLength(1)
+    const members = values[0].split(',').map(member => member.trim())
+    // A browser drops the whole header over one malformed member, camera
+    // and location included, so every member must be a plain allowlist.
+    for (const member of members) expect(member).toMatch(/^[a-z][a-z0-9-]*=\((?:self)?\)$/)
+    const policy = new Map(members.map(member => member.split('=') as [string, string]))
+    // A repeated key is not an error to a browser: the last one wins.
+    expect(policy.size).toBe(members.length)
+    expect(policy.get('camera')).toBe('()')
+    expect(policy.get('geolocation')).toBe('()')
+    expect(['()', '(self)']).toContain(policy.get('microphone'))
   })
 })
 
