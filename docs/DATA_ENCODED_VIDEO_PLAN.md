@@ -1,6 +1,6 @@
 # Data-encoded video: transparency + value readout
 
-**Status: built end-to-end** (on branches, not yet merged). The browser
+**Status: built end-to-end** (merged to `main`). The browser
 range check, zyra's luma writer, the encoder, the row + transport, all
 four render surfaces, the 2D and VR readouts, and the publish plumbing
 that activates the mode are implemented. A pipeline declaring
@@ -557,7 +557,8 @@ approach before anything is built on it.
 1. **Range verification** in a real browser (video → WebGL texture → sampled
    luma) across Chrome, Safari, Firefox, iOS Safari.
 2. **zyra** luma writer + sidecar + parity + tests → release → bump
-   `ZYRA_SCHEDULER_IMAGE`.
+   the runner image (`ZYRA_IMAGE_DEFAULT`, or a node's
+   `ZYRA_SCHEDULER_IMAGE` override).
 3. **Encoder + row + transport** (range flags, `flags=neighbor`, single
    rendition, `v:` bump, migration, serializer, `wireToDataset` fix).
 4. **Render** across all four surfaces.

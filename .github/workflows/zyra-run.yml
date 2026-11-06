@@ -62,7 +62,8 @@ env:
   #             v0.1.53 wrote them upside down, so it is not a usable
   #             floor; a dataset corrected for that with the publisher
   #             form's "Flip vertically (inverted-Y imagery)" box needs
-  #             it unticked on this image.
+  #             it unticked once its first run on this image publishes
+  #             (sooner flips the frames still on the globe).
   #   v0.1.55 — dependency bumps only; no CLI change.
   #   v0.1.56 — reads gzip-compressed GRIB2 transparently, detected by
   #             its magic bytes whatever the file is called; refuses an

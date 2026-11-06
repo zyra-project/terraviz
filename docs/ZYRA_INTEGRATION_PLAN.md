@@ -343,8 +343,11 @@ The job declares a GHA `concurrency:` group keyed on
    node can override the image without a commit through the
    `ZYRA_SCHEDULER_IMAGE` repository variable — the name is
    historical, and it too must hold a `zyra` image. Fallback if the
-   image ever stops being published: `pip install zyra==X.Y.Z`,
-   pinned, + `apt-get install ffmpeg`.
+   image ever stops being published:
+   `pip install "zyra[connectors,processing,visualization]==X.Y.Z"`
+   (the extras the image itself installs, less `api`; bare `zyra`
+   fails exactly as `zyra-scheduler` does), + `apt-get install
+   ffmpeg`.
 3. **Fetch definition** — `GET /workflows/{id}` with the service
    token; write `pipeline.json` and the metadata template to the
    workdir; POST `running` status.

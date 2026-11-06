@@ -173,6 +173,8 @@ identical from a failed run. Full table + escalation guidance in
   doesn't list it, so `/validate` rejects it. Blocked today: `acquire thredds`,
   `visualize sos`, `visualize vector`, `visualize timeseries`, `acquire api`.
   Fix = add the entry *and* confirm the pinned runner container has it.
+  `acquire thredds` also needs an upstream pipeline-runner fix before it
+  can run under `zyra run` (see the reference).
 - **Tier 2 — zyra gap.** Nobody can. Confirmed: **unit rescaling** (nothing
   multiplies a variable by a constant, which is why `kg m-2` hovers as
   `0.0000124`) and **vector/shapefile/GeoJSON geometry** (the toolkit is

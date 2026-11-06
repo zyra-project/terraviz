@@ -24,7 +24,12 @@ Verified inventory (zyra `main` vs the allowlist):
 Notable consequences:
 - **`acquire thredds`** is blocked, so a THREDDS `catalog.xml` source can't be
   used even though zyra has a purpose-built connector with `--sync-dir`,
-  `--pattern`, and recursive catalog traversal.
+  `--pattern`, and recursive catalog traversal. Allowlisting it is not
+  enough on its own: the connector takes the catalog URL as a positional
+  argument, and `zyra run`'s pipeline runner only maps positionals for
+  the commands it names (through zyra v0.1.56), so a `thredds` stage
+  fails as `unrecognized arguments: --catalog-url`. It needs that
+  mapping upstream as well — Tier 1 and Tier 2 at once.
 - **`visualize sos`** is blocked — zyra's own SOS preset renderer (4096×2048
   PlateCarree, fixed vmin/vmax) that the FV3-Chem sample pipeline uses.
 - **`visualize vector`** is blocked, so wind barbs / streamlines are off the
