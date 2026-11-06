@@ -59,9 +59,10 @@ Contact for privacy questions: *[TBD — populate before release]*.
 ## 2. What we collect, in detail
 
 The app has three telemetry modes. You can see which mode is active —
-and change it — under **Tools → Privacy**, except when the app is shown
-inside another site's page, which has no Tools menu (see "The app
-inside another site's page" under Mode 1).
+and change it — under **Tools → Privacy**, except in the app's minimal
+embedded view (an address with `embed=1`, which sites embedding the app
+normally use), which has no Tools menu (see "The app inside another
+site's page" under Mode 1).
 
 ### Mode 1 — Essential (on by default)
 
@@ -177,19 +178,22 @@ Small, anonymous events about the health of the app:
   - **How long you had that site's page open.** Your browser tells
     the app it is hidden when the page around it is hidden, so the
     session length recorded is roughly how long that site's page was
-    open, from when the frame loaded.
-  - **The screen size classes describe the frame**, the box the other
-    site gave the app, not your browser window.
+    open, from when the frame loaded until you first switched away from
+    it or closed it.
+  - **The viewport and aspect-ratio classes describe the frame**, the
+    box the other site gave the app, not your browser window. (The
+    physical-display class is still your screen's.)
   - If the people who run the other site also run the TerraViz node
     it reports to, they hold their own records of visits to their page
     as well as these events, and could match the two by time and
     country.
 
-  The embedded view shows no Tools menu and no first-run notice, so
-  there is no Privacy panel to reach, and a mode you chose on this
-  site does not carry into a frame on another site: current browsers
-  keep a framed page's storage separate for each site it appears on.
-  Section 8 says what you can do instead
+  The minimal embedded view (an address with `embed=1`, which sites
+  embedding the app normally use) shows no Tools menu and no first-run
+  notice, so there is no Privacy panel to reach. And in any frame on
+  another site, a mode you chose on this site does not carry over:
+  current browsers keep a framed page's storage separate for each site
+  it appears on. Section 8 says what you can do instead
 - When something goes wrong — a classification of the error (tile
   fetch, video stream, AI model, uncaught exception, browser-console
   message, native crash on desktop, or a globe's page), a short sanitized summary of
@@ -299,8 +303,9 @@ covered in sections 4 and 5:
   avoid them
 - **Page URLs from outside the app, referrer chains, or the addresses
   of other sites you visit.** When another web page shows the app
-  inside a frame, telemetry records only *that* it is framed, never
-  the page's address
+  inside a frame, telemetry notes that it is framed and never reads
+  the page's address; section 2 says what can still be worked out
+  about that page
 - **Your IP address in the event stream.** Our server sees your IP
   briefly to rate-limit abuse, then discards it — it is never written
   into analytics storage
@@ -610,8 +615,9 @@ profiles, or sell to third parties.
 
 - **Change telemetry mode** at any time: **Tools → Privacy**. Changes
   take effect immediately — no restart required
-- **Inside another site's page** there is no Privacy panel, and a mode
-  you chose on this site does not reach the frame (section 2). A switch
+- **Inside another site's page** a mode you chose on this site does
+  not reach the frame, and the minimal embedded view has no Privacy
+  panel at all (section 2). A switch
   that sites embedding the app can set, and support for your browser's
   Global Privacy Control setting there, are planned. Until then, a
   browser content blocker that blocks requests to this site's

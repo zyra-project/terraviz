@@ -997,16 +997,20 @@ it:
   names the page.
 - **The node's own embedding policy.** In `list` mode
   (`src/types/node-embedding.ts`) every framed session came from a
-  listed site, so with one listed site `framed` names it outright,
-  whatever was opened. In `self` mode it means the node framed itself
-  or a `file:` page did.
+  listed site or the node itself (`list` always includes `'self'`), so
+  with one listed site `framed` names that site or the node, whatever
+  was opened. In `self` mode it means the node framed itself; a
+  `file:` page can frame the app only when `file:` is a `list` entry,
+  or in `any` mode, which sends no header.
 - **Time on the host page.** `session_end` fires on hide and
   `pagehide` (`src/analytics/session.ts`), and inside a frame
   `document.visibilityState` follows the host page's tab, not whether
   the frame is in view. So for framed sessions `duration_ms`,
   `visible_ms` and the `perf_sample` cadence measure roughly how long
   the visitor had *someone else's page* open, from when the frame
-  loaded (for a lazy-loaded embed, from when they scrolled to it). The
+  loaded (for a lazy-loaded embed, from when they scrolled to it) until
+  they first switched away from it or closed it; later events still
+  carry their offset from the session's start. The
   tier table puts "how long the user dwelled on something" in Tier B;
   these fields were already Tier A for every session, and the new field
   is what makes the framed slice queryable.
@@ -1021,9 +1025,12 @@ it:
 - **Frame size.** `viewport_class` and `aspect_class` read
   `innerWidth` / `innerHeight`, which inside a frame are the box the
   embed code set: a second fingerprint of the embed code, and not the
-  visitor's window.
+  visitor's window. (`screen_class` reads `screen.width`, the device's
+  screen, frame or not.)
 
-And none of it has a notice or a switch. Embed mode skips the
+And in the embed view none of it has a notice or a switch, while in
+any frame on another site a choice made on the node's own site does
+not apply. Embed mode (`?embed=1`, not framing itself) skips the
 first-run banner (`src/main.ts`, "the host page owns consent") and
 hides `#map-controls`, which holds the Privacy entry; and a stored Off
 from the node's own site does not reach a frame on another site,
