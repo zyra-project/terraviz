@@ -325,9 +325,11 @@ function wireFeedbackForm(): void {
   }, signal ? { signal } : undefined)
 }
 
-/** Handle arrow-key navigation between tabs. */
+/** Handle arrow-key navigation between tabs. A held modifier leaves the
+ *  key alone: Alt+Left is the browser's Back, not a tab switch. */
 function onTabKeyDown(e: KeyboardEvent): void {
   if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+  if (e.altKey || e.ctrlKey || e.metaKey) return
   e.preventDefault()
   const next: TabKey = currentTab === 'guide' ? 'feedback' : 'guide'
   selectTab(next)

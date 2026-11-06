@@ -1025,7 +1025,6 @@ export function hideAllTourQuestions(): void {
 
 let controlsEl: HTMLElement | null = null
 let boundEngine: TourEngine | null = null
-let spaceHandler: ((e: KeyboardEvent) => void) | null = null
 let stopCallback: (() => void) | null = null
 
 /** Show the tour controls bar and bind it to the given engine. */
@@ -1049,17 +1048,21 @@ export function showTourControls(engine: TourEngine, onStopCb?: () => void): voi
   document.getElementById('tour-play-btn')?.addEventListener('click', onPlayPause)
   document.getElementById('tour-next-btn')?.addEventListener('click', onNext)
   document.getElementById('tour-stop-btn')?.addEventListener('click', onStop)
+}
 
-  // Space bar handler — toggles play/pause while a tour is active
-  spaceHandler = (e: KeyboardEvent) => {
-    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
-    if (e.code !== 'Space' || !boundEngine) return
-    if (boundEngine.state === 'playing' || boundEngine.state === 'paused') {
-      e.preventDefault()
-      onPlayPause()
-    }
-  }
-  document.addEventListener('keydown', spaceHandler)
+/**
+ * Whether a tour is playing or paused, so Space drives it. Space is
+ * handled once, page-wide, by `playbackController.handlePlaybackKey`:
+ * a second handler here, with its own filter, once cancelled Space on
+ * every focused button while a tour ran.
+ */
+export function tourRunning(): boolean {
+  return boundEngine?.state === 'playing' || boundEngine?.state === 'paused'
+}
+
+/** Play or pause the running tour, as its play button does. */
+export function toggleTourPlayback(): void {
+  if (tourRunning()) onPlayPause()
 }
 
 /** Hide the tour controls bar and detach event listeners. */
@@ -1069,10 +1072,6 @@ export function hideTourControls(): void {
   document.getElementById('tour-play-btn')?.removeEventListener('click', onPlayPause)
   document.getElementById('tour-next-btn')?.removeEventListener('click', onNext)
   document.getElementById('tour-stop-btn')?.removeEventListener('click', onStop)
-  if (spaceHandler) {
-    document.removeEventListener('keydown', spaceHandler)
-    spaceHandler = null
-  }
   boundEngine = null
   stopCallback = null
 }
