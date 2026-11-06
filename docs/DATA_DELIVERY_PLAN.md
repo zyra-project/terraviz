@@ -15,7 +15,7 @@ cited in the sources section), not hands-on testing, except where a
 sibling document already records a test.
 
 **Last reviewed:** 2026-11-06 (first draft, from desk research on each
-consumer.)
+consumer; §9's phased implementation added the same day.)
 
 **Revisit when any of the following becomes true:**
 
@@ -1175,59 +1175,384 @@ deeper than the source would only spend storage.
 
 ---
 
-## 9. Phases
+## 9. Phased implementation
 
-**D0 — Decide.** Review this document; settle the §11 questions that
-block D1 (tile size, the snap rule, whether to open video CORS).
+The phases below take the plan from desk research to something each
+group in §4 can use. They follow five rules, each borrowed from work
+this repository has already done.
 
-**D1 — Prove it by hand, with no code in the tree.** Take one
-image-sequence dataset and one data-encoded dataset and, with GDAL and
-ffmpeg on a laptop:
+- **Every phase merges dark.** Each surface sits behind its own
+  environment flag and answers 404 until an operator sets it, the way
+  `STAC_ENABLED` does (`functions/api/v1/_lib/stac-http.ts:45`).
+  Merging a phase changes nothing on any node; turning it on is a
+  per-node decision, and turning it off withdraws it without a
+  deploy. The flags proposed here are `FILES_ENABLED`,
+  `TILES_ENABLED` and `WMS_ENABLED`.
+- **Rules with wrong answers land first, as pure modules with tests.**
+  Grid arithmetic, URL parsing, time snapping and the reduction
+  methods are each a pure function before any route or runner step
+  calls them — the split `equirectRtt` and `projectorWarp` use, where
+  the arithmetic is tested with no GL and no network.
+- **A phase ends at a gate, not a date.** Each gate is a thing that
+  must be true, checked by a named person or test, before the next
+  phase that depends on it starts.
+- **Each phase leaves a record.** What it measured and decided goes in
+  an implementation note under `docs/delivery/`, the way the metadata
+  work keeps `docs/metadata/PHASE0_IMPLEMENTATION.md` onwards, and
+  this plan's `Last reviewed:` line moves with it.
+- **No phase adds telemetry.** These surfaces are fetched by other
+  people's software, and request volume is visible in Cloudflare's own
+  analytics. Counting uses inside TerraViz's telemetry would be a new
+  category of signal and goes through the `analytics-reviewer` as its
+  own change, if anyone wants it.
 
-- cut both pyramids (§5.1), hand-write capabilities documents, put them
-  in a scratch bucket behind a throwaway Worker, and load them in
-  OpenSpace, QGIS, CesiumJS and ArcGIS Map Viewer — checking the time
-  axis, orientation, overzoom, and a WMS `GetMap` stitched from tiles,
-  with its CPU time measured;
-- build the `h264-4096` file and an OpenSpace asset for each, and play
-  them with the OpenSpace collaborators on a dome, timing a step's seek
-  against keyframe interval;
-- build an SOS directory and ask an SOS site to load it;
-- put the `h264-1024` file on a Second Life sphere through the video
-  plugin, in Firestorm and Linden Lab's viewer.
+### 9.1 Overview
 
-Its output is measurements (bytes, tile counts, cut time, seek time,
-CPU per `GetMap`) and answers to the "?" cells in §3. It decides §5 and
-§6.
+| Phase | Delivers | Needs | Flag | Gate to finish | Size |
+|---|---|---|---|---|---|
+| **D0** Decide | Answers to §11's blocking questions | This review | — | Decisions recorded in this document | — |
+| **D1** Prove by hand | Measurements; the "?" cells in §3 answered | D0 | none — no code in the tree | `docs/delivery/D1_PROTOTYPES.md` merged | S |
+| **D2a** Video files | The §6.1 variants, manifests, the files route | D1 | `FILES_ENABLED` | A variant plays time-synced in OpenSpace | M |
+| **D2b** Bundles | OpenSpace asset, SOS directory, frame zip, KMZ | D2a | `FILES_ENABLED` | Each loads unmodified in its tool | M |
+| **D2c** Publisher controls | Portal section for delivery settings and build status | D2a | — | A publisher turns a bundle on and sees it build | S |
+| **D3a** Pyramids | Tile cutting in the runner, with the §7 methods | D1 | `TILES_ENABLED` | Parity and reduction tests pass on D1's datasets | M |
+| **D3b** WMTS | Tile route, capabilities, TileJSON, GDAL XML, colour maps | D3a | `TILES_ENABLED` | OGC validator passes; four clients load it | M |
+| **D3c** Discovery and contract | STAC links, `.well-known` field, `docs/protocol` entry | D3b | as D3b | Federation review: additive-safe | S |
+| **D4** WMS with time | `GetMap` served from the pyramids | D3b, CPU gate | `WMS_ENABLED` | CPU within budget; ArcGIS time slider animates | M |
+| **D5a** Analysis rasters | A COG per time step from the Zyra runner, as STAC assets | D1 | as STAC | QGIS opens one from STAC; values match the source | M |
+| **D5b** Operator scripts | ArcGIS Image adapter; Hub registration | D4, D5a | — (scripts) | A test organisation shows both | S |
+| **D6** Legacy video catalog | Frame extraction, licence record, opt-in | D2a, D3a | per dataset | A licence decision recorded for each dataset made public | L |
 
-**D2 — Files for players.** The runner builds the video variants,
-manifests and per-group bundles for datasets whose publisher turns them
-on; the stable file route and redirects; palette-applied video for
-data-encoded datasets. First because it is the smallest new
-infrastructure — runner work and one route — and it serves the groups
-already asking: OpenSpace, SOS sites, spheres.
+Sizes are relative — S a few days of work, M a few weeks, L dominated
+by review rather than code — and are guesses until D1 has measured
+the runner costs.
 
-**D3 — Tiles.** WMTS in both grids, the capabilities document,
-TileJSON, GDAL XML, colour maps, STAC links, the `.well-known` field.
+**What can run in parallel.** After D1, the files track (D2a → D2b,
+D2c) and the tiles track (D3a → D3b → D3c → D4) share no code but the
+pure modules and can proceed side by side. D5a depends only on D1.
+The **critical path to a dome show** is D1 → D2a → D2b. The **critical
+path to an ArcGIS time slider** is D1 → D3a → D3b → D4, and D4's CPU
+gate is the step most likely to fail.
 
-**D4 — WMS with time**, served from D3's pyramids, if D1's CPU
-measurement says a Function can afford it.
+### 9.2 D0 — Decide
 
-**D5 — Rasters for analysis.** COGs from the Zyra runner as STAC
-assets; the operator-run ArcGIS Image adapter and Hub registration
-script.
+Settle the questions in §11 that change what D1 builds: tile size
+(q1), the snap rule (q4), whether video CORS opens (q7), the D2/D3
+order (q13), and who owns the operator scripts of D5b. Each decision is
+recorded here as a dated amendment naming who made it, the way
+`architecture/federation-scoping.md` records its own. Nothing else
+starts until those five are written down.
 
-**D6 — The legacy video catalog.** Frame extraction with
-de-duplication (§7.2), a licence review per dataset, opt-in.
+### 9.3 D1 — Prove it by hand
 
-**Later, on request:** temporal aggregate layers (§7.2), higher-
-efficiency codecs as extra variants, a GeoJSON events layer for GIS
-tools (§1 notes the events endpoint is custom JSON).
+No code enters the tree. With GDAL and ffmpeg on a laptop, a scratch R2
+bucket and a throwaway Worker, take one image-sequence dataset and one
+data-encoded dataset through every format this plan proposes, and
+measure.
 
-The order D2-before-D3 is a judgement call. Tiles were the starting
-point of the conversation that led here; the research moved them second
-because the tools that animate whole globes read files, and the tools
-that read tiles mostly want WMS time, which waits on the tiles anyway.
+| Question | How | Decides |
+|---|---|---|
+| Do the grids load, the right way up, at the right longitude? | Cut both pyramids; load in OpenSpace (GDAL XML), QGIS, CesiumJS and ArcGIS Map Viewer | §5.1, §11 q1–q3 |
+| Does each client snap time as §5.3 assumes? | Request off-frame times from each client; read the server log | §5.3, §11 q4 |
+| Does ArcGIS stretch past the deepest level or go blank? | Zoom past level 2 in Map Viewer | §11 q2 |
+| What does a `GetMap` cost? | Stitch-and-scale in the Worker; read Cloudflare's CPU time, not elapsed time | D4's go / no-go |
+| What does a time step cost OpenSpace? | `h264-4096` at keyframe intervals of 1 s and 6 s (today's encode, `cli/lib/ffmpeg-hls.ts:352-357`), time-mapped, on the collaborators' dome | §6.1's keyframe rule |
+| Does OpenSpace's Folder mode read the dates right? | Dated frame names across a month boundary | §6.3, §11 q10 |
+| Do redirects survive? | Point OpenSpace's `UrlSynchronization` and Second Life's video plugin at a 302 | §6.5 |
+| Does an SOS site accept the directory? | Hand one to an SOS site or the SOS team | §6.4, §11 q9 |
+| Does a plain MP4 play on a Second Life sphere? | `h264-1024` through the video plugin, in Firestorm and Linden Lab's viewer | §2.3, §4 |
+| What does a pyramid cost? | Bytes, object count and cut time per frame on a GitHub runner | §5.8, D3a sizing |
+
+The output is `docs/delivery/D1_PROTOTYPES.md`: the measurements, the
+answers, and an amendment to every section of this plan they
+contradict.
+
+### 9.4 D2a — Video files
+
+**Builds.**
+
+- **A runner step** (`cli/lib/delivery-video.ts`) that encodes the §6.1
+  variants. The H.264 variants are constant frame rate with one video
+  frame per data frame, a keyframe at least every second (`-g` and
+  `-keyint_min` at the frame rate, `-sc_threshold 0`) and
+  `+faststart`; `sos-mpeg4` uses FFmpeg's MPEG-4 Part 2 encoder at
+  25 Mbit/s or more. Today's encodes are not reused: their keyframes
+  sit six seconds apart, one per HLS segment, which costs OpenSpace up
+  to six seconds of decoding on every step.
+- **Palette-applied video** for data-encoded datasets, coloured from
+  the frames through `buildColorScaleLut` (`src/types/color-scale.ts`);
+  smaller variants are made from frames reduced in value space (§7.1),
+  never by scaling the coloured video. Picture variants are scaled by
+  FFmpeg's area filter, which averages encoded values rather than
+  linear light; that departure from §7.1 stands unless D1 shows it
+  visibly darkens coastlines or city lights.
+- **A manifest per build** (§6.3). The runner reads each frame's date
+  from the node's own `/frames` route rather than recomputing it, so
+  `frameTimestamp` (`functions/api/v1/_lib/frames-manifest.ts:200`)
+  stays the one computation.
+- **A delivery dispatch.** A new `kind: 'delivery'` beside `video` and
+  `frames` in `functions/api/v1/_lib/github-dispatch.ts`, so a build
+  can run on a dataset without re-transcoding it — when a publisher
+  turns a variant on later, or for a backfill.
+- **Content-addressed storage** in R2, keyed by the input's digest and
+  the variant's settings, so republishing an unchanged dataset builds
+  nothing — the pattern `cli/lib/frame-store.ts` uses for frames.
+- **A `dataset_delivery` table**: per dataset, the reduction method,
+  which outputs are on, and the last build's digest, status and time.
+  A new table rather than columns on `datasets`, so `WireDataset`, the
+  native catalog and the federation feed are untouched (§8).
+- **The files route**, `functions/api/v1/datasets/[id]/files/[name].ts`:
+  a redirect to the current object; for a legacy Vimeo-hosted video, a
+  freshly signed link through the proxy `manifest.ts` already uses;
+  404 unless `FILES_ENABLED`.
+
+**Tests.** Pure tests for the encoder arguments and the manifest; a
+runner smoke test that checks the result with `ffprobe` (constant
+rate, keyframe spacing, frame count equal to the dataset's); a parity
+test that a palette-applied frame's colour at a texel is the LUT's
+entry for that texel's luma; route tests for the redirect, the flag
+and an ineligible dataset.
+
+**Gate.** An `h264-4096` file plays time-synced in OpenSpace on the
+collaborators' setup, and the route serves on a preview deploy.
+
+**Reviewers.** The Video Streaming Engineer for the encode and the
+workflow change, with the `terraviz-data-video` skill and
+`npm run check:luma-range` for data-encoded output; the Scientific
+Visualization Reviewer for palette application and reduction; the
+API Platform Engineer for the route's shape; the Application Security
+Engineer for headers and CORS; and, because a D1 migration is one of
+`GOVERNANCE.md`'s high-scrutiny areas, the Code Reviewer migration
+first, with the PR saying whether a person outside the loop has
+reviewed it.
+
+**Rollback.** Unset `FILES_ENABLED`. The table is additive and the R2
+objects inert.
+
+### 9.5 D2b — Bundles
+
+**Builds.** Generators in the runner (`cli/lib/delivery-bundles.ts`)
+for the four §6.4 bundles: an OpenSpace `.asset` whose
+`UrlSynchronization` points at the files route; an SOS directory with
+`playlist.sos` and `labels.txt`; a frame zip with its manifest; a KMZ
+of time-stamped overlays at most 2048×1024. The asset template is the
+one D1 proved, not one written from documentation.
+
+**Tests.** Snapshot tests of each generator against D1's hand-built
+originals; the KML against the OGC KML 2.2 schema; `labels.txt` line
+count equal to the frame count.
+
+**Gate.** Each bundle loads unmodified in its tool: the OpenSpace
+collaborators load an asset, an SOS site or the SOS team loads a
+directory, Google Earth Pro animates a KMZ.
+
+**Reviewers.** The Code Reviewer, and the Video Streaming Engineer for
+the `sos-mpeg4` packaging.
+
+### 9.6 D2c — Publisher controls
+
+**Builds.** A Delivery section in the dataset form
+(`src/ui/publisher/components/dataset-form.ts`): the reduction method,
+defaulted by the dataset's kind and explained in one sentence each
+from §7.1's table; which outputs to build; the last build's status
+with links. Until D2c lands, D2a and D2b are turned on per dataset
+through the publish API and the CLI.
+
+**Tests.** Unit tests for the form section; a scene in
+`scripts/screenshots/scenes.ts` and a smoke assertion, as `CLAUDE.md`
+asks of a new interactive surface.
+
+**Gate.** A publisher turns a bundle on and sees its build land.
+
+**Reviewers.** The Section 508 Accessibility Specialist; the Science
+Communicator for the method descriptions, which tell a publisher what
+each choice does to a reader's picture; the Application Security
+Engineer and the Code Reviewer for the publish API change, a
+high-scrutiny path; the Internationalization Engineer if the strings
+need more than the usual `t()` keys.
+
+### 9.7 D3a — Pyramids
+
+**Builds.**
+
+- **A shared pure module**, `src/types/tile-grid.ts`, used by the
+  runner and the Functions alike, as `src/types/image-sequence-constants.ts`
+  is: the two grids, tile bounds, the native level, the URL grammar,
+  lenient time parsing and the §5.3 snap.
+- **The cutter** (`cli/lib/tile-cutter.ts`): normalise each frame
+  (§5.5), place it at the native level, reduce level by level with the
+  dataset's method (§7.1) — in TypeScript, because GDAL's overview
+  builder averages palette codes, not values, and knows nothing of the
+  no-data band — then write indexed PNG for data-encoded layers and
+  JPEG for opaque pictures, under a prefix keyed by the frame's digest.
+- **The Web Mercator set** warped by `gdalwarp` from a floating-point
+  raster of *values* at the native level, with the dataset's method
+  and its no-data value, and coloured afterwards — warping coloured
+  pixels would average colours, the §7.1 failure. GDAL is installed in
+  the runner from apt, the way ffmpeg already is
+  (`.github/workflows/transcode-hls.yml:146`).
+- **A per-dataset index** in R2 from frame time to frame digest, which
+  the serving route reads to snap a time.
+
+**Tests.** The cutter is tested against the probe the hover readout
+uses: for random points, a native-level tile pixel equals the source
+texel `latLonToTexelUv` names (`src/services/datasetProbe.ts:45`),
+after normalisation — a regional bounding box included, since that is
+where a US box once landed over the South Pacific. `mean` equals the
+area-weighted mean `datasetStats.ts` computes over the same cells;
+`mode` breaks ties the same way every run; `max` keeps a single valid
+pixel through every level; no block straddles the antimeridian; an
+indexed PNG's palette is byte for byte the dataset's LUT.
+
+**Gate.** Those tests pass on D1's two datasets, and a 1,000-frame
+pyramid builds inside the runner time D1 measured.
+
+**Reviewers.** The Scientific Visualization Reviewer for the reduction
+methods and colouring; the Video Streaming Engineer for the workflow
+change; the Code Reviewer.
+
+### 9.8 D3b — WMTS
+
+**Builds.** `functions/api/v1/wmts/[[path]].ts` with helpers in
+`functions/api/v1/_lib/`: RESTful and KVP `GetTile`; a capabilities
+document generated from D1 under the STAC projection's eligibility
+rules; snapping through the shared module, 404 for gaps, `default` the
+latest frame; edge caching; open CORS. Beside it, per layer: TileJSON,
+a GDAL WMS XML, and for data-encoded layers a GIBS ColorMap v1.3 file
+with SVG and PNG legends generated from the dataset's `color_scale`.
+
+**Tests.** The capabilities document against OGC's WMTS 1.0 schemas,
+and OGC's own WMTS test suite in a CI job that runs only when asked,
+as `.github/workflows/stac-api.yml` runs the STAC validators. Client
+tests that run only when their tools are present, on the pattern of
+the QGIS check in `functions/api/v1/stac/clients.test.ts:31`: QGIS
+animates a layer, `gdalinfo` opens the GDAL XML, CesiumJS in headless
+Chromium draws a tile at a known time.
+
+**Gate.** The OGC suite passes for everything the capabilities
+advertise; QGIS, CesiumJS, OpenSpace and ArcGIS Map Viewer each load a
+layer on a preview deploy; CPU per tile request is measured there.
+
+**Reviewers.** The API Platform Engineer and the TerraViz Federation
+Reviewer for a new published contract; the Scientific Visualization
+Reviewer for colour maps and legends; the Application Security
+Engineer for CORS and routing (`public/_routes.json`); the Code
+Reviewer.
+
+### 9.9 D3c — Discovery and the contract
+
+**Builds.** STAC items gain web-map-links to their WMTS layers
+(`functions/api/v1/_lib/stac-builders.ts`); `/.well-known/terraviz.json`
+gains an additive field naming the tile root, present only when
+`TILES_ENABLED` is set; `docs/protocol/` gains the delivery contract
+and a changelog entry; `docs/SELF_HOSTING.md` says how an operator
+turns each flag on; `docs/BACKEND_MODULES.md` gains its rows.
+
+**Gate.** The TerraViz Federation Reviewer classes the `.well-known`
+and STAC changes as additive-safe, and the existing STAC validators
+still pass.
+
+**Reviewers.** The TerraViz Federation Reviewer; the API Platform
+Engineer for the STAC shape; the Scientific Data Steward for the STAC
+metadata; the Technical Writer for `SELF_HOSTING.md`.
+
+### 9.10 D4 — WMS with time
+
+**Builds.** `functions/api/v1/wms.ts`: capabilities with a `TIME`
+dimension per layer, and `GetMap` in `CRS:84`, `EPSG:4326` and
+`EPSG:3857`, stitched from the pyramids and scaled, at most 2048 a
+side, nearest neighbour for data layers, a transparent image for a gap
+(§5.9).
+
+**The CPU gate comes first.** Before any route lands, the worst-case
+`GetMap` — 2048×2048, in each CRS, a data layer and a picture layer —
+is measured on an isolated preview deployment against its CPU limit,
+by the protocol the STAC rollout gate uses
+(`docs/metadata/PHASE4_IMPLEMENTATION.md` §Rollout Gate). Decoding and
+encoding images inside a Worker means a WebAssembly codec, which is a
+new dependency and a decision of its own (§11 q15). If the measurement
+fails, D4 stops there: ArcGIS users get one WMTS layer per frame with
+time-based visibility (§2.1), which works for short series and not for
+long ones, and the plan says so.
+
+**Tests.** OGC's WMS 1.3 test suite in the same opt-in CI job; the
+stitching tested against the tiles it came from.
+
+**Gate.** ArcGIS Map Viewer's time slider animates a layer from a
+preview deploy, and QGIS's Temporal Controller does the same.
+
+**Reviewers.** As D3b.
+
+### 9.11 D5a — Analysis rasters
+
+**Builds.** A Cloud-Optimised GeoTIFF per time step, written by the
+Zyra runner from the reprojected source field, floating point with its
+no-data value, units and scale recorded, stored in R2 by digest and
+listed as a STAC asset with the projection and raster extension
+fields. Whether the reprojected field exists as a file the runner can
+read today, or needs a step added to the pipeline, is the first thing
+to find out (§11 q16).
+
+**Tests.** Values at sample points equal the source field's within the
+compression's stated error; the STAC validators pass with the new
+assets.
+
+**Gate.** QGIS opens a COG found through STAC, and the Scientific Data
+Steward signs off the metadata.
+
+**Reviewers.** The Zyra Workflow Author for the pipeline change, then
+the Code Reviewer; the Scientific Data Steward; the API Platform
+Engineer for the STAC asset shape.
+
+### 9.12 D5b — Operator scripts
+
+**Builds.** Two scripts under `scripts/`, run by an operator with
+their own ArcGIS credentials from the environment, never stored by the
+node, and dry-run by default as `npm run setup` is:
+
+- **The ArcGIS Image adapter** uploads D5a's rasters for a dataset as
+  a multidimensional *tiled* imagery layer, the kind that can be public.
+  Esri documents this route through ArcGIS Pro and its Python API. If
+  a TypeScript script over the REST API cannot do the same, the adapter
+  is a Python script run with pinned versions through `uv`, the way
+  `functions/api/v1/stac/clients.test.ts` runs PySTAC — still with no
+  Esri package in the node's dependencies.
+- **The Hub registration script** creates public WMS, WMTS, OGC
+  Feature Server and Web Mapping Application items pointing at the
+  node.
+
+**Gate.** Against a test ArcGIS organisation: a public imagery layer
+with a working time slider, the registered items in its Hub site, and
+an answer to whether Hub's DCAT feed includes them (§11 q11).
+
+**Reviewers.** The Application Security Engineer for credential
+handling; the Code Reviewer.
+
+### 9.13 D6 — The legacy video catalog
+
+**Builds.** Frame extraction for video-only datasets: decode, drop
+duplicates (exact duplicates only for data-encoded video, `mpdecimate`
+for pictures, §7.2), assign dates, and refuse a dataset whose
+de-duplicated frames do not fit its span evenly. Off by default and
+turned on per dataset.
+
+**The gate is a person, not a test.** Before a dataset's tiles or
+files go public, someone with the authority to say so — for NOAA's SOS
+content, the SOS team — records that it may be redistributed in these
+forms. The record says who decided, on what, and when, as `CLAUDE.md`
+asks wherever a person rather than an agent owns a decision.
+
+**Reviewers.** The Video Streaming Engineer; the Scientific Data
+Steward for the licence and provenance metadata.
+
+### 9.14 When the plan is done
+
+Each group in §4 has its primary format live on at least one node, and
+someone from that group — not the people who built it — has used it:
+a dome show from an OpenSpace asset, an SOS site playing a directory,
+an ArcGIS map animating with the time slider, a QGIS user opening a
+COG, a sphere in Second Life playing a file. Until then this document
+stays a draft for review.
 
 ---
 
@@ -1288,6 +1613,16 @@ that read tiles mostly want WMS time, which waits on the tiles anyway.
     bucket**, skipping the Function for clients that never need
     snapping?
 13. **D2 before D3?** §9's ordering, open to challenge.
+14. **Who owns the operator scripts of D5b** — the node's maintainers,
+    or each organisation that runs them? They act in someone else's
+    ArcGIS organisation and spend its credits.
+15. **A WebAssembly image codec in the Functions for D4**, a new
+    dependency, or Cloudflare's image transformations for picture
+    layers only, leaving data layers without WMS? D4's CPU gate
+    measures the first; this question decides whether to try it.
+16. **Is the Zyra runner's reprojected field available as a file**
+    after the pipeline runs, or does D5a need a pipeline step? A
+    question for the Zyra Workflow Author before D5a is sized.
 
 ---
 
