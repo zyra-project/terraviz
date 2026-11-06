@@ -59,7 +59,9 @@ Contact for privacy questions: *[TBD — populate before release]*.
 ## 2. What we collect, in detail
 
 The app has three telemetry modes. You can see which mode is active —
-and change it — under **Tools → Privacy**.
+and change it — under **Tools → Privacy**, except when the app is shown
+inside another site's page, which has no Tools menu (see "The app
+inside another site's page" under Mode 1).
 
 ### Mode 1 — Essential (on by default)
 
@@ -74,9 +76,8 @@ Small, anonymous events about the health of the app:
   device supports VR or AR, whether the app is running in its own
   window or inside a frame on another web page and whether the
   address asked for the app's minimal embedded view (never *which*
-  page framed it — its address is not read, though when only one
-  site embeds a given dataset, the dataset it opens can point to
-  that site), the country your request came from as
+  page framed it — its address is not read; see "The app inside
+  another site's page" below), the country your request came from as
   a 2-letter code (derived by our Cloudflare edge from your IP
   address and attached server-side; the IP itself is never
   written to analytics storage), and which build of the app you
@@ -162,6 +163,33 @@ Small, anonymous events about the health of the app:
   keeps its own browser, so there your control is the viewer's media
   settings, which stop the globe's page from loading at all, picture
   included
+- **The app inside another site's page** — for example a story map,
+  an ArcGIS Hub site or a WordPress post that shows TerraViz in a
+  frame. The app records the events above as it does on its own site,
+  and notes that it is in a frame. It never reads the address of the
+  page around it. Even so, some of what it records says something
+  about that page:
+  - **Which site it was can often be worked out.** An embedded view
+    usually opens one particular dataset or tour, and that is
+    recorded. Where only one site embeds it, the record points to that
+    site. The same is true when this node allows only one site to embed
+    it.
+  - **How long you had that site's page open.** Your browser tells
+    the app it is hidden when the page around it is hidden, so the
+    session length recorded is roughly how long that site's page was
+    open, from when the frame loaded.
+  - **The screen size classes describe the frame**, the box the other
+    site gave the app, not your browser window.
+  - If the people who run the other site also run the TerraViz node
+    it reports to, they hold their own records of visits to their page
+    as well as these events, and could match the two by time and
+    country.
+
+  The embedded view shows no Tools menu and no first-run notice, so
+  there is no Privacy panel to reach, and a mode you chose on this
+  site does not carry into a frame on another site: current browsers
+  keep a framed page's storage separate for each site it appears on.
+  Section 8 says what you can do instead
 - When something goes wrong — a classification of the error (tile
   fetch, video stream, AI model, uncaught exception, browser-console
   message, native crash on desktop, or a globe's page), a short sanitized summary of
@@ -582,6 +610,12 @@ profiles, or sell to third parties.
 
 - **Change telemetry mode** at any time: **Tools → Privacy**. Changes
   take effect immediately — no restart required
+- **Inside another site's page** there is no Privacy panel, and a mode
+  you chose on this site does not reach the frame (section 2). A switch
+  that sites embedding the app can set, and support for your browser's
+  Global Privacy Control setting there, are planned. Until then, a
+  browser content blocker that blocks requests to this site's
+  `/api/ingest` stops an embedded view from reporting
 - **Disable telemetry entirely**: pick "Off" in the same panel
 - **Run a telemetry-free build**: the source code is public; you or
   someone you trust can build the app with the compile-time

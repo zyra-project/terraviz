@@ -169,7 +169,7 @@ whoever holds the dataset, that is close to a referrer for embedded
 sessions that pin a dataset, and nothing for those that do not. What
 the field adds to identifiability is concentrated in that embedded
 minority: a `framed-embed` session sits in a far smaller set than a
-`top` one.
+`top` one. §9l lists every route and the decisions taken on them.
 
 **Compared with raw fingerprinting.** A typical browser leaks
 ~18 bits via raw User-Agent alone (Eckersley 2010, Table 3),
@@ -980,6 +980,86 @@ The opt-in narrows the exposure to globes someone chose to measure.
 That someone may be the venue itself, so the request that owners
 disclose in-world is the visitor's only notice.
 
+### 9l. Embedded views and the site around them
+
+A TerraViz page framed by another site (a StoryMap, a Hub page, a
+WordPress post) reports the Essential tier exactly as it does on its
+own site, and `session_start.window_context` (added 2026-11-06) makes
+those sessions separable from the rest. The framing page's address is
+never read (`detectWindowContext` reads neither `document.referrer` nor
+`location.ancestorOrigins`, and a test with throwing getters on both
+holds that), but five routes reach the page, or the visitor's time on
+it:
+
+- **The pinned dataset.** An embed code usually pins `?dataset=` or
+  `?tour=`, so the session's first `layer_loaded.layer_id`, joined on
+  `index1`, names the embed code, and where one page uses that code it
+  names the page.
+- **The node's own embedding policy.** In `list` mode
+  (`src/types/node-embedding.ts`) every framed session came from a
+  listed site, so with one listed site `framed` names it outright,
+  whatever was opened. In `self` mode it means the node framed itself
+  or a `file:` page did.
+- **Time on the host page.** `session_end` fires on hide and
+  `pagehide` (`src/analytics/session.ts`), and inside a frame
+  `document.visibilityState` follows the host page's tab, not whether
+  the frame is in view. So for framed sessions `duration_ms`,
+  `visible_ms` and the `perf_sample` cadence measure roughly how long
+  the visitor had *someone else's page* open, from when the frame
+  loaded (for a lazy-loaded embed, from when they scrolled to it). The
+  tier table puts "how long the user dwelled on something" in Tier B;
+  these fields were already Tier A for every session, and the new field
+  is what makes the framed slice queryable.
+- **The host's own logs.** A host page's operator keeps its own visit
+  logs (address, time, sometimes a signed-in account). Where the same
+  organisation runs the node, the realistic case being a lab that
+  embeds its own node's globe on its own site, matching `framed-embed`,
+  arrival time and country against those logs can tie a visitor to
+  every Tier A row of the session: layers, camera positions to about
+  111 m, map clicks. It is §9k's venue pattern without §9k's
+  mitigations.
+- **Frame size.** `viewport_class` and `aspect_class` read
+  `innerWidth` / `innerHeight`, which inside a frame are the box the
+  embed code set: a second fingerprint of the embed code, and not the
+  visitor's window.
+
+And none of it has a notice or a switch. Embed mode skips the
+first-run banner (`src/main.ts`, "the host page owns consent") and
+hides `#map-controls`, which holds the Privacy entry; and a stored Off
+from the node's own site does not reach a frame on another site,
+because current browsers partition a framed page's storage by the
+top-level site, so `loadConfig()` falls back to `essential`. The
+WordPress plan's host switch (its Integration J) is not built, and the
+main app does not honour Global Privacy Control.
+
+**Decisions** (the maintainer's, 6 November 2026, after the privacy
+review):
+
+- **The field stays Tier A.** It is a four-value enum, sent once per
+  session, describing where the app runs rather than anything the
+  visitor did. A Tier B embed event would count almost nothing, since
+  embedded visitors cannot reach Research mode.
+- **The public promise is narrowed** from "anything about other sites
+  you visit" to their addresses, and `PRIVACY.md` discloses the routes
+  above in plain language.
+- **Session length is kept for framed sessions**, and the policy says
+  what it measures there.
+- **The documents are corrected now, and the host controls come next:**
+  a `telemetry=0` parameter an embed code can carry, and Global Privacy
+  Control honoured where no notice is shown (the output page already
+  honours it, `src/output/webTelemetry.ts`).
+
+**Open:**
+
+- **Keep `window_context` out of `analytics_dataset_daily`.** Per-dataset
+  counts of embedded loads would be counts of one page's audience. Today
+  only the generic dimension mix carries it; the planned Delivery panel
+  (`DATA_DELIVERY_PLAN.md`, #520) must keep it that way.
+- **Row-level retention.** The R2 raw archive keeps rows, with session
+  ids, indefinitely (`ANALYTICS_STORAGE_AND_ADMIN_PLAN.md`), so the
+  host-log match stays possible for as long as a host keeps its logs.
+  That plan's pruning question is where to decide it.
+
 ---
 
 ## 10. Comparison to formal frameworks
@@ -990,7 +1070,7 @@ Sweeney's k-anonymity holds when each record's
 quasi-identifier tuple appears in at least `k` other
 records. Treating
 `(platform, os, locale, viewport_class, aspect_class,
-screen_class, vr_capable, country)` as the QI set:
+screen_class, vr_capable, window_context, country)` as the QI set:
 
 - **Median case: k ≫ 100.** Most users share their bucket
   with thousands of others on the public web; within

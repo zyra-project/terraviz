@@ -169,7 +169,12 @@ the four server-stamped blobs. Order is alphabetical by field name
 > over all sessions. The first half says whether the app had its
 > own window (`top`) or sat in another page's frame (`framed`); the
 > second whether the address carried `?embed=1`. It never names the
-> framing page.
+> framing page. Read it with three caveats (`PRIVACY_ANALYSIS.md` §9l):
+> `framed` also counts the project's own poster, same-origin frames and
+> `file:` kiosk pages; in a framed session `viewport_class` and
+> `aspect_class` describe the frame, not the visitor's window; and a
+> framed session's `session_end` times measure how long the *host* page
+> was open, since visibility follows the host page's tab.
 
 ### `session_end` (Tier A)
 
