@@ -101,7 +101,7 @@ gap needs a tool on our side (or an upstream contribution).
 | # | Stage (aliases) | Status upstream | Use for TerraViz | Gap / suggested tooling |
 |---|---|---|---|---|
 | 1 | **Import** (acquire, ingest) | Implemented — `zyra acquire http\|s3\|ftp\|vimeo` | Fetch source data: model output, satellite imagery, observation feeds | None blocking. THREDDS/OPeNDAP connectors would widen the NOAA catalog reach — note for upstream, not a prerequisite. |
-| 2 | **Process** (transform) | Implemented — `decode-grib2`, `extract-variable`, `convert-format`, `reproject` | Decode GRIB2/NetCDF, subset variables, reproject (regional grids → equirectangular; 0–360 global grids → ±180) | None blocking (runner pinned to zyra v0.1.49, the first release carrying `reproject`). |
+| 2 | **Process** (transform) | Implemented — `decode-grib2`, `extract-variable`, `convert-format`, `reproject` | Decode GRIB2/NetCDF, subset variables, reproject (regional grids → equirectangular; 0–360 global grids → ±180) | None blocking (`reproject` first shipped in zyra v0.1.49; the runner's pin is later — see §Runner). |
 | 3 | **Simulate** | Conceptual (no CLI) | — | Not needed; skip. |
 | 4 | **Decide** (optimize) | Conceptual | — | Not needed for v1. Future: automatic colormap / contour-level selection for unattended renders. |
 | 5 | **Visualize** (render) | Implemented — `heatmap\|contour\|timeseries\|vector\|animate\|compose-video\|interactive` | Render frames; `compose-video` produces the MP4 | **SOS preset.** Nothing enforces the sphere spec (4096×2048 equirectangular, 30 fps, H.264). v1: bake the constraints into our curated templates' ffmpeg args. Upstream candidate: a `--preset sos` for `compose-video`. **Thumbnail + legend.** No poster/legend output; v1 derives the thumbnail via an ffmpeg frame-grab in the runner, legend stays a template-supplied static asset. |
@@ -326,10 +326,21 @@ The job declares a GHA `concurrency:` group keyed on
 1. **Validate payload** — `workflow_id` + `run_id` present.
 2. **Checkout + toolchain** — Node 22 (`npm ci`) for the publish
    CLI; Zyra runs in the
-   [`ghcr.io/noaa-gsl/zyra-scheduler`](https://github.com/NOAA-GSL/zyra-scheduler)
-   container **pinned by digest** (the digest is the Zyra version
-   pin — the `/validate` stage/command allowlist is coupled to it
-   and both are bumped together, deliberately). Fallback if the
+   [`ghcr.io/noaa-gsl/zyra`](https://github.com/NOAA-GSL/zyra)
+   container **pinned by digest** in `ZYRA_IMAGE_DEFAULT` (the
+   digest is the Zyra version pin — the `/validate` stage/command
+   allowlist is coupled to it and both are bumped together,
+   deliberately). The comment above that line names the release
+   and what each bump carried; it is **v0.1.56** as of November
+   2026, and data-encoded output needs **v0.1.54 or later** (the
+   luma writer arrived in v0.1.53, which wrote GeoTIFF-sourced
+   frames upside down). Not `zyra-scheduler`, which this section
+   first named: that image is built with the `connectors` extra
+   only and dies at the first `convert-format` or `heatmap` stage
+   (`cli/lib/zyra-runner-image.test.ts` guards the default). A
+   node can override the image without a commit through the
+   `ZYRA_SCHEDULER_IMAGE` repository variable — the name is
+   historical, and it too must hold a `zyra` image. Fallback if the
    image ever stops being published: `pip install zyra==X.Y.Z`,
    pinned, + `apt-get install ffmpeg`.
 3. **Fetch definition** — `GET /workflows/{id}` with the service

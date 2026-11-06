@@ -26,6 +26,16 @@
  *
  * `reproject` (NOAA-GSL/zyra#295/#306) was added together with the
  * runner bump to zyra v0.1.49, the first release carrying it.
+ *
+ * Re-checked when the runner moved from v0.1.52 to v0.1.56: every
+ * entry below is still registered, and the set of stages and
+ * commands is identical between the two releases. What changed was
+ * flags (`heatmap --data-encoded` / `--color-scale-file`, from
+ * v0.1.53), which this table does not govern. Commands zyra has that
+ * are not listed here (`acquire thredds`, `visualize vector`,
+ * `visualize sos`, …) are missing because nobody has added them,
+ * not because the pinned release lacks them — Tier 1 in the
+ * `terraviz-data-video` skill's `references/capability-gaps.md`.
  */
 export const ZYRA_STAGE_ALLOWLIST: Readonly<Record<string, readonly string[]>> = {
   acquire: ['http', 'ftp', 's3'],

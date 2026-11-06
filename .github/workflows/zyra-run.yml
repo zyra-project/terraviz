@@ -7,7 +7,7 @@
 #
 # Phases (cli/zyra-publish-from-dispatch.ts):
 #   fetch    → pipeline.json + workflow.json + `running` callback
-#   (zyra)   → the pipeline runs in the zyra-scheduler container
+#   (zyra)   → the pipeline runs in the zyra container
 #   publish  → SOS preflight, sidecar PATCH, asset upload, transcode
 #              wait, `succeeded` callback
 #   failure  → `failed` callback with a sanitized summary, from the
@@ -52,15 +52,27 @@ env:
   # first convert-format or heatmap stage. `zyra` carries
   # connectors,processing,visualization,api on both arches.
   #
-  # v0.1.52 — corrects north-south mirroring of GeoTIFF input in
-  # heatmap/contour (NOAA-GSL/zyra#338). Every frame this runner has
-  # rendered through `convert-format geotiff` -> `reproject` ->
-  # `heatmap` had its data flipped against the basemap, so a dataset
-  # published on an earlier image needs re-running to be correct.
-  # Also places a regional basemap at its own extent rather than the
-  # viewport (NOAA-GSL/zyra#341), and validates `--extent` latitudes
-  # (NOAA-GSL/zyra#344).
-  ZYRA_IMAGE_DEFAULT: ghcr.io/noaa-gsl/zyra@sha256:0f335b9d9b2f0eba6d7ef9407906b13eddb1ead43b984bc07c21b4507063b09b
+  # v0.1.56 (multi-arch index; OCI revision 70cb06bc). The floor for
+  # a data-encoded workflow, and what the bump from v0.1.52 was for:
+  #   v0.1.53 — `visualize heatmap --data-encoded --color-scale-file`
+  #             (the luma writer). v0.1.52 rejects the pipeline at the
+  #             heatmap stage with "unrecognized arguments".
+  #   v0.1.54 — writes data-encoded frames from GeoTIFF input north-up.
+  #             v0.1.53 wrote them upside down, so it is not a usable
+  #             floor; a dataset corrected for that with the publisher's
+  #             "flipped in Y" box needs it unticked on this image.
+  #   v0.1.56 — reads gzip-compressed GRIB2 (`.grib2.gz`) transparently,
+  #             and fails a GRIB decode that finds no messages instead
+  #             of passing it on as an empty success.
+  # No stage or command was added or removed between v0.1.52 and
+  # v0.1.56, so ZYRA_STAGE_ALLOWLIST is unchanged by this bump.
+  #
+  # Earlier, v0.1.52 corrected north-south mirroring of GeoTIFF input
+  # in heatmap/contour (NOAA-GSL/zyra#338): a dataset rendered through
+  # `convert-format geotiff` -> `reproject` -> `heatmap` on an image
+  # before it needs re-running to be correct. It also placed a regional
+  # basemap at its own extent (#341) and validated `--extent` (#344).
+  ZYRA_IMAGE_DEFAULT: ghcr.io/noaa-gsl/zyra@sha256:8ecbcebed4e7b37e8c1014fe1df02757329cff6a97c36b726b857c9e66e4c85a
 
 jobs:
   run:
