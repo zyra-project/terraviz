@@ -15,13 +15,13 @@ cited in the sources section), not hands-on testing, except where a
 sibling document already records a test.
 
 **Last reviewed:** 2026-11-06 (first draft, from desk research on each
-consumer; §9's phased implementation added the same day.)
+consumer; §9's phased implementation and §9.14's usage metrics added
+the same day.)
 
-**Decision recorded:** 2026-11-06, by the maintainer: rasters for
-analysis (§4.2, §9.11) carry the producer's own values on the
-producer's own grid, taken before any regridding — not the field
-resampled for the picture. Recorded in §9.11, which holds the text it
-was made on.
+**Decisions recorded:** two so far, both 2026-11-06 by the maintainer,
+logged in §9.2: rasters for analysis carry the producer's own values on
+the producer's own grid, before any regridding (§9.11); and use is
+measured per platform and per method (§9.14).
 
 **Revisit when any of the following becomes true:**
 
@@ -1206,11 +1206,10 @@ this repository has already done.
   an implementation note under `docs/delivery/`, the way the metadata
   work keeps `docs/metadata/PHASE0_IMPLEMENTATION.md` onwards, and
   this plan's `Last reviewed:` line moves with it.
-- **No phase adds telemetry.** These surfaces are fetched by other
-  people's software, and request volume is visible in Cloudflare's own
-  analytics. Counting uses inside TerraViz's telemetry would be a new
-  category of signal and goes through the `analytics-reviewer` as its
-  own change, if anyone wants it.
+- **Use is measured per platform and per method** (§9.14), on the
+  server, with no identifiers. These surfaces are fetched by other
+  people's software, whose users never saw TerraViz's privacy notice,
+  so the counting keeps nothing but counts.
 
 ### 9.1 Overview
 
@@ -1244,10 +1243,17 @@ gate is the step most likely to fail.
 
 Settle the questions in §11 that change what D1 builds: tile size
 (q1), the snap rule (q4), whether video CORS opens (q7), the D2/D3
-order (q13), and who owns the operator scripts of D5b. Each decision is
-recorded here as a dated amendment naming who made it, the way
-`architecture/federation-scoping.md` records its own. Nothing else
+order (q13), and who owns the operator scripts of D5b (q14). Each
+decision is recorded here as a dated amendment naming who made it, the
+way `architecture/federation-scoping.md` records its own. Nothing else
 starts until those five are written down.
+
+**Decided so far:**
+
+| Date | Who | Decision | Where |
+|---|---|---|---|
+| 2026-11-06 | The maintainer | Rasters for analysis carry the producer's own values on its own grid, before any regridding | §9.11 |
+| 2026-11-06 | The maintainer | Measure use per platform and per method | §9.14 |
 
 ### 9.3 D1 — Prove it by hand
 
@@ -1311,6 +1317,10 @@ contradict.
   a redirect to the current object; for a legacy Vimeo-hosted video, a
   freshly signed link through the proxy `manifest.ts` already uses;
   404 unless `FILES_ENABLED`.
+- **Counting** (§9.14): the platform classifier and the Analytics
+  Engine writer as a pure module, the files route's counts, the
+  nightly rollup into D1, and the Delivery panel in
+  `/publish/analytics`.
 
 **Tests.** Pure tests for the encoder arguments and the manifest; a
 runner smoke test that checks the result with `ffprobe` (constant
@@ -1330,7 +1340,8 @@ API Platform Engineer for the route's shape; the Application Security
 Engineer for headers and CORS; and, because a D1 migration is one of
 `GOVERNANCE.md`'s high-scrutiny areas, the Code Reviewer migration
 first, with the PR saying whether a person outside the loop has
-reviewed it.
+reviewed it. The counting adds the `analytics-reviewer`, run before
+any other, and the Privacy Engineer (§9.14).
 
 **Rollback.** Unset `FILES_ENABLED`. The table is additive and the R2
 objects inert.
@@ -1342,7 +1353,8 @@ for the four §6.4 bundles: an OpenSpace `.asset` whose
 `UrlSynchronization` points at the files route; an SOS directory with
 `playlist.sos` and `labels.txt`; a frame zip with its manifest; a KMZ
 of time-stamped overlays at most 2048×1024. The asset template is the
-one D1 proved, not one written from documentation.
+one D1 proved, not one written from documentation. Every address a
+bundle contains carries its `via` tag (§9.14).
 
 **Tests.** Snapshot tests of each generator against D1's hand-built
 originals; the KML against the OGC KML 2.2 schema; `labels.txt` line
@@ -1426,6 +1438,9 @@ rules; snapping through the shared module, 404 for gaps, `default` the
 latest frame; edge caching; open CORS. Beside it, per layer: TileJSON,
 a GDAL WMS XML, and for data-encoded layers a GIBS ColorMap v1.3 file
 with SVG and PNG legends generated from the dataset's `color_scale`.
+Capabilities, layer configurations and tiles are counted, tiles
+sampled, and a tag on a capabilities request is carried into the tile
+addresses it advertises (§9.14).
 
 **Tests.** The capabilities document against OGC's WMTS 1.0 schemas,
 and OGC's own WMTS test suite in a CI job that runs only when asked,
@@ -1452,7 +1467,8 @@ Reviewer.
 gains an additive field naming the tile root, present only when
 `TILES_ENABLED` is set; `docs/protocol/` gains the delivery contract
 and a changelog entry; `docs/SELF_HOSTING.md` says how an operator
-turns each flag on; `docs/BACKEND_MODULES.md` gains its rows.
+turns each flag on; `docs/BACKEND_MODULES.md` gains its rows; STAC
+reads are counted (§9.14).
 
 **Gate.** The TerraViz Federation Reviewer classes the `.well-known`
 and STAC changes as additive-safe, and the existing STAC validators
@@ -1468,7 +1484,7 @@ metadata; the Technical Writer for `SELF_HOSTING.md`.
 dimension per layer, and `GetMap` in `CRS:84`, `EPSG:4326` and
 `EPSG:3857`, stitched from the pyramids and scaled, at most 2048 a
 side, nearest neighbour for data layers, a transparent image for a gap
-(§5.9).
+(§5.9). Capabilities are counted and maps sampled (§9.14).
 
 **The CPU gate comes first.** Before any route lands, the worst-case
 `GetMap` — 2048×2048, in each CRS, a data layer and a picture layer —
@@ -1580,7 +1596,7 @@ node, and dry-run by default as `npm run setup` is:
   Esri package in the node's dependencies.
 - **The Hub registration script** creates public WMS, WMTS, OGC
   Feature Server and Web Mapping Application items pointing at the
-  node.
+  node, each address tagged `via=arcgis-hub` (§9.14).
 
 **Gate.** Against a test ArcGIS organisation: a public imagery layer
 with a working time slider, the registered items in its Hub site, and
@@ -1606,7 +1622,109 @@ asks wherever a person rather than an agent owns a decision.
 **Reviewers.** The Video Streaming Engineer; the Scientific Data
 Steward for the licence and provenance metadata.
 
-### 9.14 When the plan is done
+### 9.14 Measuring use, per platform and per method
+
+**Decided** (the maintainer, 2026-11-06: "It would be nice to have per
+platform (or method) metrics"). This replaces the earlier rule that no
+phase adds telemetry. What follows is the proposed design; its details
+go through the `analytics-reviewer` and the Privacy Engineer when the
+first phase builds it.
+
+**What is counted.** Requests to the delivery surfaces, counted on the
+server by the Functions that answer them: the files route, the tile
+and WMS routes, the capabilities documents, TileJSON and GDAL XML, and
+STAC. Not the TerraViz app, which already has its own consent-gated
+telemetry, and not the output page, whose reporting is opt-in per
+globe by design (`src/output/webTelemetry.ts`) and must not gain a
+second, ungated path.
+
+**Each count carries:**
+
+- **The method**, which the route itself knows: a video file, a bundle
+  (and which kind — OpenSpace asset, SOS directory, frame zip, KMZ), a
+  capabilities document, a layer configuration (TileJSON or GDAL XML),
+  a tile, a WMS map, a STAC read.
+- **The platform**, from two sources, the more reliable first:
+  1. **A tag TerraViz wrote itself.** Every address a bundle or script
+     hands out carries `via=<platform>`: the OpenSpace asset's URLs say
+     `openspace`, the Hub registration script's items say
+     `arcgis-hub`, the KMZ says `google-earth`, the SOS directory says
+     `sos`. A capabilities document fetched with a tag writes the same
+     tag into the tile addresses it advertises, so a layer an ArcGIS
+     user adds from a Hub item stays attributed to Hub. The values
+     come from a fixed list, anything else counts as `other`, and the
+     tag is left out of the edge-cache key so it cannot split the
+     cache. D1 checks that each tool keeps a query string it is given.
+  2. **Otherwise, a bucket from the User-Agent**: classified on the
+     server into a short fixed list (`arcgis`, `qgis`, `gdal`,
+     `cesium`, `browser`, `video-player`, `other`, `unknown`) and then
+     discarded, the way `src/analytics/session.ts` buckets the app's
+     own (privacy invariant 2 in `docs/ANALYTICS_CONTRIBUTING.md`).
+     This is a heuristic — OpenSpace reading tiles through GDAL looks
+     like any other GDAL client — which is why the tag comes first.
+- **The dataset** (its catalog id, as the app's `layer_loaded` already
+  reports), the variant or format, and **the country**, from
+  Cloudflare's edge as the ingest function stamps it (invariant 1).
+
+**What is never recorded:** an IP address, a raw User-Agent, or any
+identifier that would link one request to another — no session id at
+all. That is stricter than the app's telemetry needs to be, and
+deliberately: the people using these tools never saw TerraViz's
+disclosure banner, so nothing about them is kept beyond a count.
+Generated bundles never report anything themselves; only the requests
+they make are counted.
+
+**Two exceptions.**
+
+- **Virtual-world viewers are counted without a country.** The output
+  page's reporting was designed around a venue that logs avatar
+  arrivals learning a visitor's real-world attributes, and accepts a
+  country only inside its first minute (`PRIVACY_ANALYSIS.md` §9k). A
+  plain MP4 on a Second Life sphere would otherwise hand that venue a
+  country and a time for every arrival, so a request classified as a
+  virtual-world viewer or its video player keeps no country.
+- **`KILL_TELEMETRY` stops these writes too**, as it stops the
+  ingest function's.
+
+**Counting uses, not bytes.** A file counts once per download: a
+request with no `Range` header, or one starting at byte 0, not the
+dozens of range requests a player makes after it. A capabilities
+document, layer configuration or asset counts once per fetch, which is
+the nearest thing to "someone added this layer". Tiles and WMS maps are
+**sampled** — one request in N, written with weight N — because one
+person panning a map fetches hundreds of tiles, and an unsampled count
+would be the largest write volume the node has while answering a
+question ("how much") rather than the one asked ("who uses it").
+
+**Where the numbers go.** Into Workers Analytics Engine, then through
+the nightly rollup into D1 that the publisher portal's analytics tab
+already reads (`docs/ANALYTICS_STORAGE_AND_ADMIN_PLAN.md` Phase A), so
+per-platform and per-method numbers appear in `/publish/analytics` and
+outlive Analytics Engine's 30–90 days. A Delivery panel there shows
+uses by platform, by method, by dataset and by month.
+
+**The embed is the one method this does not reach.** An embedded
+TerraViz is the app itself, counted by its own telemetry where the
+visitor allows it — but `session_start` does not say whether it is
+running embedded (`src/analytics/session.ts` has no such field), so
+"how many people saw a TerraViz globe inside a StoryMap" needs one
+append-only Tier A field there (invariant 8). That is a small change
+of its own, through the `add-analytics-event` checklist.
+
+**Which phase adds what.** D2a builds the classifier and the writer as
+a pure module, counts the files route, and adds the rollup and the
+Delivery panel; D2b writes the tag into every bundle; D3b counts tiles
+and capabilities and carries the tag into advertised tile addresses;
+D3c counts STAC reads; D4 counts WMS; D5b's registration script tags
+the items it creates. Every one of them runs the `analytics-reviewer`
+first and the Privacy Engineer, updates `docs/ANALYTICS.md`,
+`docs/ANALYTICS_QUERIES.md`, a Grafana panel and `docs/PRIVACY.md`
+(rebuilding `public/privacy.html`), and — the analytics ingest path
+being one of `GOVERNANCE.md`'s high-scrutiny areas — the Code Reviewer
+as well, with the PR saying whether a person outside the loop has
+reviewed it.
+
+### 9.15 When the plan is done
 
 Each group in §4 has its primary format live on at least one node, and
 someone from that group — not the people who built it — has used it:
@@ -1632,6 +1750,9 @@ stays a draft for review.
 - **Tiling datasets with no real time axis.** Looping diagrams and
   climatologies go out as video and frames.
 - **Restricted datasets.** Public datasets only, as STAC.
+- **Knowing who uses a channel.** Counts by platform, method, dataset
+  and country, never an IP, a raw User-Agent or anything that links
+  one request to another (§9.14).
 - **Changing `WireDataset`, the native catalog or the federation feed.**
 - **Editing `SECOND_LIFE_COMPAT.md` here.** The corrections in §2.3
   belong in their own change.
@@ -1684,6 +1805,17 @@ stays a draft for review.
 16. *Decided 2026-11-06 by the maintainer:* D5a's COGs carry the
     producer's own values on its own grid, taken before any regridding
     (§9.11). Kept here so the numbering of the others holds.
+17. **How hard to sample tiles and WMS maps** — one in a hundred? — and
+    is a tile count worth having at all beside the once-per-layer
+    counts, which already answer "which platforms use this"?
+18. **Its own Analytics Engine dataset, or `terraviz_events`** with a
+    server-stamped event type? A build-time choice for the
+    `analytics-reviewer`, since `docs/ANALYTICS_QUERIES.md`'s
+    positional layout and the rollup both depend on it.
+19. **Country for delivery requests at all?** Kept by default, as the
+    ingest function keeps it, except for virtual-world viewers
+    (§9.14). Worth confirming it is wanted for reporting, since a
+    count without it is safer still.
 
 ---
 
