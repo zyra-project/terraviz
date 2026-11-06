@@ -18,12 +18,15 @@ sibling document already records a test.
 consumer; §9's phased implementation and §9.14's usage metrics added
 the same day.)
 
-**Decisions recorded:** twelve, all 2026-11-06 by the maintainer,
+**Decisions recorded:** twenty, all 2026-11-06 by the maintainer,
 logged in §9.2: rasters for analysis carry the producer's own values on
 the producer's own grid, before any regridding (§9.11); use is measured
 per platform and per method (§9.14); five choices about how that
-measuring works (§11 q17–q21); and the five D0 blockers (§11 q1, q4,
-q7, q13, q14). **D0 is complete**; D1 is next.
+measuring works (§11 q17–q21); the five D0 blockers (§11 q1, q4, q7,
+q13, q14); and eight more from an interview the same day (§11 q5, q6,
+q8, q9, q10, q12, q15, and counting embedded views). **D0 is
+complete**; D1 is next. Open: q2, q3, q10's date parsing and q11, all
+tested in D1.
 
 **Revisit when any of the following becomes true:**
 
@@ -378,7 +381,8 @@ Firestorm's repositories):
 
 The last four correct or extend `SECOND_LIFE_COMPAT.md` (its §10
 question 13 assumes low-priority media are scaled down). They belong
-in that document, in a follow-up, not here.
+in that document, in a follow-up, not here; the maintainer asked for
+that follow-up on 2026-11-06.
 
 **Other virtual worlds**, briefly: VRChat shows video, not web pages,
 from allowlisted hosts, at most one new URL per five seconds
@@ -584,6 +588,7 @@ embed under a node's `list` embedding policy needs
 author, so the portal's help should say so; and the embedding
 validator's list of shared hosts (`src/types/node-embedding.ts:123`)
 should refuse `*.hub.arcgis.com`, which would admit every Hub site.
+The maintainer asked for the second as its own change on 2026-11-06.
 
 ---
 
@@ -775,8 +780,9 @@ against its own idea of where a texel lands.
   CesiumJS, MapLibre and OpenLayers draw tiles with WebGL, which refuses
   a cross-origin image without `Access-Control-Allow-Origin`. Its cost is one Worker
   invocation per tile request; at Cloudflare's request pricing that is
-  small next to the storage, but it is not zero, and §11 asks whether
-  exact-time tiles should also be reachable straight from the bucket.
+  small next to the storage, but it is not zero. Tiles are served only
+  this way, never straight from the bucket, so every tile passes the
+  same checks (decided, §11 q12).
 - **Visibility follows the catalog.** Only public, published,
   non-retracted datasets get tiles, the same predicate the STAC
   projection uses (`functions/api/v1/_lib/metadata-readiness.ts`), and a retraction removes the
@@ -971,7 +977,12 @@ derived from it:
   narrower policy.
 - **Only what may be redistributed.** The same eligibility as STAC
   (public, published, a curated licence); every file carries the
-  credit and licence in its manifest.
+  credit and licence in its manifest. The SOS datasets are NOAA public
+  domain and may be re-shared (decided, §11 q8); what remains for them
+  is bookkeeping, not permission — the importer records a cautious
+  originating-organisation statement rather than a licence identifier
+  (`docs/metadata/README.md`, "Generic licensing"), and the files need
+  the curated one.
 
 ---
 
@@ -1007,7 +1018,7 @@ be built in one pass with no reprojection.
 method for everything is the default in every tiling tool and is wrong
 for some of the catalog. Proposed: a per-dataset `decimation` value,
 set by the publisher, defaulted from the dataset's kind, and stated in
-the capabilities abstract:
+the capabilities abstract (decided, §11 q6):
 
 | Value | For | Rule | What it costs |
 |---|---|---|---|
@@ -1030,8 +1041,8 @@ Four rules apply whatever the method.
   pixel is itself no-data depends on the method: under `mean` and
   `mode` when less than half the block's area is valid, under `max`
   only when none of it is, because the point of `max` is that one fire
-  pixel survives the zoom-out. The half-area threshold is a judgement
-  call (§11).
+  pixel survives the zoom-out. The half-area threshold was decided
+  (§11 q5).
 - **Area, not pixel count.** An equirectangular row's cells shrink
   toward the poles, so the two rows of a block weigh differently. The
   weights are the exact band areas `datasetStats.ts` already uses
@@ -1255,7 +1266,7 @@ way `architecture/federation-scoping.md` records its own.
 **D0's gate is met:** all five were decided on 2026-11-06, so D1 can
 start once its people and places are lined up — a dome session with
 the OpenSpace collaborators, an SOS contact, a test ArcGIS organisation
-and a Second Life sphere.
+and a Second Life sphere. The maintainer can line up all four.
 
 **Decided so far:**
 
@@ -1273,6 +1284,14 @@ and a Second Life sphere.
 | 2026-11-06 | The maintainer | **D0:** open CORS on the new files route only; the existing streaming host is unchanged | §6.5, q7 |
 | 2026-11-06 | The maintainer | **D0:** files (D2) before tiles (D3), the order §9 argues for; the two tracks may still run side by side after D1 | §9.1, q13 |
 | 2026-11-06 | The maintainer | **D0:** the ArcGIS scripts are maintained in this repository and run by each organisation with its own credentials and credits | §9.12, q14 |
+| 2026-11-06 | The maintainer | A zoomed-out pixel is no-data when more than half its area is (`mean`, `mode`); any value shows under `max` | §7.1, q5 |
+| 2026-11-06 | The maintainer | The publisher chooses each dataset's reduction method, with a suggested default | §7.1, q6 |
+| 2026-11-06 | The maintainer | The SOS datasets are NOAA public domain and may be re-shared | §9.13, q8 |
+| 2026-11-06 | The maintainer | SOS still needs MPEG-4 Part 2 movies | §6.1, q9 |
+| 2026-11-06 | The maintainer | OpenSpace users download TerraViz assets from TerraViz | §6.4, q10 |
+| 2026-11-06 | The maintainer | Every tile goes through the Function; none straight from the bucket | §5.6, q12 |
+| 2026-11-06 | The maintainer | A WebAssembly image codec may be added for WMS if the CPU test passes | §9.10, q15 |
+| 2026-11-06 | The maintainer | Count embedded views, as a separate change to the app's analytics | §9.14 |
 
 ### 9.3 D1 — Prove it by hand
 
@@ -1515,7 +1534,8 @@ is measured on an isolated preview deployment against its CPU limit,
 by the protocol the STAC rollout gate uses
 (`docs/metadata/PHASE4_IMPLEMENTATION.md` §Rollout Gate). Decoding and
 encoding images inside a Worker means a WebAssembly codec, which is a
-new dependency and a decision of its own (§11 q15). If the measurement
+new dependency, accepted if the CPU test passes (decided, §11 q15). If
+the measurement
 fails, D4 stops there: ArcGIS users get one WMTS layer per frame with
 time-based visibility (§2.1), which works for short series and not for
 long ones, and the plan says so.
@@ -1639,10 +1659,14 @@ de-duplicated frames do not fit its span evenly. Off by default and
 turned on per dataset.
 
 **The gate is a person, not a test.** Before a dataset's tiles or
-files go public, someone with the authority to say so — for NOAA's SOS
-content, the SOS team — records that it may be redistributed in these
-forms. The record says who decided, on what, and when, as `CLAUDE.md`
-asks wherever a person rather than an agent owns a decision.
+files go public, someone with the authority to say so records that it
+may be redistributed in these forms, saying who decided, on what, and
+when, as `CLAUDE.md` asks wherever a person rather than an agent owns a
+decision. For the SOS catalogue that record exists: the maintainer
+stated on 2026-11-06 that the SOS datasets are NOAA public domain and
+may be re-shared (§11 q8). Each still needs its licence curated in the
+catalog, so its files can say so (§6.5); datasets from other sources
+need their own record.
 
 **Reviewers.** The Video Streaming Engineer; the Scientific Data
 Steward for the licence and provenance metadata.
@@ -1795,7 +1819,8 @@ visitor allows it — but `session_start` does not say whether it is
 running embedded (`src/analytics/session.ts` has no such field), so
 "how many people saw a TerraViz globe inside a StoryMap" needs one
 append-only Tier A field there (invariant 8). That is a small change
-of its own, through the `add-analytics-event` checklist.
+of its own, through the `add-analytics-event` checklist; the
+maintainer asked for it on 2026-11-06.
 
 **Which phase adds what.** D2a builds the classifier and the writer as
 a pure module, counts the files route, and adds the rollup and the
@@ -1859,35 +1884,36 @@ stays a draft for review.
 4. *Decided 2026-11-06 by the maintainer:* tiles snap to the containing
    period as GIBS does, `/frames?at=` keeps the closest frame, and the
    difference is documented on both routes (§5.3).
-5. **No-data threshold for `mean` and `mode`:** half the block's area,
-   or something else?
-6. **Who sets a dataset's decimation method**, and what is the default
-   for each kind — publisher in the portal, Zyra template, or both?
+5. *Decided 2026-11-06 by the maintainer:* under `mean` and `mode`, a
+   zoomed-out pixel is no-data when more than half its area is; under
+   `max`, any single value shows (§7.1).
+6. *Decided 2026-11-06 by the maintainer:* the publisher chooses the
+   reduction method in the portal, with a default suggested from the
+   dataset's kind (§7.1, §9.6).
 7. *Decided 2026-11-06 by the maintainer:* open CORS on the new files
    route only; the existing streaming host is unchanged (§6.5).
-8. **Licensing.** Which datasets, legacy SOS ones especially, may be
-   redistributed as derived files and bundles?
-9. **Is SOS's MPEG-4 Part 2 guidance still current**, and would SOS
-   rather receive frames and encode its own movies? A question for the
-   SOS team.
-10. **OpenSpace's Folder-mode date parsing**: off by one day or not?
-    And would the OpenSpace project ship TerraViz assets in its own
-    tree, as it does the 243 SOS ones, rather than users downloading
-    them? Questions for the collaborators.
-11. **Does Hub's DCAT feed include WMS and WMTS items?** Test on a live
-    Hub site before promising data.gov reach.
-12. **Should exact-time tiles also be reachable straight from the
-    bucket**, skipping the Function for clients that never need
-    snapping?
+8. *Decided 2026-11-06 by the maintainer:* the SOS datasets are NOAA
+   public domain and may be re-shared. Their licences still need
+   curating in the catalog so each file says so; datasets from other
+   sources need their own record (§6.5, §9.13).
+9. *Decided 2026-11-06 by the maintainer:* SOS's MPEG-4 Part 2 guidance is
+   still current; the `sos-mpeg4` movie stays (§6.1).
+10. *Decided 2026-11-06 by the maintainer:* OpenSpace users download
+    TerraViz assets from TerraViz rather than from OpenSpace's own
+    library. Still open, and tested in D1: whether Folder mode's date
+    parsing is off by one day.
+11. **Does Hub's DCAT feed include WMS and WMTS items?** Tested in D1,
+    in the maintainer's ArcGIS organisation, before promising data.gov
+    reach.
+12. *Decided 2026-11-06 by the maintainer:* no. Every tile goes through
+    the Function, so every tile passes the same checks (§5.6).
 13. *Decided 2026-11-06 by the maintainer:* files (D2) before tiles
     (D3), as §9 argues; the tracks may run side by side after D1.
 14. *Decided 2026-11-06 by the maintainer:* the scripts are maintained
     in this repository and run by each organisation with its own
     credentials and credits (§9.12).
-15. **A WebAssembly image codec in the Functions for D4**, a new
-    dependency, or Cloudflare's image transformations for picture
-    layers only, leaving data layers without WMS? D4's CPU gate
-    measures the first; this question decides whether to try it.
+15. *Decided 2026-11-06 by the maintainer:* a WebAssembly image codec
+    may be added for D4 if the CPU test passes (§9.10).
 16. *Decided 2026-11-06 by the maintainer:* D5a's COGs carry the
     producer's own values on its own grid, taken before any regridding
     (§9.11). Kept here so the numbering of the others holds.
