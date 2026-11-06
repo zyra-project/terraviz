@@ -83,8 +83,10 @@ automation behind the daily Vimeo re-uploads that
 `cli/lib/realtime-title.ts` detects today. It proves the
 render-on-schedule half of this plan in production and supplies
 two design inputs adopted below: a published runner container
-(`ghcr.io/noaa-gsl/zyra-scheduler`, pinned by digest) instead of
-ad-hoc `pip install`, and a worked example of per-dataset
+pinned by digest instead of ad-hoc `pip install` (the idea, not
+the image: `zyra-scheduler` carries the connectors only, so the
+runner uses the fuller `ghcr.io/noaa-gsl/zyra` — see §Runner),
+and a worked example of per-dataset
 config (its `datasets/*.env` + per-dataset workflow wrappers are
 the static-file equivalent of our D1-resident definitions). What
 it does *not* cover is the TerraViz leg — metadata sidecar,

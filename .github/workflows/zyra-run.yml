@@ -52,18 +52,24 @@ env:
   # first convert-format or heatmap stage. `zyra` carries
   # connectors,processing,visualization,api on both arches.
   #
-  # v0.1.56 (multi-arch index; OCI revision 70cb06bc). The floor for
-  # a data-encoded workflow, and what the bump from v0.1.52 was for:
+  # v0.1.56 (multi-arch index; OCI revision 70cb06bc). A data-encoded
+  # workflow needs v0.1.54 or later; what each release since v0.1.52
+  # carried:
   #   v0.1.53 — `visualize heatmap --data-encoded --color-scale-file`
   #             (the luma writer). v0.1.52 rejects the pipeline at the
   #             heatmap stage with "unrecognized arguments".
   #   v0.1.54 — writes data-encoded frames from GeoTIFF input north-up.
   #             v0.1.53 wrote them upside down, so it is not a usable
-  #             floor; a dataset corrected for that with the publisher's
-  #             "flipped in Y" box needs it unticked on this image.
-  #   v0.1.56 — reads gzip-compressed GRIB2 (`.grib2.gz`) transparently,
-  #             and fails a GRIB decode that finds no messages instead
-  #             of passing it on as an empty success.
+  #             floor; a dataset corrected for that with the publisher
+  #             form's "Flip vertically (inverted-Y imagery)" box needs
+  #             it unticked on this image.
+  #   v0.1.55 — dependency bumps only; no CLI change.
+  #   v0.1.56 — reads gzip-compressed GRIB2 transparently, detected by
+  #             its magic bytes whatever the file is called; refuses an
+  #             `.idx` byte-range subset that does not start with `GRIB`
+  #             (fails closed, so a valid source is unaffected); and
+  #             fails a GRIB decode that finds no messages instead of
+  #             passing it on as an empty success.
   # No stage or command was added or removed between v0.1.52 and
   # v0.1.56, so ZYRA_STAGE_ALLOWLIST is unchanged by this bump.
   #

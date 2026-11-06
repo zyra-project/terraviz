@@ -33,9 +33,12 @@
  * flags (`heatmap --data-encoded` / `--color-scale-file`, from
  * v0.1.53), which this table does not govern. Commands zyra has that
  * are not listed here (`acquire thredds`, `visualize vector`,
- * `visualize sos`, …) are missing because nobody has added them,
- * not because the pinned release lacks them — Tier 1 in the
- * `terraviz-data-video` skill's `references/capability-gaps.md`.
+ * `visualize sos`, …) are not missing for want of a release — Tier 1
+ * in the `terraviz-data-video` skill's
+ * `references/capability-gaps.md`. Listing one is not always enough
+ * to make it runnable, though: `acquire thredds` takes its catalog
+ * URL as a positional that `zyra run`'s pipeline runner does not
+ * map, so it fails as `unrecognized arguments: --catalog-url`.
  */
 export const ZYRA_STAGE_ALLOWLIST: Readonly<Record<string, readonly string[]>> = {
   acquire: ['http', 'ftp', 's3'],
