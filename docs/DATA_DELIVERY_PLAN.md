@@ -125,7 +125,230 @@ a picture whose placement is described in metadata, not embedded in the
 file. GIS tools need the placement in the file (a GeoTIFF) or in the
 service (a tile grid). That is the gap.
 
-<!-- §2 consumer survey: filled from research -->
+---
+
+## 2. The user groups, and what their tools read
+
+Each subsection says what the group's tools can read, what that means
+for the format TerraViz should serve them, and what size, pace and
+precision those tools actually use. Claims about third-party tools were
+checked against vendor documentation or source code on 2026-11-06 and
+link to it inline. Where the documentation is silent, the text says so
+rather than guessing. The two most consequential findings are that
+**ArcGIS's time slider follows WMS time but ignores WMTS time**, and
+that **Second Life plays an MP4 URL through a video player with no
+browser at all** — both change what §4 recommends.
+
+### 2.1 ArcGIS users: analysts, Hub sites, StoryMaps authors
+
+**What ArcGIS Online reads.**
+
+- **Map Viewer adds OGC services by URL**: OGC API Features, WMS, WMTS,
+  WFS 2.0 (GeoJSON output only) and WCS. Servers must allow CORS and
+  token-secured services are not supported. A WMS or WMTS layer must
+  use the basemap's coordinate system, and a WMTS layer's tiling scheme
+  must match the basemap's
+  ([OGC layers](https://doc.arcgis.com/en/arcgis-online/reference/ogc.htm)).
+  Most basemaps are Web Mercator.
+- **Time: WMS-T yes, WMTS no.** Map Viewer is built on the ArcGIS Maps
+  SDK for JavaScript, whose `WMSLayer` reads a time dimension and
+  follows the time slider
+  ([WMSLayer](https://developers.arcgis.com/javascript/latest/references/core/layers/WMSLayer/)),
+  while `WMTSLayer` has no time property at all
+  ([WMTSLayer](https://developers.arcgis.com/javascript/latest/references/core/layers/WMTSLayer/));
+  Esri staff say only a WMTS dimension's default value is used
+  ([Esri Community](https://community.esri.com/t5/arcgis-online-questions/wmts-time-dimension-support/m-p/741619)).
+  Since February 2026 any layer can be given a start and end date that
+  the slider uses to switch it on and off
+  ([Esri blog](https://www.esri.com/arcgis-blog/products/arcgis-online/mapping/make-time-for-time-based-layer-visibility-in-map-viewer)),
+  so one WMTS layer per frame would animate — workable for a handful of
+  frames, not for a year of days.
+- **XYZ tile layers** from a URL template are Web Mercator only, with
+  no time
+  ([add layers from URL](https://doc.arcgis.com/en/arcgis-online/create-maps/add-layers-from-url.htm)).
+- **KML**: GroundOverlay, KMZ and NetworkLink display; files over
+  10 MB cannot be added; time is not mentioned
+  ([KML](https://doc.arcgis.com/en/arcgis-online/reference/kml.htm)).
+- **Scene Viewer** global scenes take WMS and WMTS with 256- or
+  512-pixel tiles in Web Mercator or Esri's "WGS 1984 Geographic
+  Coordinate System, Version 2" scheme
+  ([global and local scenes](https://doc.arcgis.com/en/arcgis-online/create-maps/choose-global-local-scene.htm)).
+  Whether that scheme is the same as WorldCRS84Quad is not documented.
+- **Zooming past the deepest level** is undocumented for WMTS; the
+  SDK's `TileLayer` stops requesting tiles past a service's deepest
+  level by design
+  ([Esri bug 000133378](https://support.esri.com/en-us/bug/the-tilelayer-does-not-dynamically-load-tiles-in-after-bug-000133378)).
+  If WMTS behaves the same, §7.1's rule of stopping at the native level
+  leaves ArcGIS users with blank maps when they zoom in. Phase D1 tests
+  it (§11).
+- **ArcGIS Image for ArcGIS Online**, which the TerraViz operator's
+  organisation licenses, creates hosted imagery layers from uploaded
+  files, converted to Esri's CRF format; inputs include GRIB, HDF,
+  NetCDF and any raster ArcGIS Pro reads, multidimensional included
+  ([publish imagery layers](https://doc.arcgis.com/en/arcgis-online/manage-data/publish-imagery-layers.htm)).
+  **Tiled** imagery layers can be shared publicly; **dynamic** ones
+  cannot. A multidimensional layer gets a time slider, one slice at a
+  time
+  ([multidimensional](https://doc.arcgis.com/en/arcgis-online/create-maps/configure-multidimensional.htm));
+  a temporal mean is a separate analysis run that writes a new layer
+  ([aggregate](https://doc.arcgis.com/en/arcgis-online/analyze/aggregate-multidimensional-raster-mv-ra.htm)).
+  No documented way was found for ArcGIS Online to read data in place
+  from S3-compatible storage such as R2, so the data is *copied* into
+  Esri's store. Storage is 1.2 credits per GB per month and tile
+  generation 1 credit per 10,000 tiles
+  ([credits](https://doc.arcgis.com/en/arcgis-online/administer/credits.htm)).
+- **ArcGIS Pro** browses STAC APIs (Explore STAC, Pro 3.2 and later) and
+  reads Zarr ([Explore STAC](https://doc.esri.com/en/arcgis-pro/latest/help/data/imagery/explore-stac.html)).
+  Which asset formats it can place on a map is undocumented; the safe
+  assumption is that an asset must carry its own georeferencing (COG,
+  GeoTIFF, NetCDF), so today's PNG frames would not be placed.
+- **Hub** shows items from its organisation; no feature for harvesting
+  an outside catalog was found. Items that point at a URL — WMS, WMTS,
+  OGC Feature Server, WCS, KML, Media Layer, Web Mapping Application —
+  can be created through the REST API's `addItem`
+  ([item types](https://developers.arcgis.com/rest/users-groups-and-items/items-and-item-types/)),
+  and Hub lists WMS and WMTS items with map previews
+  ([supported content](https://doc.esri.com/en/arcgis-hub/latest/build/supported-content.html)).
+  Hub's DCAT feed carries only public data items; whether WMS and WMTS
+  items are among them is untested
+  ([federate data](https://doc.esri.com/en/arcgis-hub/latest/build/federate-data.html)).
+- **Video.** Map Viewer's media layer takes only JPEG or PNG uploaded
+  from the user's device
+  ([media layers](https://doc.arcgis.com/en/arcgis-online/create-maps/add-media-layers.htm)).
+  The web map format allows a video media layer by URL and the SDK plays
+  one ([mediaLayer](https://developers.arcgis.com/web-map-specification/objects/mediaLayer/)),
+  but whether Map Viewer plays one saved into a web map is unverified.
+  StoryMaps take uploaded video up to 50 MB, not georeferenced, and
+  HTTPS embeds
+  ([StoryMaps FAQ](https://doc.esri.com/en/arcgis-storymaps/latest/reference/faq.html)).
+
+**What this means.** For browsing with a time slider, ArcGIS needs
+**WMS-T in Web Mercator**; WMTS in plain latitude/longitude is of
+little use to it. For analysis, it needs the source fields as
+multidimensional rasters, uploaded as a public tiled imagery layer. For
+Hub, it needs items registered that point at those services and at the
+embed page. For storytelling, the embed page, plus short MP4 clips.
+
+**Size, pace, precision.** WMS `GetMap` requests are capped at 2048
+pixels by default. A 4096×2048 source reaches its native resolution at
+level 4 of Web Mercator. Analysis rasters go up as CRF with LERC
+compression, whose maximum error should be set below the field's
+meaningful precision.
+
+<!-- §2.2 planetarium and dome producers: filled from research -->
+
+### 2.3 Virtual-world educators: Second Life and OpenSimulator
+
+**Already built, and documented elsewhere.**
+[`SECOND_LIFE_COMPAT.md`](SECOND_LIFE_COMPAT.md) records in-world tests
+(Firestorm 7.2.4, Chromium 139: WebGL 2, H.264, AAC, VP9, AV1 and hls.js
+work; native HLS does not; media is capped at 2048 a side) and two
+built routes: the full app on a flat panel, and the output page's web
+mode as a sphere's texture, steered by a shared clock in its address.
+Video must come from the node's own origin, because the video host's
+CORS allows only that origin (§4.4 there). This plan does not repeat
+any of it.
+
+**What the viewer source adds** (checked against Linden Lab's and
+Firestorm's repositories):
+
+- **Every loaded globe renders at its full media size.** The viewer
+  shrinks low-priority media only for plugins that opt in with
+  `allow_downsample`, and the web-page plugin never does
+  ([`llpluginclassmedia.cpp`](https://github.com/secondlife/viewer/blob/develop/indra/llplugin/llpluginclassmedia.cpp),
+  [`media_plugin_cef.cpp`](https://github.com/secondlife/viewer/blob/develop/indra/media_plugins/cef/media_plugin_cef.cpp)).
+  The page's `width` is the only lever on what a visitor's GPU and
+  connection pay for.
+- **An MP4 address plays without a browser.** An address served as
+  `video/mp4` goes to the viewer's LibVLC video plugin, not the web
+  page plugin
+  ([`mime_types.xml`](https://github.com/secondlife/viewer/blob/develop/indra/newview/skins/default/xui/en/mime_types.xml)).
+  A plain equirectangular MP4 on a sphere is therefore a globe that
+  needs no WebGL — and has no shared clock. Untested in-world.
+- **Firestorm does not auto-play shared media by default.**
+  `ParcelMediaAutoPlayEnable` is 1 in Linden Lab's viewer and 0 in
+  Firestorm
+  ([official settings](https://github.com/secondlife/viewer/blob/develop/indra/newview/app_settings/settings.xml),
+  [Firestorm settings](https://github.com/FirestormViewer/phoenix-firestorm/blob/master/indra/newview/app_settings/settings.xml)),
+  so a Firestorm visitor sees nothing until they press play.
+- **An address is at most 1,024 characters**, and each
+  `llSetPrimMediaParams` call sleeps the script for a second
+  ([LSL wiki](https://wiki.secondlife.com/wiki/LlSetPrimMediaParams)).
+- **The browser is moving.** Linden Lab's viewer 26.2 runs CEF 139;
+  Firestorm's main branch pins CEF 152, not yet in a release checked
+  ([Firestorm `autobuild.xml`](https://github.com/FirestormViewer/phoenix-firestorm/blob/master/autobuild.xml)).
+
+The last four correct or extend `SECOND_LIFE_COMPAT.md` (its §10
+question 13 assumes low-priority media are scaled down). They belong
+in that document, in a follow-up, not here.
+
+**Other virtual worlds**, briefly: VRChat shows video, not web pages,
+from allowlisted hosts, at most one new URL per five seconds
+([VRChat](https://creators.vrchat.com/worlds/udon/video-players/www-whitelist));
+Overte shows web pages but lists only open codecs, so H.264 would not
+play ([Overte](https://docs.overte.org/en/latest/create/entities/web-entity-media.html));
+Microsoft Mesh was retired in December 2025. None changes §4; VRChat
+is one more reason for a plain MP4.
+
+**Size, pace, precision.** Because the page always renders at full
+size, the face width is the whole budget. A 2:1 texture W pixels wide
+is the limiting factor only when the sphere spans more than about W/π
+pixels on screen: about 650 at 2048, about 330 at 1024. A 4 m sphere
+seen from 15 m on a 1080p screen spans about 270 pixels, so 1024 is
+enough beyond about 7 m. That supports the output page's
+`defaultWebFramebufferWidth` and `capLevelForWidth` caps, a 1024
+default for exhibits, and the low-bitrate 1024×512 rendition
+`SECOND_LIFE_COMPAT.md` §7 already plans. Data-encoded video, at one
+4096×2048 rung of up to 25 Mbit/s per visitor, is the worst case;
+§6.3 proposes smaller renditions made the honest way.
+
+<!-- §2.4 Science On a Sphere sites and spherical displays: filled from research -->
+
+### 2.5 Desktop GIS users and web developers
+
+- **QGIS** animates WMS-T with its Temporal Controller (since 3.14)
+  and WMTS time (since 3.28)
+  ([3.28 changelog](https://changelog.qgis.org/en/version/3.28)),
+  rounds a requested time down to the period step, and resamples the
+  deepest tile level when zoomed past it
+  ([`qgswmsprovider.cpp`](https://github.com/qgis/QGIS/blob/master/src/providers/wms/qgswmsprovider.cpp)).
+  It opens COGs over HTTP through GDAL and browses STAC since 3.40
+  ([3.40 changelog](https://qgis.org/project/visual-changelogs/visualchangelog340/)).
+  No video.
+- **CesiumJS** animates WMTS through a `{Time}` URL template with a
+  `times` list and a `clock`, and WMS the same way
+  ([WMTS provider](https://cesium.com/learn/cesiumjs/ref-doc/WebMapTileServiceImageryProvider.html)).
+  Its `GeographicTilingScheme` (2×1 at the root) matches
+  WorldCRS84Quad. It shows the interval containing its clock with no
+  blending, prefetches the next interval when it is under five seconds
+  away, and stretches the deepest level past its maximum
+  ([`TimeDynamicImagery.js`](https://github.com/CesiumGS/cesium/blob/main/packages/engine/Source/Scene/TimeDynamicImagery.js)).
+  It can also play a video on an ellipsoid as a material, from any
+  source the browser plays, including HLS through hls.js — if the video
+  is served with CORS
+  ([ImageMaterialProperty](https://cesium.com/learn/cesiumjs/ref-doc/ImageMaterialProperty.html)).
+- **Cesium for Unreal and Unity** take WMTS, WMS and TMS overlays but
+  have no time property, so no animated imagery
+  ([Unreal WMTS overlay](https://cesium.com/learn/cesium-unreal/ref-doc/classUCesiumWebMapTileServiceRasterOverlay.html)).
+- **Google Earth Pro** animates KML GroundOverlays with TimeSpans on its
+  time slider ([KML time](https://developers.google.com/kml/documentation/time))
+  and adds WMS without time. **Google Earth on the web** takes image
+  overlays up to 2048×2048 and no time animation was found
+  ([KML import guide](https://support.google.com/earth/community-guide/307322063/google-earth-kml-import-guide?hl=en)).
+  Neither plays video on the globe.
+- **Web map libraries** read TileJSON and XYZ (MapLibre, Mapbox GL,
+  OpenLayers). OGC API Tiles is native only in OpenLayers among
+  viewers, ArcGIS Pro reads its map-tiles type, and QGIS reaches it
+  partly through GDAL
+  ([implementations](https://github.com/opengeospatial/ogcapi-tiles/blob/master/implementations.adoc)).
+  Raster PMTiles works in web libraries but not yet in GDAL or QGIS.
+  GeoZarr is a draft. None of these is worth leading with in 2026.
+
+**What this means.** Desktop GIS users are served by WMS-T and WMTS for
+viewing and by COGs for analysis; Google Earth Pro users by a KML of
+time-stamped overlays at most 2048×1024 each; web developers by WMTS
+with `{Time}`, TileJSON, and CORS-enabled H.264 video they can put on
+a Cesium or three.js globe.
 
 <!-- §3 capability matrix: filled from research -->
 
@@ -172,14 +395,17 @@ property of the projection, not of the implementation, and the
 capabilities document should say so in each layer's abstract.
 
 **Not adopted: GIBS's own geographic tile matrix sets.** GIBS's
-EPSG:4326 sets are sized to its native product resolutions (250 m,
-500 m, 2 km…) rather than to a 2:1 image, so their level-0 tiles do not
-cover exactly 180°. Copying them would buy URL compatibility with
-existing GIBS configurations at the cost of resampling every frame.
-Copying GIBS's *URL grammar* (§5.2) while using the standard grid gets
-most of the benefit; a client that reads the capabilities document, or
-GDAL with an explicit data window, handles the difference. This is a
-judgement call — §11 lists it as an open question.
+EPSG:4326 sets are padded: 512-pixel tiles, level 0 two tiles at
+0.5625° a pixel covering 576°×288°, and column counts of 2, 3, 5, 10,
+20, 40 by level rather than powers of two (verified against GIBS's live
+capabilities document, 2026-11-06). They are sized to GIBS's native
+product resolutions, not to a 2:1 image, so copying them would mean
+resampling every frame, and CesiumJS's own GIBS example avoids them by
+using GIBS's Web Mercator endpoint. WorldCRS84Quad is what CesiumJS's
+`GeographicTilingScheme` (2×1 at the root) and QGIS read directly.
+Copying GIBS's *URL grammar and time rules* (§5.2, §5.3) while using
+the standard grid keeps most of the familiarity; GDAL-based clients
+such as OpenSpace need a data window that says so (§2.2).
 
 ### 5.2 URL grammar
 
@@ -212,15 +438,29 @@ pinned in `docs/protocol/` the way STAC's is (§8).
   `start_time + period × index`, most layers can declare a compact
   `start/end/period` interval rather than listing every frame; a
   dataset with irregular frames lists them.
-- **A requested time snaps to a frame.** Clients that animate on a
-  fixed step (OpenSpace's temporal layers round the simulation time to
-  a configured resolution) will ask for times that are not frame times.
-  A tile request for a time inside the dataset's span returns the
-  frame at or before it, not a 404. The existing `/frames?at=` query
-  returns the *closest* frame; the tile service should not silently
-  differ from it, so which rule to use is open (§11).
+- **A requested time snaps down to the frame whose period contains
+  it**, and a time outside the dataset's span, or in a gap between
+  irregular frames, is a 404. That is GIBS's behaviour, checked with
+  live requests (a mid-June date returns the June tile byte for byte; a
+  date in a gap returns 404 over WMTS). It is also what the clients
+  assume: QGIS rounds a request down to the period step, and CesiumJS
+  shows the interval that contains its clock. Clients that animate on
+  a fixed step — OpenSpace rounds simulation time to a configured
+  resolution — will ask for times that are not frame times and must
+  get the frame they are inside, not an error.
+- **This deliberately differs from `/frames?at=`**, which returns the
+  *closest* frame. A closest-frame rule shows a frame up to half a
+  period before its own time, which for a forecast is showing the
+  future. The difference is documented on both routes rather than
+  resolved by changing the existing one.
 - **`default` is the latest frame**, matching GIBS, so a client that
-  sends no time gets the most recent picture.
+  sends no time gets the most recent picture. GIBS does not accept a
+  `current` keyword, and neither should this.
+- **Long time lists are capped.** GIBS's capabilities document carries
+  only the latest 100 periods per layer and answers a `DescribeDomains`
+  request for the rest; its 4326 document is 5.3 MB for 1,332 layers.
+  Regular series here declare one `start/end/period` interval and need
+  no cap; irregular ones copy GIBS's.
 - **Datasets with no real time axis** — a looping diagram animation, a
   "typical year" climatology — are not tiled in v1. Exposing a frame
   index as a non-time dimension is valid WMTS, but almost no client
@@ -277,7 +517,9 @@ against its own idea of where a texel lands.
 - **Served by a Pages Function** that resolves `{time}` to a frame,
   reads the tile from R2, and caches at the edge. A Function in front
   (rather than a public bucket URL) is what makes time snapping, KVP
-  requests, CORS and visibility checks possible. Its cost is one Worker
+  requests, CORS and visibility checks possible. CORS has to be open:
+  CesiumJS, MapLibre and OpenLayers draw tiles with WebGL, which refuses
+  a cross-origin image without `Access-Control-Allow-Origin`. Its cost is one Worker
   invocation per tile request; at Cloudflare's request pricing that is
   small next to the storage, but it is not zero, and §11 asks whether
   exact-time tiles should also be reachable straight from the bucket.
@@ -298,6 +540,11 @@ capabilities:
 - **TileJSON** for MapLibre and other XYZ web maps.
 - **A GDAL WMS XML** per layer, which is what OpenSpace and any
   GDAL-based tool loads (§2.2).
+- **A colour map and legend** per data-encoded layer, in GIBS's
+  ColorMap v1.3 XML (source value ranges to colours, no-data flagged,
+  each entry classed as classification, continuous or discrete) with
+  SVG and PNG legends — generated from the dataset's `color_scale`, so
+  a client that already reads GIBS colour maps reads TerraViz's.
 - **STAC links** — each item gains `wmts` / `xyz` links under the STAC
   web-map-links extension, so a STAC client finds the tiles from the
   catalog it already reads (§4.3).
