@@ -18,10 +18,11 @@ sibling document already records a test.
 consumer; §9's phased implementation and §9.14's usage metrics added
 the same day.)
 
-**Decisions recorded:** two so far, both 2026-11-06 by the maintainer,
+**Decisions recorded:** seven so far, all 2026-11-06 by the maintainer,
 logged in §9.2: rasters for analysis carry the producer's own values on
-the producer's own grid, before any regridding (§9.11); and use is
-measured per platform and per method (§9.14).
+the producer's own grid, before any regridding (§9.11); use is measured
+per platform and per method (§9.14); and five choices about how that
+measuring works (§11 q17–q21).
 
 **Revisit when any of the following becomes true:**
 
@@ -1254,6 +1255,11 @@ starts until those five are written down.
 |---|---|---|---|
 | 2026-11-06 | The maintainer | Rasters for analysis carry the producer's own values on its own grid, before any regridding | §9.11 |
 | 2026-11-06 | The maintainer | Measure use per platform and per method | §9.14 |
+| 2026-11-06 | The maintainer | Don't count individual tiles or WMS maps at first | §9.14, q17 |
+| 2026-11-06 | The maintainer | Delivery counts get their own Analytics Engine dataset | §9.14, q18 |
+| 2026-11-06 | The maintainer | Keep country, by month, except for virtual-world viewers | §9.14, q19 |
+| 2026-11-06 | The maintainer | Record `major.minor` versions of known platforms, on layer loads and downloads only | §9.14, q20 |
+| 2026-11-06 | The maintainer | Hash unrecognised names and domains; resolve them against a list of likely names | §9.14, q21 |
 
 ### 9.3 D1 — Prove it by hand
 
@@ -1318,9 +1324,10 @@ contradict.
   freshly signed link through the proxy `manifest.ts` already uses;
   404 unless `FILES_ENABLED`.
 - **Counting** (§9.14): the three-layer platform classifier and the
-  Analytics Engine writer as a pure module, the files route's counts,
-  the nightly rollup into D1, and the Delivery panel in
-  `/publish/analytics`.
+  Analytics Engine writer as a pure module, the delivery dataset's
+  binding in `wrangler.toml`, the files route's counts, the nightly
+  rollup into D1, the "unknown clients" report with its list of likely
+  names, and the Delivery panel in `/publish/analytics`.
 
 **Tests.** Pure tests for the encoder arguments and the manifest; a
 runner smoke test that checks the result with `ffprobe` (constant
@@ -1441,8 +1448,8 @@ rules; snapping through the shared module, 404 for gaps, `default` the
 latest frame; edge caching; open CORS. Beside it, per layer: TileJSON,
 a GDAL WMS XML, and for data-encoded layers a GIBS ColorMap v1.3 file
 with SVG and PNG legends generated from the dataset's `color_scale`.
-Capabilities, layer configurations and tiles are counted, tiles
-sampled, and a tag on a capabilities request is carried into the tile
+Capabilities documents and layer configurations are counted, tiles are
+not, and a tag on a capabilities request is carried into the tile
 addresses it advertises (§9.14).
 
 **Tests.** The capabilities document against OGC's WMTS 1.0 schemas,
@@ -1487,7 +1494,7 @@ metadata; the Technical Writer for `SELF_HOSTING.md`.
 dimension per layer, and `GetMap` in `CRS:84`, `EPSG:4326` and
 `EPSG:3857`, stitched from the pyramids and scaled, at most 2048 a
 side, nearest neighbour for data layers, a transparent image for a gap
-(§5.9). Capabilities are counted and maps sampled (§9.14).
+(§5.9). Capabilities are counted; maps are not (§9.14).
 
 **The CPU gate comes first.** Before any route lands, the worst-case
 `GetMap` — 2048×2048, in each CRS, a data layer and a picture layer —
@@ -1635,8 +1642,8 @@ first phase builds it.
 
 **What is counted.** Requests to the delivery surfaces, counted on the
 server by the Functions that answer them: the files route, the tile
-and WMS routes, the capabilities documents, TileJSON and GDAL XML, and
-STAC. Not the TerraViz app, which already has its own consent-gated
+and WMS services' capabilities documents, TileJSON and GDAL XML, and
+STAC — but not each tile or map (decided, q17). Not the TerraViz app, which already has its own consent-gated
 telemetry, and not the output page, whose reporting is opt-in per
 globe by design (`src/output/webTelemetry.ts`) and must not gain a
 second, ungated path.
@@ -1646,12 +1653,19 @@ second, ungated path.
 - **The method**, which the route itself knows: a video file, a bundle
   (and which kind — OpenSpace asset, SOS directory, frame zip, KMZ), a
   capabilities document, a layer configuration (TileJSON or GDAL XML),
-  a tile, a WMS map, a STAC read.
+  a STAC read. Individual tiles and WMS maps are not counted (below).
 - **The platform**, worked out in three layers, most reliable first —
   see *How the platform vocabulary grows*, below.
 - **The dataset** (its catalog id, as the app's `layer_loaded` already
   reports), the variant or format, and **the country**, from
-  Cloudflare's edge as the ingest function stamps it (invariant 1).
+  Cloudflare's edge as the ingest function stamps it (invariant 1),
+  summarised by month in the rollup (decided, q19).
+- **The platform's version, as `major.minor`**, for platforms on the
+  curated list only, and only on a layer load or a download — never on
+  anything finer. It answers support questions such as whether to rely
+  on WMTS time (QGIS 3.28 and later) or video layers (OpenSpace 0.19
+  and later). It sits in its own field, so it can be dropped without
+  disturbing the rest (decided, q20).
 
 **How the platform vocabulary grows.** A fixed list undercounts
 exactly the platforms nobody predicted. An open one lets any client
@@ -1687,12 +1701,18 @@ each open in a different way.
    list are stored as themselves. Anything else is stored as `other`
    plus a 12-hex hash of the normalised token or domain — invariant 3's
    treatment of free text — kept only in Analytics Engine's 30–90-day
-   window and never rolled up. An "unknown clients" report ranks those
-   hashes by frequency, and identifying a busy one means testing
-   candidate names against it, the dictionary lookup
-   `docs/ANALYTICS_CONTRIBUTING.md` already describes. Once identified,
-   a platform is promoted: onto the curated list (a code change, and
-   append-only under invariant 8) or as a partner tag (a row).
+   window and never rolled up. Hashing uses the app's own helper
+   (`src/analytics/hash.ts`), so the repository has one rule for it
+   (decided, q21). An "unknown clients" report ranks those hashes by
+   frequency and matches them automatically against a list of likely
+   names — HTTP clients, GIS and visualisation tools, well-known science
+   and museum sites — so anything on that list shows by name and only
+   the truly unknown stay hashes. This works for software and sites as
+   it would not for search terms, because their names are public and
+   easy to list: the dictionary lookup `docs/ANALYTICS_CONTRIBUTING.md`
+   describes, done ahead of time. Once identified, a platform is
+   promoted: onto the curated list (a code change, and append-only
+   under invariant 8) or as a partner tag (a row).
 
 **Carriers: a query parameter first, a header where a client can send
 one.** The `via` parameter is the universal carrier because it survives
@@ -1732,13 +1752,22 @@ they make are counted.
 request with no `Range` header, or one starting at byte 0, not the
 dozens of range requests a player makes after it. A capabilities
 document, layer configuration or asset counts once per fetch, which is
-the nearest thing to "someone added this layer". Tiles and WMS maps are
-**sampled** — one request in N, written with weight N — because one
-person panning a map fetches hundreds of tiles, and an unsampled count
-would be the largest write volume the node has while answering a
-question ("how much") rather than the one asked ("who uses it").
+the nearest thing to "someone added this layer". **Individual tiles and
+WMS maps are not counted at first** (decided, q17). One person panning a
+map fetches hundreds of tiles, so a tile count would be the largest
+write volume the node has, and it answers "how much" rather than the
+question asked, "who uses it", which the per-layer counts already
+answer. Raw request volume per address is in Cloudflare's own
+dashboard. A sampled tile count — one request in N, written with
+weight N — is added later only if a question needs it, such as
+planning costs.
 
-**Where the numbers go.** Into Workers Analytics Engine, then through
+**Where the numbers go.** Into a Workers Analytics Engine dataset of
+their own, not the app's `terraviz_events` (decided, q18): that
+dataset's positional layout is read by the dashboards and the nightly
+rollup, and these counts have no session id to sample on. The cost is
+one more binding in `wrangler.toml` and one more step for an operator
+setting up a node. From there they go through
 the nightly rollup into D1 that the publisher portal's analytics tab
 already reads (`docs/ANALYTICS_STORAGE_AND_ADMIN_PLAN.md` Phase A), so
 per-platform and per-method numbers appear in `/publish/analytics` and
@@ -1755,10 +1784,10 @@ of its own, through the `add-analytics-event` checklist.
 
 **Which phase adds what.** D2a builds the classifier and the writer as
 a pure module, counts the files route, and adds the rollup and the
-Delivery panel; D2b writes the tag into every bundle; D3b counts tiles
-and capabilities and carries the tag into advertised tile addresses;
-D3c counts STAC reads; D4 counts WMS; D5b's registration script tags
-the items it creates. Every one of them runs the `analytics-reviewer`
+Delivery panel; D2b writes the tag into every bundle; D3b counts
+capabilities documents and layer configurations and carries the tag
+into advertised tile addresses; D3c counts STAC reads; D4 counts WMS
+capabilities; D5b's registration script tags the items it creates. Every one of them runs the `analytics-reviewer`
 first and the Privacy Engineer, updates `docs/ANALYTICS.md`,
 `docs/ANALYTICS_QUERIES.md`, a Grafana panel and `docs/PRIVACY.md`
 (rebuilding `public/privacy.html`), and — the analytics ingest path
@@ -1847,25 +1876,20 @@ stays a draft for review.
 16. *Decided 2026-11-06 by the maintainer:* D5a's COGs carry the
     producer's own values on its own grid, taken before any regridding
     (§9.11). Kept here so the numbering of the others holds.
-17. **How hard to sample tiles and WMS maps** — one in a hundred? — and
-    is a tile count worth having at all beside the once-per-layer
-    counts, which already answer "which platforms use this"?
-18. **Its own Analytics Engine dataset, or `terraviz_events`** with a
-    server-stamped event type? A build-time choice for the
-    `analytics-reviewer`, since `docs/ANALYTICS_QUERIES.md`'s
-    positional layout and the rollup both depend on it.
-19. **Country for delivery requests at all?** Kept by default, as the
-    ingest function keeps it, except for virtual-world viewers
-    (§9.14). Worth confirming it is wanted for reporting, since a
-    count without it is safer still.
-20. **Major versions for known platforms?** QGIS 3.28 against 3.40
-    decides who sees WMTS time, which is worth knowing when choosing
-    what to support; a version is also one more detail per request.
-    Off by default.
-21. **Unrecognised product tokens and domains: hashed or raw?** Hashing
-    (§9.14) follows invariant 3. Raw software names would be easier to
-    read, and are text any client can set to anything. The
-    `analytics-reviewer`'s call when D2a builds it.
+17. *Decided 2026-11-06 by the maintainer:* tiles and WMS maps are not
+    counted at first; per-layer counts and downloads answer who uses
+    what, and Cloudflare's dashboard has raw volume (§9.14).
+18. *Decided 2026-11-06 by the maintainer:* delivery counts get their
+    own Analytics Engine dataset, leaving `terraviz_events` untouched
+    (§9.14).
+19. *Decided 2026-11-06 by the maintainer:* country is kept, summarised
+    by month, except for virtual-world viewers (§9.14).
+20. *Decided 2026-11-06 by the maintainer:* `major.minor` versions for
+    platforms on the curated list, on layer loads and downloads only,
+    in their own field (§9.14).
+21. *Decided 2026-11-06 by the maintainer:* unrecognised names and
+    domains are hashed with `src/analytics/hash.ts`, and the report
+    resolves them against a list of likely names (§9.14).
 
 ---
 
