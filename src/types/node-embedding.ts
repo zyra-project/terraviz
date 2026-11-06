@@ -48,7 +48,9 @@
  *   subdomain ({@link SHARED_HOST_SUFFIXES}): `*.wordpress.com` would
  *   admit every WordPress.com site, not the operator's. The list is
  *   short and deliberately incomplete; it catches the likely mistakes
- *   for a WordPress-embedding node rather than every multi-tenant host.
+ *   for a node embedded in WordPress or ArcGIS (Hub sites, StoryMaps)
+ *   rather than every multi-tenant host. The match is exact on the part
+ *   after `*.`, so each level an operator might type is listed.
  * - Non-ASCII hosts. CSP matches the ASCII (punycode) form, so the
  *   operator is asked for the `xn--` form rather than having it
  *   converted behind their back.
@@ -137,6 +139,13 @@ export const SHARED_HOST_SUFFIXES = [
   'wixsite.com',
   'squarespace.com',
   'weebly.com',
+  // ArcGIS: every Hub site is `<site>.hub.arcgis.com` and every ArcGIS
+  // Online organisation `<org>.maps.arcgis.com`, so a wildcard over
+  // either admits every customer's. A real site is a single host; an
+  // operator embedding into StoryMaps lists https://storymaps.arcgis.com.
+  'arcgis.com',
+  'maps.arcgis.com',
+  'hub.arcgis.com',
 ] as const
 
 /** Why an origin was refused. The portal words each one; the API

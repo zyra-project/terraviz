@@ -28,6 +28,9 @@ describe('validateEmbedOrigin', () => {
     ['https://*.sites.example.org', 'https://*.sites.example.org'],
     ['https://*.my-site.wordpress.example.org', 'https://*.my-site.wordpress.example.org'],
     ['https://news.wordpress.com', 'https://news.wordpress.com'],
+    // One ArcGIS site, not a wildcard over all of them.
+    ['https://my-site-my-org.hub.arcgis.com', 'https://my-site-my-org.hub.arcgis.com'],
+    ['https://storymaps.arcgis.com', 'https://storymaps.arcgis.com'],
     ['https://xn--bcher-kva.example', 'https://xn--bcher-kva.example'],
     // Pages opened from a file: the one scheme-source, as that token.
     ['file:', 'file:'],
@@ -118,6 +121,11 @@ describe('validateEmbedOrigin', () => {
     ['https://*.wordpress.com', 'shared_host'],
     ['https://*.github.io', 'shared_host'],
     ['https://*.pages.dev', 'shared_host'],
+    // Every Hub site, every ArcGIS Online organisation, all of ArcGIS.
+    ['https://*.hub.arcgis.com', 'shared_host'],
+    ['https://*.maps.arcgis.com', 'shared_host'],
+    ['https://*.arcgis.com', 'shared_host'],
+    ['https://*.HUB.ArcGIS.com', 'shared_host'],
     ['https://*.com', 'wildcard_too_broad'],
     ['https://bücher.example', 'not_ascii'],
     ['', 'required'],
