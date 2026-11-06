@@ -7,10 +7,13 @@ that activates the mode are implemented. A pipeline declaring
 `visualize heatmap --data-encoded --color-scale-file` now reaches the
 globe as data.
 
-Not yet done: the zyra release + `ZYRA_SCHEDULER_IMAGE` bump, so no
-deployed runner can produce these frames yet, and the manual
-first-slice confirmation under §Verification. Downloads remain the
-recorded follow-up.
+The zyra side has shipped: the luma writer in zyra v0.1.53, and the
+north-up fix for GeoTIFF-sourced frames in v0.1.54, so v0.1.54 is
+the floor. The runner's committed default (`ZYRA_IMAGE_DEFAULT` in
+`.github/workflows/zyra-run.yml`) has been v0.1.56 since November
+2026, so a node needs no `ZYRA_SCHEDULER_IMAGE` override to produce
+these frames. Not yet done: the manual first-slice confirmation
+under §Verification. Downloads remain the recorded follow-up.
 
 Backwards compatibility holds at every boundary a dataset crosses — the
 encoder argv, the row serializer, the overlay bundle, and the publish

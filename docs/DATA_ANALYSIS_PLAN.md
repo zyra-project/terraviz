@@ -85,10 +85,11 @@ framesDigest }` against `GET /api/v1/datasets/{id}/frames/{index}` — with an
 exact `startTime` + `PT1H` period, which changes the time-axis architecture
 materially (see below).
 
-> The parent plan's header still says the zyra release and
-> `ZYRA_SCHEDULER_IMAGE` bump are outstanding and that no deployed runner can
-> produce these frames. That text is stale as of the rows above and should be
-> refreshed; it is cited here only to note that it should not be relied on.
+> The parent plan's header used to say the zyra release and
+> `ZYRA_SCHEDULER_IMAGE` bump were outstanding and that no deployed runner
+> could produce these frames. That was stale as of the rows above, and the
+> header has since been refreshed (November 2026, when the runner's default
+> image moved to zyra v0.1.56).
 
 ---
 
