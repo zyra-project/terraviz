@@ -2,11 +2,16 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The Zyra Project
 
-"""Render a colorbar legend PNG (opaque white background) for a data-encoded dataset.
+"""Render a colorbar legend PNG (opaque white background) for a `legend_ref`.
 
-TerraViz on `main` has no auto gradient legend — the colorbar comes from a
-`legend_ref` image you attach via the publisher form → Media. This makes one
-that matches your palette's colormap + vmin/vmax + units. Match the `base`
+Not for a data-encoded dataset on a current TerraViz node: since September 2026
+`main` draws the colorbar itself from the row's `color_scale`
+(`src/ui/colorbarUI.ts`), and a `legend_ref` image beside it still shows in
+the info panel and goes to Orbit's vision model while no longer following the
+palette, stretch or threshold the viewer picks. Use this only for consumers
+that read `legend_ref` and not `color_scale` (a node built before the colorbar
+landed; the web zip download, whose manifest carries no color scale). See
+SKILL.md §8 and references/data-encoded-contract.md §6. Match the `base`
 colormap to the workflow's palette so the legend agrees with the globe.
 
 Usage:

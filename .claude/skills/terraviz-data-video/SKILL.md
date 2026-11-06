@@ -57,7 +57,8 @@ Prefer **NOAA Open Data on S3 (NODD)** over agency THREDDS servers.
 datacenter/CI IPs** — the workflow will fail on fetch no matter how correct the
 pipeline is. `*.s3.amazonaws.com` buckets (e.g. `noaa-gefs-pds`) are open.
 GEFS-Aerosols on `noaa-gefs-pds` *is* the operational descendant of GSL's
-FV3-Chem, so it usually covers the same fields. See
+FV3-Chem, so it usually covers the same fields. NODD also carries daily SST
+(OISST v2.1), but as NetCDF, which the workflow path cannot read yet. See
 [references/data-sources.md](references/data-sources.md).
 
 ### 2. Find the exact variable in the GRIB2
@@ -70,7 +71,8 @@ is `COLMD` (column mass density), one record per species
 distribution. See [references/data-sources.md](references/data-sources.md).
 
 ### 3. Set vmin/vmax from the real data, not a guess
-`vmin: 0`, and **`vmax` ≈ the p99.9** of the field. A vmax that's ~10× too high
+For a one-sided field (a concentration, where zero is clear air): `vmin: 0`,
+and **`vmax` ≈ the p99.9** of the field. A vmax that's ~10× too high
 maps everything into the low/transparent end → a near-black globe (the single
 most common "it's broken" symptom). `scripts/sample_grib_range.py` prints
 percentiles; use p99.9 as vmax, or p99.99 to keep the most intense cores from
@@ -79,6 +81,19 @@ clipping. Cross-check against a sibling dataset via `node_inspect.py reference`.
 Note that `vmax` is no longer merely cosmetic once a dataset is data-encoded: it
 *is* the calibration. Anything above it clamps to full luma and then reads back
 wrong under the cursor.
+
+**Diverging fields (anomalies, differences) break the p99.9 rule.** It assumes
+the rare tail is noise; in an anomaly the rare tail is often the event. NOAA
+OISST v2.1 `anom` sampled on 2026-11-04 had a global p99.9 of about +6.5 °C,
+while on the days sampled from 25 October to 4 November 16–48% of Niño 1+2
+cells sat above +6 °C during a strong El Niño. A p99.9 `vmax` clamps the
+phenomenon itself, and every clamped cell hovers as exactly `vmax`,
+understating the event where people point. Use **symmetric** limits
+(`vmin = −vmax`, so zero sits mid-scale and equal colors mean equal
+magnitudes), sized to the extremes of the region of interest over the whole
+window rather than to a global percentile. The palette needs different
+settings too (step 5). Detail in
+[references/data-encoded-contract.md](references/data-encoded-contract.md) §5.
 
 **State `vmin`/`vmax`/`units` in the source data's own units — do not
 pre-convert them for readability.** TerraViz restates the scale at display time
@@ -125,6 +140,15 @@ Pick a **light-starting** colormap so faint plumes read on the black globe, and
 follow the aerosol color convention (smoke `YlOrBr`, dust `Oranges`). Details +
 the classified format in [references/pipeline-reference.md](references/pipeline-reference.md).
 
+**Don't reuse that default on a diverging field.** `transparent_range: 12`
+hides the bottom ~5% of the scale and `blend_range: 48` fades the next ~19%,
+which on an anomaly is nearly half its cold side. The strongest cold values
+fade or vanish while the warm side shows in full, and the globe reads as "only
+warming". Use a diverging base with nothing faded:
+`{"type":"continuous","base":"RdBu_r","transparent_range":1,"blend_range":0,"overall_alpha":1.0}`.
+`transparent_range: 1` still hides luma code 0, which zyra also writes for
+no-data (land); see the contract reference §5 for why that matters.
+
 ### 6. Write the metadata template
 Plain-language title/abstract for the globe; self-updating dates via
 `{{valid_iso:...}}`; allowed fields only. See
@@ -136,13 +160,26 @@ Validate the YAML against the repo's *actual* validators + placeholder renderer
 publish log shows `render_encoding, color_scale` were attached. Recipes in
 [references/verification.md](references/verification.md).
 
-### 8. Legend
-There is **no auto gradient legend on `main`** — the dynamic colorbar (built
-from `color_scale`) lives on the unmerged `claude/data-driven-video-analytics`
-branch. Until it ships, generate a colorbar PNG with `scripts/make_legend.py`
-and attach it to the dataset's `legend_ref` via the publisher form → Media. The
-`color_scale` still powers the **hover readout**, which is the live value
-surface on `main`.
+### 8. Legend: nothing to attach
+Once the row carries `render_encoding: data-luma` and a parseable
+`color_scale`, the globe draws a floating **colorbar** from it
+(`src/ui/colorbarUI.ts`): the dataset's own ramp, round-number ticks and the
+units, shown whenever Tools → Legend is on (the default). Tapping it opens the
+display transforms (`src/services/colorScaleDisplay.ts`): palette swap
+(Original, Viridis, Magma, Turbo, Grayscale), range stretch and threshold.
+Each is just a different 256×1 LUT, so viewers recolor without a re-encode, and
+none of them changes a reported value. Tools → Analyze… adds area-weighted
+statistics, a histogram, transects, a zonal profile and CSV export over the
+displayed frame. All of it reads the same `color_scale` as the hover readout:
+if hover works, the colorbar will too.
+
+**Don't attach a `legend_ref` PNG to a data-encoded dataset** (the old
+stopgap). The colorbar replaces it on the floating legend, but the image still
+shows as the info-panel thumbnail and is still sent to Orbit's vision model to
+describe. It can't follow a palette swap, a stretch or a re-tuned `vmax`, so it
+ends up contradicting the live bar. `scripts/make_legend.py` stays only for
+consumers that read `legend_ref` and not `color_scale`
+([references/data-encoded-contract.md](references/data-encoded-contract.md) §6).
 
 ## The data-encoded contract (why the gotchas exist)
 
@@ -152,7 +189,7 @@ These are the rules that silently produce a wrong-looking dataset. Each has a
 
 | Rule | Why | Symptom if violated |
 |---|---|---|
-| `data_encoded: true` **and** `color_scale_file` both set | publish scrapes the heatmap stage for both to attach `render_encoding`+`color_scale`; the client needs both or it shows raw luma | grayscale globe, no hover, no legend |
+| `data_encoded: true` **and** `color_scale_file` both set | publish scrapes the heatmap stage for both to attach `render_encoding`+`color_scale`; the client needs both or it shows raw luma | grayscale globe, no hover, no colorbar |
 | Palette via `--cmap-file`/`cmap_inline`, **not** `--cmap` | `--cmap` is ignored for data-encoded; `build_color_scale(None)` writes a black→white ramp | detailed but **grayscale** globe (hover works) |
 | **No** `width`/`height` on the heatmap stage | resizing would average values never measured; zyra hard-errors | stage fails: "cannot be used with --data-encoded" |
 | Regrid to 4096×2048 **in `reproject`**, not heatmap | reprojection resamples the *data* (legit); image resize averages *luma* | (how you get 4K without breaking #3) |
@@ -161,6 +198,7 @@ These are the rules that silently produce a wrong-looking dataset. Each has a
 | Cycle `LAG` must cover the *whole* run posting, not just f000 | a cycle posts incrementally over ~6–7 h; a short lag finds early frames and 404s late ones | fetch fails partway through the frame list |
 | **No** `basemap` on a data-encoded heatmap | data-encoded bypasses the basemap; the globe supplies Earth | ignored at best; keep it clean |
 | `vmin`/`vmax` from real data | required; a too-high vmax pushes everything near 0 | near-black globe with faint detail |
+| Diverging field: symmetric limits, no aerosol fade | p99.9 clamps the event; `transparent_range: 12`/`blend_range: 48` hide and fade nearly half the cold side | event core one flat color that hovers as `vmax`; anomaly reads one-sided |
 
 ## When the request can't be built
 
@@ -173,12 +211,16 @@ identical from a failed run. Full table + escalation guidance in
   doesn't list it, so `/validate` rejects it. Blocked today: `acquire thredds`,
   `visualize sos`, `visualize vector`, `visualize timeseries`, `acquire api`.
   Fix = add the entry *and* confirm the pinned runner container has it.
-- **Tier 2 — zyra gap.** Nobody can. Confirmed: **unit rescaling** (nothing
-  multiplies a variable by a constant, which is why `kg m-2` hovers as
-  `0.0000124`) and **vector/shapefile/GeoJSON geometry** (the toolkit is
+- **Tier 2 — zyra gap.** Nobody can. Confirmed: **arithmetic on values**
+  (nothing multiplies, sums or subtracts; SI prefixes are now restated by the
+  client, so readability is no longer the reason, but a real change of
+  quantity or a node-chosen anomaly baseline still can't be computed),
+  **NetCDF input to `convert-format`** (every input goes through the GRIB-only
+  decoder), and **vector/shapefile/GeoJSON geometry** (the toolkit is
   raster-only). Fix = an upstream `NOAA-GSL/zyra` issue.
 - **Tier 3 — client gap.** The pipeline could emit it; the globe can't consume
-  it (dynamic legend, non-equirectangular sources, animated vector fields).
+  it (diverging-aware display transforms, the color scale in a zip download,
+  non-equirectangular sources, animated vector fields).
 
 Say which tier it is, what the fix costs, and — importantly — what the user can
 do *today*. A blocked request usually has a decent raster-shaped workaround;
@@ -191,16 +233,26 @@ Match the symptom, don't guess. Deep version in
 [references/data-encoded-contract.md](references/data-encoded-contract.md) §Debugging.
 
 - **Black globe, but detail appears when you zoom/adjust** → `vmax` too high.
-  Sample the range, set `vmax ≈ p99.9`.
+  Sample the range, set `vmax ≈ p99.9` (one-sided fields). Pulling the
+  colorbar's range high end down confirms it in seconds without changing any
+  value.
 - **Grayscale (detail visible), hover values work** → palette is grayscale:
   `--cmap` was used (ignored) or no palette at all. Add `cmap_inline`/`cmap_file`.
-- **Grayscale, NO hover values, NO legend** → the color scale never attached.
+- **Grayscale, NO hover values, NO colorbar** → the color scale never attached.
   Check the publish log for `WARN: … publishing as a picture`; confirm
   `data_encoded: true` + `color_scale_file` are both present; confirm publishing
   went through the Zyra dispatch path (not a manual upload); check the dataset
   row's `render_encoding`/`color_scale` columns.
-- **Color + hover work, but no legend** → expected on `main`. Attach a
-  `legend_ref` PNG, or ship the analytics branch.
+- **Color + hover work, but no colorbar** → Tools → Legend is off; it gates
+  the colorbar as well as legend images. (VR and the multi-monitor outputs
+  draw no colorbar at all.)
+- **A second, static legend in the info panel that disagrees after a
+  recolor** → a `legend_ref` PNG on a data-encoded row. Remove it; the form
+  can't, so see the contract reference §6.
+- **An anomaly's core is one flat color and hovers as exactly `vmax`** → p99.9
+  limits on a diverging field. Go symmetric, sized to the region (§3). **Its
+  strongest cold values are faint or missing** → the aerosol
+  `transparent_range`/`blend_range` were reused (§5).
 - **`403 Forbidden` on fetch** → Cloudflare blocking the CI IP. Switch to an
   S3/NODD source (§1).
 - **`unrecognized arguments: --X`** → the pinned zyra container doesn't support
@@ -218,7 +270,9 @@ Match the symptom, don't guess. Deep version in
   min/max/mean/percentiles. Use it to pick `vmax` and to confirm your
   `--pattern` matches exactly one record. Needs `pip install eccodes numpy`.
 - `scripts/make_legend.py` — renders a colorbar PNG (opaque white background)
-  matching a colormap + vmin/vmax + units, for the stopgap `legend_ref`. Needs
+  matching a colormap + vmin/vmax + units, for a `legend_ref`. **Not for a
+  data-encoded dataset on a current node**, which draws its own colorbar (§8);
+  only for consumers that read `legend_ref` and not `color_scale`. Needs
   `pip install matplotlib pillow numpy`.
 
 **HTTP tip that bites in both directions:** default `python-urllib` and
@@ -228,11 +282,12 @@ TerraViz nodes themselves. Send an ordinary UA (the bundled scripts do).
 ## References
 
 - [references/data-encoded-contract.md](references/data-encoded-contract.md) —
-  the full contract with code-level *why* (which functions gate each behavior)
-  and the complete debugging map.
+  the full contract with code-level *why* (which functions gate each behavior),
+  diverging-field calibration, the colorbar, and the complete debugging map.
 - [references/data-sources.md](references/data-sources.md) — Cloudflare vs
   S3/NODD, GEFS-Aerosols paths + variable inventory, the `.idx` inspection
-  recipe, GEFS-Aerosols ↔ FV3-Chem lineage.
+  recipe, GEFS-Aerosols ↔ FV3-Chem lineage, OISST v2.1 SST (NetCDF) and why
+  it can't be templated or read yet.
 - [references/pipeline-reference.md](references/pipeline-reference.md) —
   stage-by-stage arg reference, the placeholder grammar (incl. what it *can't*
   express), metadata template rules, palette specs, `cmap_inline`, cadence/fps.
