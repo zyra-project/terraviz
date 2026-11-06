@@ -27,12 +27,6 @@
  *     NOAA OISST on NODD). The same matching rule applies: pair it
  *     with a `cycle_date` of identical INTERVAL and LAG, or the
  *     directory and the file name can name different months.
- *
- * A *look-back* window over a daily archive is written with a
- * different LAG per frame rather than a negative offset: frame k of
- * `{{cycle_date:P1D:P{k}D}}` is the UTC day k days before the run,
- * because the cycle is `floor((now − LAG) / INTERVAL)`. Offsets stay
- * forward-only, the forecast-hour meaning they were built for.
  *   - `{{valid_iso:INTERVAL:LAG[:OFFSET]}}` — the *valid time* of a
  *     frame, as `YYYY-MM-DDTHH:MM:SSZ`. OFFSET is the frame's
  *     forecast hour as an ISO duration, so `f042` of a 6-hourly
@@ -43,6 +37,12 @@
  *     `--datetime-format %Y%m%dT%H%M%S` parses back out. Pair it
  *     with `process convert-format --output-names` to name frames by
  *     valid time instead of by the cycle-relative source name.
+ *
+ * A *look-back* window over a daily archive is written with a
+ * different LAG per frame rather than a negative offset: frame k of
+ * `{{cycle_date:P1D:P{k}D}}` is the UTC day k days before the run,
+ * because the cycle is `floor((now − LAG) / INTERVAL)`. Offsets stay
+ * forward-only, the forecast-hour meaning they were built for.
  *
  * Shared by the save/dispatch-time validator (`functions/`) and the
  * runner (`cli/`), which interpolates just before writing

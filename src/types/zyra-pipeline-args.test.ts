@@ -193,6 +193,26 @@ describe('renderArgPlaceholders', () => {
       '202612/20261230',
     )
   })
+  it('takes the month in UTC, whatever the host time zone', () => {
+    // Cycles that land where a local-time reading changes the month:
+    // 00:00Z on the 1st reads as the 31st west of Greenwich, and
+    // 18:00Z on the 31st reads as the 1st east of it. A runner on a
+    // non-UTC host must still fetch the month the S3 key is filed
+    // under, so the zone is forced rather than left to CI's default.
+    const saved = process.env.TZ
+    try {
+      for (const tz of ['UTC', 'America/Denver', 'Asia/Tokyo']) {
+        process.env.TZ = tz
+        const nov = { now: new Date('2026-11-04T12:00:00Z'), runId: CTX.runId }
+        expect(renderArgPlaceholders('{{cycle_month:P1D:P3D}}', nov), tz).toBe('202611')
+        const oct = { now: new Date('2026-10-31T19:00:00Z'), runId: CTX.runId }
+        expect(renderArgPlaceholders('{{cycle_month:PT6H:PT0H}}', oct), tz).toBe('202610')
+      }
+    } finally {
+      if (saved === undefined) delete process.env.TZ
+      else process.env.TZ = saved
+    }
+  })
   it('expresses a daily look-back window by varying the lag', () => {
     // The shape a month-filed daily archive (NOAA OISST on NODD)
     // needs: frame k is the UTC day k days back, its directory the
