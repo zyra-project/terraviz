@@ -1317,9 +1317,9 @@ contradict.
   a redirect to the current object; for a legacy Vimeo-hosted video, a
   freshly signed link through the proxy `manifest.ts` already uses;
   404 unless `FILES_ENABLED`.
-- **Counting** (§9.14): the platform classifier and the Analytics
-  Engine writer as a pure module, the files route's counts, the
-  nightly rollup into D1, and the Delivery panel in
+- **Counting** (§9.14): the three-layer platform classifier and the
+  Analytics Engine writer as a pure module, the files route's counts,
+  the nightly rollup into D1, and the Delivery panel in
   `/publish/analytics`.
 
 **Tests.** Pure tests for the encoder arguments and the manifest; a
@@ -1373,8 +1373,11 @@ the `sos-mpeg4` packaging.
 (`src/ui/publisher/components/dataset-form.ts`): the reduction method,
 defaulted by the dataset's kind and explained in one sentence each
 from §7.1's table; which outputs to build; the last build's status
-with links. Until D2c lands, D2a and D2b are turned on per dataset
-through the publish API and the CLI.
+with links. Beside it, for admins, a list of registered partner tags
+(§9.14), managed the way the Embedding card manages allowed sites.
+Until D2c lands, D2a and D2b are turned on per dataset through the
+publish API and the CLI, and partner tags are registered through the
+API.
 
 **Tests.** Unit tests for the form section; a scene in
 `scripts/screenshots/scenes.ts` and a smoke assertion, as `CLAUDE.md`
@@ -1644,27 +1647,66 @@ second, ungated path.
   (and which kind — OpenSpace asset, SOS directory, frame zip, KMZ), a
   capabilities document, a layer configuration (TileJSON or GDAL XML),
   a tile, a WMS map, a STAC read.
-- **The platform**, from two sources, the more reliable first:
-  1. **A tag TerraViz wrote itself.** Every address a bundle or script
-     hands out carries `via=<platform>`: the OpenSpace asset's URLs say
-     `openspace`, the Hub registration script's items say
-     `arcgis-hub`, the KMZ says `google-earth`, the SOS directory says
-     `sos`. A capabilities document fetched with a tag writes the same
-     tag into the tile addresses it advertises, so a layer an ArcGIS
-     user adds from a Hub item stays attributed to Hub. The values
-     come from a fixed list, anything else counts as `other`, and the
-     tag is left out of the edge-cache key so it cannot split the
-     cache. D1 checks that each tool keeps a query string it is given.
-  2. **Otherwise, a bucket from the User-Agent**: classified on the
-     server into a short fixed list (`arcgis`, `qgis`, `gdal`,
-     `cesium`, `browser`, `video-player`, `other`, `unknown`) and then
-     discarded, the way `src/analytics/session.ts` buckets the app's
-     own (privacy invariant 2 in `docs/ANALYTICS_CONTRIBUTING.md`).
-     This is a heuristic — OpenSpace reading tiles through GDAL looks
-     like any other GDAL client — which is why the tag comes first.
+- **The platform**, worked out in three layers, most reliable first —
+  see *How the platform vocabulary grows*, below.
 - **The dataset** (its catalog id, as the app's `layer_loaded` already
   reports), the variant or format, and **the country**, from
   Cloudflare's edge as the ingest function stamps it (invariant 1).
+
+**How the platform vocabulary grows.** A fixed list undercounts
+exactly the platforms nobody predicted. An open one lets any client
+write any string into the node's analytics: a way to spam the counts,
+and a way for personal data to land in a field that privacy invariant 3
+says must never hold raw free text. So the vocabulary has three layers,
+each open in a different way.
+
+1. **Artifact tags: closed, but they grow with the code.** One value per
+   kind of thing TerraViz generates — the OpenSpace asset, the GDAL XML,
+   the KMZ, the SOS directory, the frame zip, the Hub item, the
+   TileJSON. Each generator declares its own tag in a
+   `satisfies Record<…>` table beside it, the pattern `outputUI` uses
+   for its health badges, so a new generator cannot compile without one
+   and the list never needs updating separately. These tags name
+   TerraViz's outputs, not the world's platforms, which is why a closed
+   list is right for them.
+2. **Partner tags: open, but registered.** A node admin registers a tag
+   in the portal — a lowercase slug and a sentence on who it is for —
+   the way the Embedding card manages allowed sites. A partner who
+   builds TerraViz links into their own product (a museum's kiosk
+   software, the WordPress plugin, a planetarium vendor's catalog) asks
+   for a tag and uses it. Registering one is a row, not a release. A
+   `via` value nobody registered is counted as `unregistered`, so no
+   one can mint a category by sending it, and a retired tag is never
+   reused, so old counts keep their meaning.
+3. **Discovery: for the platforms nobody told us about.** A request
+   with no recognised tag is classified from what every client already
+   sends: the User-Agent's first product token (`QGIS`, `GDAL`, `VLC`,
+   `curl` — RFC 9110's `name/version` form, version dropped) and, for a
+   browser request, the registrable domain of its `Origin` header
+   (`arcgis.com`, `cesium.com`, a museum's site). Names on a curated
+   list are stored as themselves. Anything else is stored as `other`
+   plus a 12-hex hash of the normalised token or domain — invariant 3's
+   treatment of free text — kept only in Analytics Engine's 30–90-day
+   window and never rolled up. An "unknown clients" report ranks those
+   hashes by frequency, and identifying a busy one means testing
+   candidate names against it, the dictionary lookup
+   `docs/ANALYTICS_CONTRIBUTING.md` already describes. Once identified,
+   a platform is promoted: onto the curated list (a code change, and
+   append-only under invariant 8) or as a partner tag (a row).
+
+**Carriers: a query parameter first, a header where a client can send
+one.** The `via` parameter is the universal carrier because it survives
+inside the configuration files and capabilities documents other tools
+read. A header cannot be the main carrier. ArcGIS, QGIS, Second Life
+and OpenSpace send their own headers with no way to add ours, and in a
+browser a custom header turns every tile request into two, because it
+forces a CORS preflight. So the node also accepts a registered tag in a
+`TerraViz-Via` request header, for clients that can set one and are not
+browsers — TerraViz's own CLI, a partner's server-side integration. And
+the GDAL XML it generates sets GDAL's `<UserAgent>` element to a
+product token naming the asset
+([GDAL WMS](https://gdal.org/en/stable/drivers/raster/wms.html)), a
+second signal that survives if a tool rewrites the address.
 
 **What is never recorded:** an IP address, a raw User-Agent, or any
 identifier that would link one request to another — no session id at
@@ -1816,6 +1858,14 @@ stays a draft for review.
     ingest function keeps it, except for virtual-world viewers
     (§9.14). Worth confirming it is wanted for reporting, since a
     count without it is safer still.
+20. **Major versions for known platforms?** QGIS 3.28 against 3.40
+    decides who sees WMTS time, which is worth knowing when choosing
+    what to support; a version is also one more detail per request.
+    Off by default.
+21. **Unrecognised product tokens and domains: hashed or raw?** Hashing
+    (§9.14) follows invariant 3. Raw software names would be easier to
+    read, and are text any client can set to anything. The
+    `analytics-reviewer`'s call when D2a builds it.
 
 ---
 
