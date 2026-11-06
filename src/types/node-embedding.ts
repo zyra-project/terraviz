@@ -139,13 +139,20 @@ export const SHARED_HOST_SUFFIXES = [
   'wixsite.com',
   'squarespace.com',
   'weebly.com',
-  // ArcGIS: every Hub site is `<site>.hub.arcgis.com` and every ArcGIS
-  // Online organisation `<org>.maps.arcgis.com`, so a wildcard over
-  // either admits every customer's. A real site is a single host; an
-  // operator embedding into StoryMaps lists https://storymaps.arcgis.com.
+  // ArcGIS: every Hub site is `<site>.hub.arcgis.com`, every ArcGIS
+  // Online organisation `<org>.maps.arcgis.com`, and a legacy Open Data
+  // site `<site>.opendata.arcgis.com`, so a wildcard over any of them
+  // admits every customer's. An operator's own site is a single host.
+  // Some ArcGIS apps share one origin among all their authors instead
+  // (https://storymaps.arcgis.com, https://experience.arcgis.com): listing
+  // one admits every author's page, because frame-ancestors matches the
+  // framing page's origin and never its path. They are accepted, since
+  // refusing them would make embedding there impossible; the operator is
+  // choosing that breadth knowingly.
   'arcgis.com',
   'maps.arcgis.com',
   'hub.arcgis.com',
+  'opendata.arcgis.com',
 ] as const
 
 /** Why an origin was refused. The portal words each one; the API
