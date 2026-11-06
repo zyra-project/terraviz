@@ -52,6 +52,7 @@ import {
   type EmbedPolicy,
 } from '../../../types/node-embedding'
 import { handleSessionError, publisherSend } from '../api'
+import { busyButton } from './busy-button'
 import type { EmbedPolicyProblem, NodeSettingsResponse } from '../types'
 
 const SETTINGS_ENDPOINT = '/api/v1/publish/node-settings'
@@ -274,24 +275,6 @@ let cardCount = 0
  *  left-to-right order inside a translated right-to-left sentence. */
 function isolate(value: string): string {
   return `\u2068${value}\u2069`
-}
-
-/** A button that stays focusable while its action runs. Setting
- *  `disabled` on the focused button sends focus to `<body>`, which
- *  loses a keyboard or screen-reader user's place; `aria-disabled`
- *  says the same thing and keeps focus where it was. */
-function busyButton(button: HTMLButtonElement) {
-  let busy = false
-  return {
-    get busy(): boolean {
-      return busy
-    },
-    set(next: boolean): void {
-      busy = next
-      if (next) button.setAttribute('aria-disabled', 'true')
-      else button.removeAttribute('aria-disabled')
-    },
-  }
 }
 
 /** Build the card. Its state lives in the closure; the saved policy
@@ -639,6 +622,9 @@ export function buildEmbeddingCard(options: EmbeddingCardOptions): HTMLElement {
 
       const body = { embedding: { mode, origins: mode === 'list' ? sent.map(s => s.value) : [] } }
       saving.set(true)
+      // Said in words too: a screen reader does not reliably announce
+      // aria-disabled changing on the focused button.
+      status.textContent = t('publisher.nodeProfile.saving')
       void publisherSend<NodeSettingsResponse>(SETTINGS_ENDPOINT, body, { method: 'PUT', fetchFn })
         .then(res => {
           if (res.ok) {

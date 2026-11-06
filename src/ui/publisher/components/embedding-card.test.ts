@@ -233,7 +233,7 @@ describe('buildEmbeddingCard', () => {
         origins: ['https://www.example.org', 'https://example.org', 'https://news.example.org'],
       },
     })
-    await until(() => view.q('[role="status"]')?.textContent !== '', 'the saved message')
+    await until(() => !view.save()!.hasAttribute('aria-disabled'), 'the save to finish')
     expect(view.q('.publisher-nodeprofile-actions [role="status"]')?.textContent).toMatch(/saved/i)
   })
 
@@ -363,6 +363,7 @@ describe('buildEmbeddingCard', () => {
     expect(save.disabled).toBe(false)
     expect(save.getAttribute('aria-disabled')).toBe('true')
     expect(document.activeElement).toBe(save)
+    expect(card.querySelector('.publisher-nodeprofile-actions [role="status"]')?.textContent).toBe('Saving…')
     // A second press while busy sends nothing more.
     save.click()
     release()
@@ -523,10 +524,7 @@ describe('buildEmbeddingCard: what this node sends now', () => {
     choose(view.radio('self'))
     view.save()!.click()
     await until(() => view.puts().length === 1, 'the PUT')
-    await until(
-      () => (view.q('.publisher-nodeprofile-actions [role="status"]')?.textContent ?? '').length > 0,
-      'the save outcome',
-    )
+    await until(() => !view.save()!.hasAttribute('aria-disabled'), 'the save to finish')
     view.qa<HTMLButtonElement>('button').find(b => b.textContent === 'Check again')!.click()
     await until(
       () => (view.q('.publisher-nodeprofile-embed-live [role="status"]')?.textContent ?? '').includes("doesn't match"),
