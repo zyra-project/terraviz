@@ -356,9 +356,20 @@ Ice-covered cells are an open question (below).
   `MAX_PIPELINE_ARG_LIST_ITEMS` (128). Measured against
   `MAX_PIPELINE_JSON_BYTES`, 90 frames' templated URL lists come to
   roughly 25 KB of 64 KiB.
-- **Daily schedule; newest frame at LAG `P3D`** if the run can be
-  pinned after ~10:00Z, otherwise **`P4D`**. Posting has run as late as
-  D+3 08:31Z, and a missing input fails the run.
+- **Daily schedule; the posting hour goes into the LAG: `P{k}DT10H`.**
+  The run hour can't be pinned, for two reasons:
+  - `computeNextRunAt` anchors a daily schedule's phase to when the
+    workflow was saved or enabled (`workflow-schedule.ts`), and GitHub
+    Actions adds jitter its own comment calls "hours-scale under load";
+  - "Run now" fires whenever someone clicks it.
+
+  A bare `P3D` would therefore ask for D−3 at any hour, including
+  before that day's file has posted. Posting has run as late as D+3
+  08:31Z, and a missing input fails the run. With `P3DT10H` the newest
+  frame is D−3 from 10:00Z and D−4 before it. That keeps 1.5 h of
+  margin over the latest posting observed, at any run hour: 09:59Z
+  renders `20261102` and 10:00Z renders `20261103` (verified, the
+  Zyra Workflow Author review).
 - **All `_preliminary` for v1.** One filename shape, and the files
   persist (observed). The tradeoff: frames older than ~16 days show
   preliminary values where a final exists. A deterministic refinement
@@ -388,7 +399,7 @@ Ice-covered cells are an open question (below).
 | # | Gap | Tier | Where | What fixes it |
 |---|---|---|---|---|
 | **G1** | `convert-format` cannot read NetCDF. `cmd_convert_format` sends every input through `grib_decode`, which is GRIB-only. The `--format netcdf` passthrough fetches the file, but `heatmap`'s NetCDF reader returns `ds[var].values` unsqueezed, `(1, 1, 720, 1440)`, and `normalize_to_luma` raises *"Data must be a 2-D grid (got 4-D)"*. Even squeezed, it would write south-up, 0–360 frames. | 2 (zyra) | `NOAA-GSL/zyra` `processing/__init__.py`, `processing/grib_utils.py`, `visualization/cli_utils.py` | NetCDF input to `convert-format --format geotiff --var`: open with xarray, CF-decode (`scale_factor`, `_FillValue` → NaN), squeeze singleton dims, write north-up with nodata tagged. The rest of the existing chain then works unchanged. Issue body in Appendix A. **Blocking.** |
-| **G2** | No `YYYYMM` placeholder. The S3 key has a month directory, and the grammar formats only `YYYYMMDD`, `HH`, ISO and compact instants. | TerraViz grammar | `src/types/zyra-pipeline-args.ts` (shared by the validator and the runner) | Add `{{cycle_month:INTERVAL:LAG}}` → `YYYYMM`. A look-back window then needs no negative offsets: frame *k* uses LAG `P{k}D`, and the cycle maths (`floor((now − LAG) / P1D)`) lands on day *k* before today. **Built** (`cycle_month`, with tests in `zyra-pipeline-args.test.ts` and `workflow-validators.test.ts`; grammar documented in `ZYRA_INTEGRATION_PLAN.md` §Pipeline arg placeholders). |
+| **G2** | No `YYYYMM` placeholder. The S3 key has a month directory, and the grammar formats only `YYYYMMDD`, `HH`, ISO and compact instants. | TerraViz grammar | `src/types/zyra-pipeline-args.ts` (shared by the validator and the runner) | Add `{{cycle_month:INTERVAL:LAG}}` → `YYYYMM`. A look-back window then needs no negative offsets: frame *k* uses LAG `P{k}D` (plus the posting hour, D5), and the cycle maths (`floor((now − LAG) / P1D)`) lands on day *k* before today. **Built** (`cycle_month`, with tests in `zyra-pipeline-args.test.ts` and `workflow-validators.test.ts`; grammar documented in `ZYRA_INTEGRATION_PLAN.md` §Pipeline arg placeholders). |
 | **G3** | No reserved no-data band: NaN shares code 0 with `vmin`. | 2 (zyra) | `luma_writer.normalize_to_luma`, `build_color_scale` | Reserve a low band for NaN, sized from the HLS coast measurement in D4 (4–8 codes, not 1). Write data above it and emit the matching `dataMinLuma`. Workaround in D4. **Not blocking.** |
 | **G4** | Display transforms are not diverging-aware, and on this field that is a **known defect**, not just a missing nicety. **Stretch:** the handles move by data quantile (`colorbarUI.ts`), so on a warm-skewed field an even drag puts white near +0.5 °C, and cells from 0 to +0.5 °C turn **blue**, a sign flip. **Palette swap:** the choices are viridis, magma, turbo and grayscale, so an anomaly loses its zero. **Threshold:** it keeps one band only, so "\|anomaly\| > 1 °C" can't be shown. | 3 (client) **and the sidecar contract** | `src/services/colorScaleDisplay.ts`, `src/ui/colorbarUI.ts`, `src/types/color-scale.ts`, zyra `build_color_scale` | `ColorScale` has no field saying a scale is diverging or where its centre is. The fix therefore starts as a **contract change**: a centre field, written by zyra and parsed by the client, which routes to the TerraViz Federation Reviewer. The client then offers a diverging palette, keeps a stretch symmetric about the centre, and allows a two-sided threshold. This is the "anomaly and difference display modes" follow-up in `DATA_ENCODED_VIDEO_PLAN.md`, and this dataset is its first user. **Not blocking the default view, but schedule it:** any visitor can tap the colorbar. |
 | **G5** | No arithmetic. Rebaselining (D1 b) needs `sst − climatology`. | 2 (zyra) | No `process` command | The same upstream ask as unit rescaling (`capability-gaps.md`). Plus a hosted 1991–2020 day-of-year climatology, and a person's sign-off. **Only if D1 (b) is chosen.** |
@@ -416,7 +427,8 @@ to it and does not replace it until the data-encoded one has proven out.
 
 Not paste-ready: G1 doesn't exist yet, and the lists are shown
 with three of their 90 entries. Every list runs **oldest first**, LAG
-`P92D` → `P3D`. Generate the lists rather than typing them.
+`P92DT10H` → `P3DT10H` (D5). Generate the lists rather than typing
+them: one wrong index silently names a frame for the wrong day.
 
 ```yaml
 stages:
@@ -427,20 +439,20 @@ stages:
       var: anom                                   # G1
       output_dir: /work/tif
       inputs:
-        - https://noaa-cdr-sea-surface-temp-optimum-interpolation-pds.s3.amazonaws.com/data/v2.1/avhrr/{{cycle_month:P1D:P92D}}/oisst-avhrr-v02r01.{{cycle_date:P1D:P92D}}_preliminary.nc   # G2 (built)
-        # … P91D … P4D …
-        - https://noaa-cdr-sea-surface-temp-optimum-interpolation-pds.s3.amazonaws.com/data/v2.1/avhrr/{{cycle_month:P1D:P3D}}/oisst-avhrr-v02r01.{{cycle_date:P1D:P3D}}_preliminary.nc
+        - https://noaa-cdr-sea-surface-temp-optimum-interpolation-pds.s3.amazonaws.com/data/v2.1/avhrr/{{cycle_month:P1D:P92DT10H}}/oisst-avhrr-v02r01.{{cycle_date:P1D:P92DT10H}}_preliminary.nc   # G2 (built)
+        # … P91DT10H … P4DT10H …
+        - https://noaa-cdr-sea-surface-temp-optimum-interpolation-pds.s3.amazonaws.com/data/v2.1/avhrr/{{cycle_month:P1D:P3DT10H}}/oisst-avhrr-v02r01.{{cycle_date:P1D:P3DT10H}}_preliminary.nc
       output_names:
-        - "{{valid_compact:P1D:P92D}}.tif"
+        - "{{valid_compact:P1D:P92DT10H}}.tif"
         # …
-        - "{{valid_compact:P1D:P3D}}.tif"
+        - "{{valid_compact:P1D:P3DT10H}}.tif"
   - stage: process
     command: reproject
     args:
       inputs:
-        - /work/tif/{{valid_compact:P1D:P92D}}.tif
+        - /work/tif/{{valid_compact:P1D:P92DT10H}}.tif
         # …
-        - /work/tif/{{valid_compact:P1D:P3D}}.tif
+        - /work/tif/{{valid_compact:P1D:P3DT10H}}.tif
       output_dir: /work/wrapped
       dst_bounds: [-180, -90, 180, 90]
       width: 4096
@@ -450,9 +462,9 @@ stages:
     command: heatmap
     args:
       inputs:
-        - /work/wrapped/{{valid_compact:P1D:P92D}}.tif
+        - /work/wrapped/{{valid_compact:P1D:P92DT10H}}.tif
         # …
-        - /work/wrapped/{{valid_compact:P1D:P3D}}.tif
+        - /work/wrapped/{{valid_compact:P1D:P3DT10H}}.tif
       output_dir: /work/images/frames
       data_encoded: true
       color_scale_file: /work/color-scale.json
@@ -500,6 +512,11 @@ Temperature Anomaly - Real-time*.
 1. Validate the YAML against the repo's validators and placeholder
    renderer (`.claude/skills/terraviz-data-video/references/verification.md`).
    Render every input URL for today and check each returns 200.
+   Then, on the rendered pipeline, assert that the date in
+   `convert-format` `inputs[i]` equals the date in `output_names[i]`
+   and in the `reproject` and `heatmap` `inputs[i]`, for every `i`.
+   Nothing else catches a misaligned list: the frame would carry
+   another day's name, and `scan-frames` would believe it.
 2. Smoke run as a **disabled draft**. The publish log must show
    `render_encoding, color_scale` attached. A `WARN: … publishing as a
    picture` is a failure.
@@ -603,9 +620,14 @@ sign-off. No person has reviewed this plan yet.
 - **Do preliminary files persist by policy or by accident?** If NCEI
   starts pruning them, older frames need the final name. That is the
   D5 refinement, promoted from optional.
-- **Can a workflow's schedule pin the time of day?** That decides
-  `P3D` against `P4D`.
 - **Does the runner pass a non-ASCII `units` string through intact?**
+- **Should the validator require one INTERVAL:LAG per string?** Both
+  code reviews of G2 suggested it. Every `cycle_*` placeholder in one
+  string would have to share its INTERVAL and LAG, so a URL's month
+  directory and file name cannot name different days. Look-back frames
+  are separate strings, so it would not touch them. Left for the
+  maintainer, because it tightens what already-saved workflows must
+  satisfy at their next dispatch.
 
 ## Appendix A — upstream zyra issue drafts (not filed)
 

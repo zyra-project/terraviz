@@ -76,8 +76,15 @@ failure** (a URL with a missing date would fetch garbage).
   `floor((now−LAG)/INTERVAL)·INTERVAL`, epoch-anchored. INTERVAL/LAG are
   ISO-8601 durations. Give paired placeholders the same INTERVAL and LAG.
 - **Look-back windows** (observations, not forecasts): vary the LAG per frame
-  instead of using an offset. `{{cycle_date:P1D:P3D}}` … `{{cycle_date:P1D:P92D}}`
-  is the last 90 UTC days, newest three days back. Offsets are forward-only.
+  instead of using an offset. Offsets are forward-only.
+  - `{{cycle_date:P1D:P3DT10H}}` … `{{cycle_date:P1D:P92DT10H}}` is the last
+    90 UTC days.
+  - Put the archive's posting hour into the LAG (`T10H` here). A run's hour
+    can't be pinned (schedule phase follows save time, plus GHA jitter, plus
+    "Run now"), so a bare `P3D` asks for a file that may not have posted yet.
+  - Generate the per-frame lists, and check that `inputs[i]`, `output_names[i]`
+    and every downstream `inputs[i]` render the same date.
+  - `cycle_month` gives the month of a day; `P1M` is not accepted.
 - `{{valid_iso:INTERVAL:LAG[:OFFSET]}}` → ISO valid time of a forecast hour
   (cycle + OFFSET). `{{valid_compact:…}}` → `YYYYMMDDTHHMMSS` (filename-safe;
   pairs with `--output-names` + `scan-frames --datetime-format %Y%m%dT%H%M%S`).

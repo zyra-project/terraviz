@@ -763,8 +763,8 @@ Model-output sources embed the forecast cycle in their paths
 (`gefs.20260724/00/...`), so a static pipeline can only fetch one
 frozen cycle. String arg values (including array elements) may
 reference `{{run_date}}`, `{{run_id}}`, and the parameterized
-`{{cycle_date:INTERVAL:LAG}}` / `{{cycle_hour:INTERVAL:LAG}}` pair
-(ISO-8601 durations; cycle = floor((now − LAG) / INTERVAL) · INTERVAL,
+`{{cycle_date:INTERVAL:LAG}}` / `{{cycle_hour:INTERVAL:LAG}}` /
+`{{cycle_month:INTERVAL:LAG}}` family (ISO-8601 durations; cycle = floor((now − LAG) / INTERVAL) · INTERVAL,
 epoch-anchored). The validator checks placeholder syntax at save and
 dispatch time (`invalid_placeholder`); the runner interpolates them
 just before writing `pipeline.json`. Unlike the metadata sidecar's
@@ -794,7 +794,17 @@ An observational archive also wants a window that looks *back* from
 the run rather than forward from a cycle. That is written by varying
 the LAG per frame, not with an offset: `{{cycle_date:P1D:P{k}D}}` is
 the UTC day k days before the run. Offsets stay forward-only, the
-forecast-hour meaning they were built for. Worked example:
+forecast-hour meaning they were built for.
+
+Put the archive's posting hour into the LAG, too. A run's hour can't be
+pinned: a daily schedule's phase is set by when the workflow was saved
+or enabled, GitHub Actions adds jitter, and "Run now" fires whenever.
+So `P{k}DT10H` is k days back from 10:00Z, and k+1 days back before
+it, so the newest frame never names a day whose file posts later that
+morning.
+
+`cycle_month` names the month of a day; it cannot step by calendar
+months, and `P1M` is not a duration the grammar accepts. Worked example:
 [`SST_ANOMALY_DATA_ENCODED_PLAN.md`](SST_ANOMALY_DATA_ENCODED_PLAN.md).
 
 ## Inline palettes

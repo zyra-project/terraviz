@@ -75,3 +75,36 @@ Run `scripts/sample_grib_range.py <s3-grib2-url> "<idx-regex>"`. It confirms the
 regex matches one record and prints min/max/mean/percentiles. Use it to set
 `vmax ≈ p99.9`. Observed GEFS column aerosols (kg m⁻²) run ~1e-6 background to
 ~7e-4 in heavy plumes; p99.9 is typically ~2–3e-4.
+
+## NOAA OISST v2.1 (daily SST + SST anomaly), on open S3 — NetCDF, not GRIB2
+
+The daily 0.25° Optimum Interpolation SST analysis is on the open bucket
+**`noaa-cdr-sea-surface-temp-optimum-interpolation-pds`**. It is the analysis
+behind CPC's weekly Niño indices. Worked through end to end in
+`docs/SST_ANOMALY_DATA_ENCODED_PLAN.md`.
+
+**Path grammar (filed by month):**
+```
+https://noaa-cdr-sea-surface-temp-optimum-interpolation-pds.s3.amazonaws.com/data/v2.1/avhrr/{YYYYMM}/oisst-avhrr-v02r01.{YYYYMMDD}_preliminary.nc
+```
+- Template with `{{cycle_month:P1D:LAG}}` / `{{cycle_date:P1D:LAG}}`, both with
+  the same LAG. The final file drops `_preliminary`.
+- **Posting:** preliminary ~D+2 08:30Z, seen as late as D+3 08:31Z; final
+  ~D+16. Preliminary files have stayed in the bucket after the final lands,
+  but that is observed behaviour, not a documented policy.
+- A look-back window varies LAG per frame, with the posting hour in it:
+  `P3DT10H` … `P92DT10H` (`pipeline-reference.md` §2).
+
+**Contents:** one NetCDF4 per day, about 1.5 MB, with `sst`, `anom`, `err` and
+`ice`.
+- Each is `int16` with `scale_factor 0.01` and `_FillValue -999` over land.
+- Dims are `(time=1, zlev=1, lat=720, lon=1440)`.
+- Latitude runs **south to north**; longitude runs **0–360**.
+- `anom` is against a **1971–2000** climatology, per the file's own
+  metadata. CPC's indices use 1991–2020, and CPC now classifies events
+  with *relative* indices.
+
+**Blocked today:** zyra's `convert-format` sends every input through the
+GRIB-only `grib_decode`, so there is no NetCDF → GeoTIFF path. `heatmap
+--data-encoded --var anom` on the raw `.nc` rejects the 4-D array. Upstream ask
+drafted in the plan's Appendix A.
