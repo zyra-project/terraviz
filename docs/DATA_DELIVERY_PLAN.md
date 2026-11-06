@@ -17,6 +17,12 @@ sibling document already records a test.
 **Last reviewed:** 2026-11-06 (first draft, from desk research on each
 consumer; §9's phased implementation added the same day.)
 
+**Decision recorded:** 2026-11-06, by the maintainer: rasters for
+analysis (§4.2, §9.11) carry the producer's own values on the
+producer's own grid, taken before any regridding — not the field
+resampled for the picture. Recorded in §9.11, which holds the text it
+was made on.
+
 **Revisit when any of the following becomes true:**
 
 - A consumer in §2 ships a capability this plan assumes it lacks, or
@@ -537,9 +543,9 @@ NetCDF before they render anything — publish those values, not the
 pictures made from them:
 
 - **A Cloud-Optimised GeoTIFF per time step**, written by the Zyra
-  runner from the source field after reprojection and before
-  rendering, listed as an asset on its STAC item. QGIS, ArcGIS Pro
-  and any GDAL-based tool read it over HTTP.
+  runner from the source field on the producer's own grid, before any
+  regridding (§9.11), listed as an asset on its STAC item. QGIS,
+  ArcGIS Pro and any GDAL-based tool read it over HTTP.
 - **An ArcGIS Image adapter**: a script an operator runs with their own
   ArcGIS credentials that uploads the source fields as a
   multidimensional *tiled* imagery layer (the kind that can be public),
@@ -1522,19 +1528,31 @@ pinned image carries):
 - **They last one job.** Only the current run's steps are on disk;
   history accumulates in R2 only if each run uploads its own.
 
-**Which grid is a person's decision.** In the canonical template,
-`reproject` upsamples the 0.25° source to 4096×2048 *bilinearly* — new
-values between the producer's grid points. Those are right for the
-picture and are not what the producer published. The pre-regrid files
-in `/work/tif/` are the producer's own values on its own grid, on the
-0–360° longitude layout `reproject` exists to unwrap. Publishing the
-first as "the data" is the case `CLAUDE.md` sends to a person: the node
-deriving a value its producer never published. The proposal is to
-publish from `/work/tif/`, wrapped to ±180° losslessly at native
-resolution with nearest-neighbour resampling, and to let the
-regridded files go only where a workflow already reprojects at native
-resolution. The Scientific Data Steward reviews it; the dataset's
-producer or the node's science reviewer decides it.
+**Decided: the producer's grid** (the maintainer, 2026-11-06). In the
+canonical template, `reproject` upsamples the 0.25° source to
+4096×2048 *bilinearly*, making new values between the producer's grid
+points. Those are right for the picture and are not what the producer
+published, and publishing them as the data is the case `CLAUDE.md`
+sends to a person: the node deriving a value its producer never
+published. The decision, on the proposal as written here: the COGs
+come from the pre-regrid files in `/work/tif/`, the producer's own
+values on its own grid. What that means for the step:
+
+- **The longitudes are rotated, not resampled.** Those files are on
+  the 0–360° layout `reproject` exists to unwrap. Where 180° is a whole
+  number of columns, as it is at 0.25°, the COG is the same columns
+  rotated to ±180°, every cell keeping its value and its own position.
+  Where it is not, the COG keeps the producer's 0–360° layout, which
+  GDAL-based tools read, rather than shift a cell to make it fit.
+- **The data grid and the picture grid differ, on purpose.** For the
+  GEFS-Aerosols template the COG is 1440 columns wide where the frames
+  are 4096; the tiles and videos are
+  pictures (§4.1, §6) and keep the regridded field.
+- **A workflow that already reprojects at native resolution**, with no
+  `width` and `height` on its reproject stage, has no new values in
+  `/work/wrapped/` and may publish from there.
+- **Every COG says where its values came from**: the source file, the
+  grid, and that no resampling was applied, in its STAC item.
 
 **Tests.** Values at sample points equal the source field's within the
 compression's stated error; the STAC validators pass with the new
@@ -1663,12 +1681,9 @@ stays a draft for review.
     dependency, or Cloudflare's image transformations for picture
     layers only, leaving data layers without WMS? D4's CPU gate
     measures the first; this question decides whether to try it.
-16. **Which grid do D5a's COGs carry**: the producer's own (`/work/tif/`,
-    wrapped losslessly) or the regridded field (`/work/wrapped/`,
-    bilinear in the canonical template)? Whether the field is on the
-    runner's disk at all is answered — it is, for workflows built from
-    the shipped templates (§9.11). Which values to publish is a
-    person's decision, not this plan's.
+16. *Decided 2026-11-06 by the maintainer:* D5a's COGs carry the
+    producer's own values on its own grid, taken before any regridding
+    (§9.11). Kept here so the numbering of the others holds.
 
 ---
 
