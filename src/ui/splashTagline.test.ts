@@ -130,10 +130,42 @@ describe('the splash markup and stylesheet', () => {
   const html = readFileSync(resolve(process.cwd(), 'src/index.html'), 'utf8')
   const css = readFileSync(resolve(process.cwd(), 'src/styles/loading.css'), 'utf8')
 
+  const doc = new DOMParser().parseFromString(html, 'text/html')
+  const LIVE_ROLES = new Set(['alert', 'log', 'marquee', 'status', 'timer'])
+  // Explicit attributes, plus <output>'s implicit status role. A role
+  // list is read by its first token, the one a browser tries first.
+  const isLiveRegion = (el: Element): boolean => {
+    const live = el.getAttribute('aria-live')
+    if (live !== null && live !== 'off') return true
+    const role = el.getAttribute('role')?.trim().split(/\s+/)[0] ?? (el.tagName === 'OUTPUT' ? 'status' : '')
+    return LIVE_ROLES.has(role)
+  }
+
   it('starts the subtitle held back, and never announced', () => {
-    const tag = html.match(/<div class="loading-subtitle"[^>]*>/)?.[0] ?? ''
-    expect(tag).toContain(`${SPLASH_TAGLINE_PENDING_ATTR}="pending"`)
-    expect(tag).toContain('aria-live="off"')
+    const subtitle = doc.querySelector('.loading-subtitle')
+    expect(subtitle).not.toBeNull()
+    expect(subtitle!.getAttribute(SPLASH_TAGLINE_PENDING_ATTR)).toBe('pending')
+    // No live region round it at all, rather than a nested
+    // aria-live="off": WebKit skips an "off" and announces the change
+    // through the next live ancestor.
+    const live: string[] = []
+    for (let el: Element | null = subtitle; el; el = el.parentElement) {
+      if (isLiveRegion(el)) live.push(el.id || el.className || el.tagName)
+    }
+    expect(live).toEqual([])
+  })
+
+  it('announces only through the status line, and politely', () => {
+    const screen = doc.getElementById('loading-screen')
+    expect(screen).not.toBeNull()
+    const regions = [screen!, ...screen!.querySelectorAll('*')].filter(isLiveRegion)
+    expect(regions.map(el => el.id)).toEqual(['loading-status'])
+    expect(regions[0].getAttribute('role')).toBe('status')
+    expect(regions[0].getAttribute('aria-live') ?? 'polite').toBe('polite')
+    // aria-busy lets a screen reader hold back changes inside the
+    // screen, and the only changes there are the progress meant to be
+    // heard.
+    expect(screen!.hasAttribute('aria-busy')).toBe(false)
   })
 
   it('hides it while pending, and reveals it by itself as a safety net', () => {

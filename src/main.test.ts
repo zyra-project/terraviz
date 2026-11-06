@@ -85,7 +85,7 @@ function setupDOM(): void {
       </div>
     </div>
     <div id="error-message" class="hidden"></div>
-    <div id="a11y-announcer" aria-live="assertive"></div>
+    <div id="a11y-announcer" aria-live="polite" aria-atomic="true"></div>
     <div id="latlng-display" class="hidden"></div>
     <div id="info-panel" class="hidden">
       <div id="info-header"><span id="info-title"></span></div>
