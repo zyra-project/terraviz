@@ -129,71 +129,142 @@ export function stopPlaybackLoop(state: PlaybackState): void {
 /** A playback action a bare key stands for (see `playbackShortcutFor`). */
 export type PlaybackShortcut = 'toggle' | 'step-back' | 'step-forward' | 'start' | 'end'
 
-const SHORTCUT_BY_CODE: Readonly<Record<string, PlaybackShortcut>> = {
-  Space: 'toggle',
-  ArrowLeft: 'step-back',
-  ArrowRight: 'step-forward',
-  Home: 'start',
-  End: 'end',
-}
+/** Keyed on `KeyboardEvent.key`, not `code`, so the keypad's arrows,
+ *  Home and End (NumLock off) count, as every other key handler in the
+ *  app reads them. */
+const SHORTCUT_BY_KEY: ReadonlyMap<string, PlaybackShortcut> = new Map([
+  [' ', 'toggle'],
+  ['ArrowLeft', 'step-back'],
+  ['ArrowRight', 'step-forward'],
+  ['Home', 'start'],
+  ['End', 'end'],
+])
 
 const EDITABLE = 'input, textarea, select, [contenteditable]:not([contenteditable="false"])'
 
-/** What moves its caret, selection or value by the arrows, Home and End.
- *  A `role="toolbar"` is not here: the transport bar is one, moves
- *  between its buttons by Tab, and keeps the arrows for stepping. */
-const ARROW_OWNERS = [
-  EDITABLE,
-  ...['listbox', 'menu', 'menubar', 'radiogroup', 'tablist', 'tree', 'treegrid', 'grid',
-    'slider', 'spinbutton', 'scrollbar', 'combobox', 'textbox', 'searchbox'].map((role) => `[role="${role}"]`),
-].join(', ')
+/** Roles that move their caret, selection or value by the arrows, Home
+ *  and End. A `role="toolbar"` is not one: the transport bar is a
+ *  toolbar, moves between its buttons by Tab, and keeps the arrows for
+ *  stepping. */
+export const ARROW_OWNER_ROLES = [
+  'listbox', 'menu', 'menubar', 'radiogroup', 'tablist', 'tree', 'treegrid', 'grid',
+  'slider', 'spinbutton', 'scrollbar', 'combobox', 'textbox', 'searchbox',
+] as const
 
-/** What Space presses, ticks, opens or types into: every arrow owner
- *  (a focused list or grid acts on its current item), and controls. */
-const SPACE_OWNERS = [
-  ARROW_OWNERS,
-  'button, a[href], summary',
-  ...['button', 'link', 'checkbox', 'switch', 'radio', 'tab', 'option', 'menuitem',
-    'menuitemcheckbox', 'menuitemradio', 'treeitem', 'gridcell'].map((role) => `[role="${role}"]`),
-].join(', ')
+/** Roles of a single control Space acts on. */
+export const SPACE_OWNER_ROLES = [
+  'button', 'link', 'checkbox', 'switch', 'radio', 'tab', 'option', 'menuitem',
+  'menuitemcheckbox', 'menuitemradio', 'treeitem', 'gridcell',
+] as const
 
-const DIALOGS = 'dialog, [role="dialog"], [role="alertdialog"]'
+const byRole = (roles: readonly string[]): string => roles.map((role) => `[role="${role}"]`).join(', ')
+
+/** What takes the arrows, Home and End for itself: fields, arrow-driven
+ *  widgets, and a native media player, which seeks with them. */
+const ARROW_OWNERS = [EDITABLE, 'video[controls], audio[controls]', byRole(ARROW_OWNER_ROLES)].join(', ')
+
+/** What Space acts on or belongs to: every arrow owner (a focused list or
+ *  grid acts on its current item, a player plays), a control it presses,
+ *  and a link, where Space does not follow it but scrolls the panel the
+ *  link sits in rather than acting somewhere else. */
+const SPACE_OWNERS = [ARROW_OWNERS, 'button, a[href], summary', byRole(SPACE_OWNER_ROLES)].join(', ')
+
+/** Places whose keys are their own: a dialog, and the open browse
+ *  panel, whose catalog views (graph, map, timeline) take the arrows. */
+const KEY_OWNING_REGIONS = 'dialog, [role="dialog"], [role="alertdialog"], #browse-overlay:not(.hidden)'
 
 /** The parts of a `KeyboardEvent` the decision reads. */
 export type ShortcutKeyEvent = Pick<
   KeyboardEvent,
-  'code' | 'target' | 'defaultPrevented' | 'isComposing' | 'altKey' | 'ctrlKey' | 'metaKey' | 'shiftKey'
+  'key' | 'target' | 'defaultPrevented' | 'isComposing' | 'altKey' | 'ctrlKey' | 'metaKey' | 'shiftKey'
 >
 
 /**
  * The playback action a key press stands for, or `null` when the key
  * belongs to something else. Space toggles playback; the arrows step
- * a frame, Home rewinds and End fast-forwards.
+ * a frame, Home jumps to the start and End to the end.
  *
  * The page-wide handler once took these keys everywhere but a text
  * field and the browse panel, and cancelled their default action. So
- * Space did nothing on any focused button, link or switch (Space
- * presses a button through that default action) and toggled the
- * dataset behind it instead; arrow keys stepped the dataset from
- * inside the Help panel; and Alt+Left, the browser's Back, stepped a
- * frame. A key is left alone when:
+ * Space did nothing on any focused button or switch (Space presses a
+ * button through that default action) and toggled the dataset behind
+ * it instead; arrow keys stepped the dataset from inside the Help
+ * panel; and Alt+Left, the browser's Back, stepped a frame. A key is
+ * left alone when:
  *   - it has a modifier, or is part of an IME composition, or a
- *     handler before this one already took it;
- *   - focus is inside a dialog, whose keys are its own;
- *   - for Space, focus is on something Space presses or types into;
- *   - for the others, focus is in a field or a widget that moves by
- *     arrow (a list, a menu, a tab list, a slider).
+ *     handler before this one already took it. That includes the
+ *     globe: MapLibre takes the arrows on a focused map to pan it, so
+ *     there they move the view and step nothing;
+ *   - focus is inside a dialog or the open browse panel;
+ *   - for Space, focus is on something it acts on or belongs to;
+ *   - for the others, focus is in a field, a media player or a widget
+ *     that moves by arrow (a list, a menu, a tab list, a slider).
  */
 export function playbackShortcutFor(event: ShortcutKeyEvent): PlaybackShortcut | null {
-  const shortcut = SHORTCUT_BY_CODE[event.code]
+  const shortcut = SHORTCUT_BY_KEY.get(event.key)
   if (!shortcut) return null
   if (event.defaultPrevented || event.isComposing) return null
   if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return null
   const target = event.target
   if (!(target instanceof Element)) return shortcut
-  if (target.closest(DIALOGS)) return null
+  if (target.closest(KEY_OWNING_REGIONS)) return null
   if (target.closest(shortcut === 'toggle' ? SPACE_OWNERS : ARROW_OWNERS)) return null
   return shortcut
+}
+
+/** What a playback key can drive. */
+export interface PlaybackKeyActions {
+  /** Whether a tour is playing or paused. While one is, Space drives
+   *  the tour, as its own play button does, and not the dataset. */
+  tourRunning(): boolean
+  toggleTour(): void
+  /** Whether a video dataset is loaded, so there is playback to drive. */
+  hasPlayback(): boolean
+  toggle(): void
+  step(direction: -1 | 1): void
+  rewind(): void
+  fastForward(): void
+}
+
+/**
+ * The page-wide playback key handler: `playbackShortcutFor`'s decision,
+ * then what the key drives. Returns whether it took the key.
+ *
+ * A key with nothing to drive keeps its default (an image dataset or
+ * nothing loaded, and no tour). A held Space is taken but acts once,
+ * since auto-repeat would toggle playback, and announce it, thirty times
+ * a second; held arrows keep stepping, which is how one scrubs.
+ *
+ * This is the only key handler for playback. A tour once added a second
+ * one for Space with the old filter, which cancelled Space on every
+ * focused button while a tour ran and, with nothing focused, toggled
+ * the tour and the dataset at once.
+ */
+export function handlePlaybackKey(
+  event: ShortcutKeyEvent & Pick<KeyboardEvent, 'repeat' | 'preventDefault'>,
+  actions: PlaybackKeyActions,
+): boolean {
+  const shortcut = playbackShortcutFor(event)
+  if (!shortcut) return false
+  const tour = shortcut === 'toggle' && actions.tourRunning()
+  if (!tour && !actions.hasPlayback()) return false
+  event.preventDefault()
+  if (shortcut === 'toggle' && event.repeat) return true
+  switch (shortcut) {
+    case 'toggle':
+      if (tour) actions.toggleTour()
+      else actions.toggle()
+      break
+    case 'step-back': actions.step(-1); break
+    case 'step-forward': actions.step(1); break
+    case 'start': actions.rewind(); break
+    case 'end': actions.fastForward(); break
+    default: {
+      const unhandled: never = shortcut
+      return unhandled
+    }
+  }
+  return true
 }
 
 // --- Transport controls ---

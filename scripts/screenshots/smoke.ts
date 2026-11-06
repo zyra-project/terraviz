@@ -118,6 +118,25 @@ const checks: Check[] = [
     },
   },
   {
+    // The page-wide playback shortcuts once took Space everywhere but a
+    // text field and cancelled it, video or not, so no focused button
+    // could be pressed with it; this fails against that handler. With no
+    // video loaded the handler now takes nothing, so this pins the
+    // end-to-end path, not the button rule itself: the unit tests in
+    // `playbackController.shortcuts.test.ts` pin that, since a video
+    // cannot be relied on to load in this headless Chromium.
+    name: 'Space presses a focused button rather than toggling playback',
+    fixtures: catalogFixtures(),
+    async run(page) {
+      await gotoApp(page, '/')
+      const toggle = page.locator('#tools-menu-toggle')
+      await toggle.waitFor({ state: 'visible' })
+      await toggle.focus()
+      await page.keyboard.press(' ')
+      await page.locator('#tools-menu-popover').waitFor({ state: 'visible', timeout: 5_000 })
+    },
+  },
+  {
     name: 'a node with Orbit turned off offers no Orbit',
     fixtures: [
       { url: '/api/v1/node-profile', json: { profile: null, features: { orbit: false } } },

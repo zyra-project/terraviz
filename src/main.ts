@@ -70,7 +70,7 @@ import {
 } from './analytics'
 import {
   createPlaybackState, startPlaybackLoop, stopPlaybackLoop,
-  togglePlayPause, rewind, fastForward, stepFrame, onScrub, playbackShortcutFor,
+  togglePlayPause, rewind, fastForward, stepFrame, onScrub, handlePlaybackKey,
   updatePlayButton, toggleCaptions, resetPlaybackState, initPlaybackPositioning,
   seekToDate,
   checkSeekToDate,
@@ -83,7 +83,7 @@ import {
 import { resolveRegion } from './data/regions'
 import type { PublicEvent } from './services/eventsService'
 import { TourEngine, type TourTelemetryMeta } from './services/tourEngine'
-import { showTourControls, hideTourControls, hideAllTourTextBoxes, hideAllTourImages, hideAllTourVideos, hideAllTourPopups, hideAllTourQuestions } from './ui/tourUI'
+import { showTourControls, hideTourControls, tourRunning, toggleTourPlayback, hideAllTourTextBoxes, hideAllTourImages, hideAllTourVideos, hideAllTourPopups, hideAllTourQuestions } from './ui/tourUI'
 import { initLegendForDataset, clearLegendCache, loadConfig, readCurrentTime } from './services/docentService'
 import { isMobile, IS_MOBILE_NATIVE, getCloudTextureUrl } from './utils/deviceCapability'
 import { hasWebGL2 } from './utils/webglSupport'
@@ -4068,24 +4068,19 @@ class InteractiveSphere {
       })
     }
 
-    // Keyboard shortcuts. Which keys are playback's, and which belong
-    // to a focused control, a dialog or the browser, is decided by
-    // `playbackShortcutFor`.
+    // Keyboard shortcuts: which keys are playback's, and what they drive
+    // (the tour while one runs), is `handlePlaybackKey`'s to decide.
     document.addEventListener('keydown', (e) => {
-      const browseOverlay = document.getElementById('browse-overlay')
-      if (browseOverlay && !browseOverlay.classList.contains('hidden') && browseOverlay.contains(e.target as Node)) return
-
-      const shortcut = playbackShortcutFor(e)
-      if (!shortcut) return
-      e.preventDefault()
       const announce = (m: string): void => this.announce(m)
-      switch (shortcut) {
-        case 'toggle': togglePlayPause(this.hlsService, this.appState, announce); break
-        case 'step-back': stepFrame(-1, this.hlsService, this.appState, this.playback, announce); break
-        case 'step-forward': stepFrame(1, this.hlsService, this.appState, this.playback, announce); break
-        case 'start': rewind(this.hlsService, this.appState, this.playback, announce); break
-        case 'end': fastForward(this.hlsService, this.appState, this.playback, announce); break
-      }
+      handlePlaybackKey(e, {
+        tourRunning,
+        toggleTour: toggleTourPlayback,
+        hasPlayback: () => this.hlsService !== null,
+        toggle: () => togglePlayPause(this.hlsService, this.appState, announce),
+        step: (direction) => stepFrame(direction, this.hlsService, this.appState, this.playback, announce),
+        rewind: () => rewind(this.hlsService, this.appState, this.playback, announce),
+        fastForward: () => fastForward(this.hlsService, this.appState, this.playback, announce),
+      })
     })
   }
 

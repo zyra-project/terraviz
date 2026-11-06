@@ -167,6 +167,16 @@ describe('helpUI', () => {
       expect(feedbackTab.getAttribute('aria-selected')).toBe('true')
       expect(guideTab.getAttribute('aria-selected')).toBe('false')
     })
+
+    // Alt+Left is the browser's Back; it must not switch tabs or be cancelled.
+    it.each(['altKey', 'ctrlKey', 'metaKey'] as const)('leaves an arrow held with %s alone', (modifier) => {
+      const guideTab = document.getElementById('help-tab-guide')!
+      guideTab.click()
+      const evt = new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true, [modifier]: true })
+      guideTab.dispatchEvent(evt)
+      expect(guideTab.getAttribute('aria-selected')).toBe('true')
+      expect(evt.defaultPrevented).toBe(false)
+    })
   })
 
   describe('feedback form validation', () => {
