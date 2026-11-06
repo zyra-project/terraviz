@@ -234,8 +234,11 @@ Match the symptom, don't guess. Deep version in
 
 - **Black globe, but detail appears when you zoom/adjust** → `vmax` too high.
   Sample the range, set `vmax ≈ p99.9` (one-sided fields). Pulling the
-  colorbar's range high end down confirms it in seconds without changing any
-  value.
+  colorbar's range high end down is only a partial check: it brings up values
+  in the faded part of the ramp, but nothing encoded into the palette's hidden
+  codes (0–11 for the aerosol default), because the stretch keeps the
+  no-data mask. Those come back only with a lower `vmax` and regenerated
+  frames.
 - **Grayscale (detail visible), hover values work** → palette is grayscale:
   `--cmap` was used (ignored) or no palette at all. Add `cmap_inline`/`cmap_file`.
 - **Grayscale, NO hover values, NO colorbar** → the color scale never attached.

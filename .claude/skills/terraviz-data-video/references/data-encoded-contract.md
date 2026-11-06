@@ -116,9 +116,13 @@ nearly every pixel into the low/transparent end → a near-black globe with fain
 detail. This is *distinct* from "scale not attached": here the scale IS attached
 (hover works, the colorbar shows), the coverage is just wrong. For a one-sided
 field, set `vmax ≈ p99.9` of the field (sample it —
-`scripts/sample_grib_range.py`). The colorbar's range stretch confirms the
-diagnosis quickly: pull the high end down and the field appears, with every
-hover value unchanged.
+`scripts/sample_grib_range.py`). The colorbar's range stretch is only a
+partial check. Pulling the high end down brings up values in the faded
+(`blend_range`) part of the ramp, but not values encoded into the hidden
+`transparent_range` codes (0–11 for the aerosol default): `buildDisplayLut`
+tests the no-data mask against the original code under every stretch
+(`src/services/colorScaleDisplay.ts`). Those come back only with a lower
+`vmax` and regenerated frames.
 
 ### Diverging fields
 
