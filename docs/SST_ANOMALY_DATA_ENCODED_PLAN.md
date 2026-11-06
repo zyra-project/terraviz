@@ -10,8 +10,7 @@ person has reviewed it yet.
 Last reviewed: 2026-11-06
 
 Revisit when: the zyra NetCDF-input gap (G1) closes or is refused
-upstream; the `cycle_month` placeholder (G2) lands; zyra emits a
-reserved no-data band (G3); the node's science reviewer decides the
+upstream; zyra emits a reserved no-data band (G3); the node's science reviewer decides the
 baseline question (D1); NCEI changes the OISST v2.1 bucket layout or
 stops keeping `_preliminary` files after the final ones land; CPC's
 ENSO status changes from what §Why quotes.
@@ -70,9 +69,10 @@ variable, the latest 90 days of `_preliminary` files, at a symmetric
 **−10 to +10 °C** range on a diverging palette with land masked. It is
 the analysis behind CPC's weekly Niño indices. It reaches a CI
 runner (open S3), posts about two days after the fact rather than ten,
-and is 1.5 MB a day. Two things in our own toolchain block it today,
-both small and named below (G1 in zyra, G2 in TerraViz's placeholder
-grammar). One science decision needs a person: the anomaly baseline (D1).
+and is 1.5 MB a day. One gap in our toolchain still blocks it: G1,
+in zyra, named below. The other, G2 in TerraViz's placeholder grammar,
+is now built. One science decision needs a person: the anomaly baseline
+(D1).
 
 ## Sources considered
 
@@ -388,7 +388,7 @@ Ice-covered cells are an open question (below).
 | # | Gap | Tier | Where | What fixes it |
 |---|---|---|---|---|
 | **G1** | `convert-format` cannot read NetCDF. `cmd_convert_format` sends every input through `grib_decode`, which is GRIB-only. The `--format netcdf` passthrough fetches the file, but `heatmap`'s NetCDF reader returns `ds[var].values` unsqueezed, `(1, 1, 720, 1440)`, and `normalize_to_luma` raises *"Data must be a 2-D grid (got 4-D)"*. Even squeezed, it would write south-up, 0–360 frames. | 2 (zyra) | `NOAA-GSL/zyra` `processing/__init__.py`, `processing/grib_utils.py`, `visualization/cli_utils.py` | NetCDF input to `convert-format --format geotiff --var`: open with xarray, CF-decode (`scale_factor`, `_FillValue` → NaN), squeeze singleton dims, write north-up with nodata tagged. The rest of the existing chain then works unchanged. Issue body in Appendix A. **Blocking.** |
-| **G2** | No `YYYYMM` placeholder. The S3 key has a month directory, and the grammar formats only `YYYYMMDD`, `HH`, ISO and compact instants. | TerraViz grammar | `src/types/zyra-pipeline-args.ts` (shared by the validator and the runner) | Add `{{cycle_month:INTERVAL:LAG}}` → `YYYYMM`. A look-back window then needs no negative offsets: frame *k* uses LAG `P{k}D`, and the cycle maths (`floor((now − LAG) / P1D)`) lands on day *k* before today. Small change with tests. Routes to the Zyra Workflow Author and the Code Reviewer. **Blocking.** |
+| **G2** | No `YYYYMM` placeholder. The S3 key has a month directory, and the grammar formats only `YYYYMMDD`, `HH`, ISO and compact instants. | TerraViz grammar | `src/types/zyra-pipeline-args.ts` (shared by the validator and the runner) | Add `{{cycle_month:INTERVAL:LAG}}` → `YYYYMM`. A look-back window then needs no negative offsets: frame *k* uses LAG `P{k}D`, and the cycle maths (`floor((now − LAG) / P1D)`) lands on day *k* before today. **Built** (`cycle_month`, with tests in `zyra-pipeline-args.test.ts` and `workflow-validators.test.ts`; grammar documented in `ZYRA_INTEGRATION_PLAN.md` §Pipeline arg placeholders). |
 | **G3** | No reserved no-data band: NaN shares code 0 with `vmin`. | 2 (zyra) | `luma_writer.normalize_to_luma`, `build_color_scale` | Reserve a low band for NaN, sized from the HLS coast measurement in D4 (4–8 codes, not 1). Write data above it and emit the matching `dataMinLuma`. Workaround in D4. **Not blocking.** |
 | **G4** | Display transforms are not diverging-aware, and on this field that is a **known defect**, not just a missing nicety. **Stretch:** the handles move by data quantile (`colorbarUI.ts`), so on a warm-skewed field an even drag puts white near +0.5 °C, and cells from 0 to +0.5 °C turn **blue**, a sign flip. **Palette swap:** the choices are viridis, magma, turbo and grayscale, so an anomaly loses its zero. **Threshold:** it keeps one band only, so "\|anomaly\| > 1 °C" can't be shown. | 3 (client) **and the sidecar contract** | `src/services/colorScaleDisplay.ts`, `src/ui/colorbarUI.ts`, `src/types/color-scale.ts`, zyra `build_color_scale` | `ColorScale` has no field saying a scale is diverging or where its centre is. The fix therefore starts as a **contract change**: a centre field, written by zyra and parsed by the client, which routes to the TerraViz Federation Reviewer. The client then offers a diverging palette, keeps a stretch symmetric about the centre, and allows a two-sided threshold. This is the "anomaly and difference display modes" follow-up in `DATA_ENCODED_VIDEO_PLAN.md`, and this dataset is its first user. **Not blocking the default view, but schedule it:** any visitor can tap the colorbar. |
 | **G5** | No arithmetic. Rebaselining (D1 b) needs `sst − climatology`. | 2 (zyra) | No `process` command | The same upstream ask as unit rescaling (`capability-gaps.md`). Plus a hosted 1991–2020 day-of-year climatology, and a person's sign-off. **Only if D1 (b) is chosen.** |
@@ -412,9 +412,9 @@ not update itself, and it has to be redone each time. The existing
 picture-path SST anomaly feed keeps running either way. This plan adds
 to it and does not replace it until the data-encoded one has proven out.
 
-## The target pipeline (after G1 and G2)
+## The target pipeline (after G1)
 
-Not paste-ready: G1 and G2 don't exist yet, and the lists are shown
+Not paste-ready: G1 doesn't exist yet, and the lists are shown
 with three of their 90 entries. Every list runs **oldest first**, LAG
 `P92D` → `P3D`. Generate the lists rather than typing them.
 
@@ -427,7 +427,7 @@ stages:
       var: anom                                   # G1
       output_dir: /work/tif
       inputs:
-        - https://noaa-cdr-sea-surface-temp-optimum-interpolation-pds.s3.amazonaws.com/data/v2.1/avhrr/{{cycle_month:P1D:P92D}}/oisst-avhrr-v02r01.{{cycle_date:P1D:P92D}}_preliminary.nc   # G2
+        - https://noaa-cdr-sea-surface-temp-optimum-interpolation-pds.s3.amazonaws.com/data/v2.1/avhrr/{{cycle_month:P1D:P92D}}/oisst-avhrr-v02r01.{{cycle_date:P1D:P92D}}_preliminary.nc   # G2 (built)
         # … P91D … P4D …
         - https://noaa-cdr-sea-surface-temp-optimum-interpolation-pds.s3.amazonaws.com/data/v2.1/avhrr/{{cycle_month:P1D:P3D}}/oisst-avhrr-v02r01.{{cycle_date:P1D:P3D}}_preliminary.nc
       output_names:
@@ -573,9 +573,9 @@ sign-off. No person has reviewed this plan yet.
 
 | Phase | What | Blocked on |
 |---|---|---|
-| 0 | This plan. Decide D1. File the G1 (and G3) zyra issues. | Approval to file; they are public |
-| 1 | G2: `cycle_month` in `zyra-pipeline-args.ts`, with tests | Nothing |
-| 2 | G1 lands in a zyra release → bump the pinned image digest in `.github/workflows/zyra-run.yml` → author the workflow as a disabled draft → smoke run → verification → reviews → enable | G1 upstream |
+| 0 | This plan. Decide D1. File the G1 (and G3) zyra issues; drafts in Appendix A. | Approval to file; they are public |
+| 1 | G2: `cycle_month` in `zyra-pipeline-args.ts`, with tests | **Done** |
+| 2 | G1 lands in a zyra release → move the runner to it: the `ZYRA_SCHEDULER_IMAGE` repo variable, and the committed `ZYRA_IMAGE_DEFAULT` in `.github/workflows/zyra-run.yml`, which is still v0.1.52 and predates data-encoded output altogether → author the workflow as a disabled draft → smoke run → verification → reviews → enable | G1 upstream |
 | 3 | G3: zyra emits `dataMinLuma` → re-run, remove the `transparent_range` workaround | G3 upstream |
 | 4 | *Optional.* Rebaseline to 1991–2020 | G5 upstream, and a person's sign-off |
 | — | Diverging-aware display transforms (G4), which start with a `ColorScale` contract change | Its own plan item; schedule it, because this dataset is its first user |
@@ -607,46 +607,166 @@ sign-off. No person has reviewed this plan yet.
   `P3D` against `P4D`.
 - **Does the runner pass a non-ASCII `units` string through intact?**
 
-## Appendix A — upstream zyra issue body (G1), not filed
+## Appendix A — upstream zyra issue drafts (not filed)
 
-> **convert-format: accept NetCDF input for `--format geotiff --var`**
->
-> *Use case:* a data-encoded daily SST anomaly globe from NOAA OISST
-> v2.1 on NODD
-> (`s3://noaa-cdr-sea-surface-temp-optimum-interpolation-pds/data/v2.1/avhrr/YYYYMM/oisst-avhrr-v02r01.YYYYMMDD_preliminary.nc`).
-> The files are CF NetCDF4: `anom(time=1, zlev=1, lat=720, lon=1440)`,
-> `int16`, `scale_factor 0.01`, `_FillValue -999`, latitude south to
-> north, longitude 0–360.
->
-> *What happens:* `cmd_convert_format` passes every input to
-> `grib_decode`. cfgrib fails, pygrib finds no messages, and the stage
-> exits with "no GRIB messages found in input". `--format netcdf`
-> passes the bytes through. But `visualize heatmap --data-encoded --var
-> anom` reads `ds[var].values` unsqueezed, and `normalize_to_luma`
-> raises "Data must be a 2-D grid for luma output (got 4-D)".
->
-> *Ask:* when the input bytes are NetCDF and the target is GeoTIFF,
-> open with xarray instead of `grib_decode`. Apply CF decoding (scale,
-> offset, fill → NaN), select `--var`, squeeze singleton dims (refuse
-> if more than two remain), and write a north-up GeoTIFF with nodata
-> tagged. `process reproject` and `heatmap` downstream then work
-> unchanged. A squeeze in `cli_utils.load_data_array` would help the
-> direct `.nc` → heatmap path too.
->
-> *Related (G3):* `luma_writer.normalize_to_luma` maps NaN to code 0,
-> which is also `vmin`. For a diverging field such as an anomaly, that
-> makes land read as the coldest value. TerraViz's sidecar already
-> supports `dataMinLuma`, a reserved low band. A configurable reserved
-> band would close it: NaN at code 0, data written above the band, and
-> a matching `dataMinLuma` in the sidecar. One code is not enough after
-> a lossy video encode, because land beside ocean is a ~128-code step
-> that rings at every coast. The band needs room for that noise, which
-> is likely 4–8 codes; we will measure it on the transcoded stream
-> before asking for a number.
->
-> *Workaround in use:* none for G1. For G3, a several-code
-> `transparent_range`, which costs anomalies at the very bottom of the
-> range.
+Two issues for `NOAA-GSL/zyra`, ready to paste: G1 blocks this dataset
+and G3 makes it honest. Filing is outward-facing, so nobody files them
+without the maintainer's go-ahead. Both failures were reproduced on
+2026-11-06 against **zyra 0.1.56** from PyPI (`zyra[processing]`),
+which is also `main` at `70cb06b` for every file involved.
+
+Context the issues don't need to say but a filer should know: the
+runner's committed default image is v0.1.52
+(`ZYRA_IMAGE_DEFAULT` in `.github/workflows/zyra-run.yml`). That
+predates the data-encoded heatmap, which arrived in v0.1.53. So any
+node running data-encoded workflows is already on a newer image through
+the `ZYRA_SCHEDULER_IMAGE` repo variable. Check which one before
+filing, and cite it if it is not 0.1.56.
+
+### Issue 1 (G1) — blocking
+
+**Title:** `process convert-format: accept NetCDF input for geotiff output (CF decode, --var, squeeze)`
+
+````markdown
+### Summary
+
+`process convert-format` decodes every input as GRIB2, so a CF NetCDF
+source cannot be turned into a GeoTIFF. `visualize heatmap
+--data-encoded` can read `.nc` directly, but it rejects the singleton
+`time`/`zlev` dims that most daily NetCDF products carry. Together these
+leave a NetCDF-only daily product with no way into the
+`convert-format → reproject → heatmap --data-encoded` chain.
+
+### Use case
+
+A data-encoded daily sea surface temperature anomaly globe, from NOAA
+OISST v2.1 on NOAA Open Data:
+
+```
+s3://noaa-cdr-sea-surface-temp-optimum-interpolation-pds/data/v2.1/avhrr/YYYYMM/oisst-avhrr-v02r01.YYYYMMDD_preliminary.nc
+```
+
+- Public and unsigned, about 1.5 MB a day. There is no GRIB2 version.
+- Variables `sst`, `anom`, `err` and `ice`: all `int16`,
+  `scale_factor 0.01`, `_FillValue -999`.
+- Dims `(time=1, zlev=1, lat=720, lon=1440)`. Latitude runs south to
+  north; longitude runs 0.125–359.875.
+
+### Reproduction (zyra 0.1.56, `pip install "zyra[processing]==0.1.56"`)
+
+```bash
+URL=https://noaa-cdr-sea-surface-temp-optimum-interpolation-pds.s3.amazonaws.com/data/v2.1/avhrr/202611/oisst-avhrr-v02r01.20261104_preliminary.nc
+
+# 1. NetCDF -> GeoTIFF
+zyra process convert-format geotiff --var anom \
+  --output-dir tif --output-names 20261104T000000.tif --inputs "$URL"
+```
+
+```
+  File ".../zyra/processing/grib_utils.py", line 159, in grib_decode
+RuntimeError: Failed to decode GRIB2: no GRIB messages found in input
+```
+
+The batch path sends each input to `grib_decode`. The only NetCDF
+handling is the passthrough when the target is `netcdf` and no `--var`
+is given.
+
+```bash
+# 2. The passthrough fetches the file; heatmap cannot read it
+zyra process convert-format netcdf \
+  --output-dir nc --output-names 20261104T000000.nc --inputs "$URL"   # OK
+zyra visualize heatmap --data-encoded --var anom --vmin -10 --vmax 10 \
+  --units degC --cmap-file pal.json --color-scale-file cs.json \
+  --input nc/20261104T000000.nc --output frames/20261104T000000.png
+```
+
+```
+ERROR: Data must be a 2-D grid for luma output (got 4-D)
+```
+
+`visualization/cli_utils.load_data_array` returns `ds[var].values`
+unsqueezed. Squeezing the file by hand does produce a frame, but it is
+south-up (the top 40 rows are Antarctica's no-data band) and starts at
+0°E. The `.nc` path writes the array in file order and carries no
+georeferencing. That is why the GeoTIFF route through `process
+reproject` is the one we want.
+
+### Ask
+
+In `convert-format`, when the input bytes are NetCDF and the target is
+`geotiff`:
+
+1. Open with xarray, with CF decoding on (scale and offset applied,
+   `_FillValue` → NaN), instead of `grib_decode`.
+2. Select `--var`, required as now when there is more than one data
+   variable.
+3. Squeeze singleton dims. If more than two dims remain, refuse with an
+   error naming them rather than picking a slice.
+4. Write a **north-up** GeoTIFF with an EPSG:4326 transform from the
+   1-D lat/lon coords and **nodata tagged** (NaN for float data). Then
+   `process reproject` can do the 0–360 → ±180 wrap and the regrid, and
+   `heatmap --data-encoded` reads the result as it does today.
+
+Nodata tagging matters for this field in particular. `reproject` fills
+with 0 where the source carries no nodata, and 0 means "normal" for an
+anomaly, so untagged land would read as a plausible and wrong +0.00.
+
+A smaller, independent change would also help: squeeze singleton dims
+in `load_data_array`, with the same refusal past two dims. The direct
+`.nc` → heatmap path would then either work or fail with a clear
+message, rather than on shape.
+
+### Today
+
+Nothing automates around it. The dataset waits on this.
+````
+
+### Issue 2 (G3) — not blocking, makes diverging fields honest
+
+**Title:** `heatmap --data-encoded: reserve a no-data band so NaN does not share vmin's code`
+
+````markdown
+### Summary
+
+`luma_writer.normalize_to_luma` maps NaN to code 0, which is also the
+code for `vmin`. That is harmless for a field whose minimum means
+"nothing here" (aerosol mass). It is wrong for a **diverging** field
+(an anomaly or a difference), where `vmin` is a real reading: masked
+cells, such as land, read as the most negative value.
+
+### Reproduction (zyra 0.1.56)
+
+Take the OISST v2.1 `anom` field from the G1 issue, squeezed to 2-D,
+and render it with `heatmap --data-encoded --vmin -10 --vmax 10`.
+Every land cell is code 0, the same code as −10 °C. The sidecar
+carries `transparentRange` but no reserved band, so a consumer cannot
+tell "−10 °C" from "no data" except by hiding real readings with it.
+
+### Ask
+
+An option, for example `--nodata-band N`, defaulting to `0` (today's
+behaviour):
+
+- write NaN and masked cells as code 0;
+- scale data into codes `N..255`, so `vmin` is code `N` and `vmax` is
+  code 255;
+- emit `"dataMinLuma": N` in the colour-scale sidecar;
+- leave the palette's stops below `N` transparent.
+
+TerraViz already reads `dataMinLuma`, an integer from 0 to 254:
+- codes below it are no data;
+- a value is `vmin + (code − N) / (255 − N) · (vmax − vmin)`;
+- a sidecar carrying `transparentRange` as well must agree, with
+  `ceil(transparentRange · 255) == dataMinLuma`. zyra's
+  `transparent_range: N` (written as `N/256`) satisfies that for every
+  N from 1 to 255.
+
+**Why N is more than 1:** the frames go through one H.264 encode. At
+every coastline, land beside ocean is a step of about 128 codes, and
+the encode rings into codes 1–N. A one-code band absorbs none of that.
+We will measure N on the transcoded stream before asking for a default;
+it is likely 4–8.
+````
 
 ## Appendix B — how the numbers were made
 
@@ -668,6 +788,11 @@ sign-off. No person has reviewed this plan yet.
   - `rel_mthsst9120.txt`, October 2026 (relative monthly);
   - the ENSO diagnostic discussion of 8 Oct 2026 (status wording).
 - **zyra behaviour:** read from `NOAA-GSL/zyra` `main` at `70cb06b`
-  (16 Oct 2026). The runner pins
-  `ghcr.io/noaa-gsl/zyra@sha256:0f335b9d…`, so re-check G1 against the
-  pinned image's version before filing.
+  (16 Oct 2026, identical to v0.1.56 in every file involved). Then both
+  G1 failures and the G3 behaviour were reproduced against **zyra
+  0.1.56 from PyPI** (`zyra[processing]`; the `visualization` extra's
+  cartopy would not build in the scratch environment, and the
+  data-encoded path does not need it). The runner's committed default
+  image is v0.1.52, from the image's own OCI labels, revision
+  `78e8c62`. That release predates `luma_writer.py`, which first ships
+  in v0.1.53.
