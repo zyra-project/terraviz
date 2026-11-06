@@ -138,12 +138,43 @@ the four server-stamped blobs. Order is alphabetical by field name
 | `blob13` | `screen_class` |
 | `blob14` | `viewport_class` |
 | `blob15` | `vr_capable` |
+| `blob16` | `window_context` — `top` / `top-embed` / `framed` / `framed-embed` |
 | `double1` | `client_offset_ms` |
 
 > The `resumed` slot is optional — when absent, fields shift up by
-> one. In practice `resumed` only appears on re-starts after the
-> user toggles telemetry back on; for production analytics filter
-> on its presence rather than its position.
+> one. No client sets it today (`initSession` runs once per page),
+> so every row so far has `window_context` at `blob15`; filter on
+> its presence rather than its position.
+> `resumed`'s own slot reads `'true'`/`'false'` only when it is
+> there, so a query can tell the two layouts apart. The Product
+> Health panel keeps to comparisons in `WHERE` and leaves rows that
+> carry `resumed` out (none exist):
+>
+> ```sql
+> SELECT blob15 AS window_context, count(DISTINCT index1) AS sessions
+> FROM terraviz_events
+> WHERE blob1 = 'session_start'
+>   AND blob11 != 'true' AND blob11 != 'false' AND blob15 != ''
+> GROUP BY window_context
+> ```
+>
+> A query that must count those rows too reads `blob16` for them,
+> e.g. `if(blob11 = 'true', blob16, if(blob11 = 'false', blob16,
+> blob15))`; check it on the AE SQL API first, since no panel here
+> uses `if()` as a grouping key yet.
+>
+> `window_context` was appended on 2026-11-06 and sorts after every
+> other field, so no existing position moved. Rows from older
+> clients have it empty: count it over sessions that report it, not
+> over all sessions. The first half says whether the app had its
+> own window (`top`) or sat in another page's frame (`framed`); the
+> second whether the address carried `?embed=1`. It never names the
+> framing page. Read it with three caveats (`PRIVACY_ANALYSIS.md` §9l):
+> `framed` also counts the project's own poster, same-origin frames and
+> `file:` kiosk pages; in a framed session `viewport_class` and
+> `aspect_class` describe the frame, not the visitor's window; and a
+> framed session's `session_end` times measure how long the *host* page
+> was open, since visibility follows the host page's tab.
 
 ### `session_end` (Tier A)
 

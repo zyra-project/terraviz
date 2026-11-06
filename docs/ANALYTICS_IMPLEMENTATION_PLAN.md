@@ -149,7 +149,7 @@ the client validate against the same shape.
 
 | Event | Tier | `blobs[]` (strings) | `doubles[]` (numbers) | `indexes[]` |
 |---|---|---|---|---|
-| `session_start` | A | `event_type`, `app_version`, `platform` (`web`/`desktop`/`mobile`), `os` (`mac`/`windows`/`linux`/`ios`/`android`/`unknown`), `locale`, `viewport_class` (`xs`/`sm`/`md`/`lg`/`xl`), `aspect_class` (`portrait-tall`/`portrait`/`square`/`landscape`/`wide`/`ultrawide`), `screen_class` (`mobile`/`tablet`/`1080p`/`2k`/`4k+`), `build_channel` (`public`/`internal`/`canary`), `vr_capable` (`none`/`vr`/`ar`/`both`), `country` (server-stamped 2-letter ISO) | — | `session_id` |
+| `session_start` | A | `event_type`, `app_version`, `platform` (`web`/`desktop`/`mobile`), `os` (`mac`/`windows`/`linux`/`ios`/`android`/`unknown`), `locale`, `viewport_class` (`xs`/`sm`/`md`/`lg`/`xl`), `aspect_class` (`portrait-tall`/`portrait`/`square`/`landscape`/`wide`/`ultrawide`), `screen_class` (`mobile`/`tablet`/`1080p`/`2k`/`4k+`), `build_channel` (`public`/`internal`/`canary`), `vr_capable` (`none`/`vr`/`ar`/`both`), `schema_version`, `window_context` (`top`/`top-embed`/`framed`/`framed-embed`, added 2026-11-06), `country` (server-stamped 2-letter ISO) | — | `session_id` |
 | `session_end` | A | `event_type`, `exit_reason` (`pagehide`/`visibilitychange`/`clean`) | `duration_ms`, `event_count` | `session_id` |
 | `layer_loaded` | A | `event_type`, `layer_id`, `layer_source` (`network`/`cache`/`hls`/`image`), `slot_index`, `trigger` (`browse`/`orbit`/`tour`/`url`/`default`) | `load_ms` | `session_id` |
 | `layer_unloaded` | A | `event_type`, `layer_id`, `slot_index`, `reason` (`replaced`/`home`/`tour`/`manual`) | `dwell_ms` | `session_id` |

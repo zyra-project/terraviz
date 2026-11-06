@@ -2,7 +2,12 @@
 // Copyright 2026 The Zyra Project
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { initSession, emitSessionEnd, __resetSessionForTests } from './session'
+import {
+  initSession,
+  emitSessionEnd,
+  detectWindowContext,
+  __resetSessionForTests,
+} from './session'
 import { resetForTests, __peek, emit } from './emitter'
 import { setTier } from './config'
 import type { LayerLoadedEvent } from '../types'
@@ -48,6 +53,7 @@ describe('session — initSession', () => {
     expect(s.build_channel).toMatch(/^(public|internal|canary)$/)
     expect(s.vr_capable).toMatch(/^(none|vr|ar|both)$/)
     expect(s.schema_version.length).toBeGreaterThan(0)
+    expect(s.window_context).toMatch(/^(top|top-embed|framed|framed-embed)$/)
   })
 
   it('is idempotent — a second call does not emit a second session_start', async () => {
@@ -252,5 +258,96 @@ describe('session — emitSessionEnd', () => {
     const evs = __peek()
     const ends = evs.filter((e) => e.event_type === 'session_end')
     expect(ends).toHaveLength(1)
+  })
+})
+
+describe('session — window_context', () => {
+  const originalUrl = window.location.href
+
+  /** Make `window.top` read as another window, or throw, for one
+   * test. Restored by `restoreTop`. */
+  let restoreTop: (() => void) | null = null
+  function setTop(get: () => unknown): void {
+    const own = Object.getOwnPropertyDescriptor(window, 'top')
+    Object.defineProperty(window, 'top', { configurable: true, get })
+    restoreTop = () => {
+      if (own) Object.defineProperty(window, 'top', own)
+      else delete (window as unknown as { top?: unknown }).top
+    }
+  }
+
+  afterEach(() => {
+    restoreTop?.()
+    restoreTop = null
+    window.history.replaceState(null, '', originalUrl)
+  })
+
+  it('reads top when the app has its own window and no embed flag', () => {
+    expect(window.self === window.top).toBe(true)
+    expect(detectWindowContext()).toBe('top')
+  })
+
+  it('reads top-embed for the embed address opened in its own window', () => {
+    window.history.replaceState(null, '', '/?embed=1')
+    expect(detectWindowContext()).toBe('top-embed')
+  })
+
+  it('treats ?embed=0 as no embed flag, as embed mode does', () => {
+    window.history.replaceState(null, '', '/?embed=0')
+    expect(detectWindowContext()).toBe('top')
+  })
+
+  it('reads framed when another page frames the full app', () => {
+    setTop(() => ({}))
+    expect(detectWindowContext()).toBe('framed')
+  })
+
+  it('reads framed-embed when another page frames the embed address', () => {
+    setTop(() => ({}))
+    window.history.replaceState(null, '', '/?embed=1&dataset=x')
+    expect(detectWindowContext()).toBe('framed-embed')
+  })
+
+  it('reads framed when the frame check throws', () => {
+    setTop(() => {
+      throw new Error('blocked')
+    })
+    expect(detectWindowContext()).toBe('framed')
+  })
+
+  it('never reads the framing page: referrer and ancestorOrigins stay untouched', () => {
+    // The headline privacy claim for this field. Throwing getters make
+    // any read of either fail the test, whatever the code does with it.
+    const doc = Object.getOwnPropertyDescriptor(document, 'referrer')
+    const loc = Object.getOwnPropertyDescriptor(window.location, 'ancestorOrigins')
+    const read: string[] = []
+    try {
+      Object.defineProperty(document, 'referrer', {
+        configurable: true,
+        get() { read.push('referrer'); throw new Error('document.referrer read') },
+      })
+      Object.defineProperty(window.location, 'ancestorOrigins', {
+        configurable: true,
+        get() { read.push('ancestorOrigins'); throw new Error('location.ancestorOrigins read') },
+      })
+      setTop(() => ({}))
+      window.history.replaceState(null, '', '/?embed=1')
+      expect(detectWindowContext()).toBe('framed-embed')
+      expect(read).toEqual([])
+    } finally {
+      if (doc) Object.defineProperty(document, 'referrer', doc)
+      else delete (document as unknown as { referrer?: unknown }).referrer
+      if (loc) Object.defineProperty(window.location, 'ancestorOrigins', loc)
+      else delete (window.location as unknown as { ancestorOrigins?: unknown }).ancestorOrigins
+    }
+  })
+
+  it('carries the reading on session_start', async () => {
+    setTop(() => ({}))
+    window.history.replaceState(null, '', '/?embed=1')
+    await initSession()
+    const s = __peek().find((e) => e.event_type === 'session_start')
+    if (!s || s.event_type !== 'session_start') throw new Error('unreachable')
+    expect(s.window_context).toBe('framed-embed')
   })
 })

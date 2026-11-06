@@ -9,7 +9,7 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 12,
+  "version": 13,
   "refresh": "5m",
   "time": {
     "from": "now-7d",
@@ -1561,6 +1561,59 @@
             {
               "selector": "errors",
               "text": "errors",
+              "type": "number"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 28,
+      "type": "barchart",
+      "title": "Sessions by window context (embedded views)",
+      "description": "Distinct sessions by session_start.window_context: whether the app had its own window (top) or sat in a frame on another page (framed), and whether the address carried ?embed=1 (-embed). framed-embed is an embed code on someone's page (a StoryMap, a Hub page, a WordPress post). framed is a page framing the app without the flag; on the reference node that is mostly the project's own poster. top-embed is the embed address opened on its own (a kiosk, or a check before pasting it). The framing page is never recorded. Sessions from clients older than the field (2026-11-06) report nothing and are left out. AE positional layout: window_context is blob15, or blob16 when the optional resumed field (blob11, 'true'/'false') is present. Rows carrying resumed are left out to keep to SQL forms other panels already run; no client sends it today.",
+      "gridPos": {
+        "x": 0,
+        "y": 82,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "${DS_INFINITY}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${DS_INFINITY}"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/sql",
+          "url_options": {
+            "method": "POST",
+            "data": "SELECT blob15 AS window_context, count(DISTINCT index1) AS sessions FROM terraviz_events WHERE blob1 = 'session_start' AND blob2 = '$environment' AND blob4 = '$internal' AND blob11 != 'true' AND blob11 != 'false' AND blob15 != '' AND timestamp > toDateTime(intDiv($__from, 1000)) GROUP BY window_context ORDER BY sessions DESC",
+            "headers": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ]
+          },
+          "parser": "backend",
+          "root_selector": "data",
+          "columns": [
+            {
+              "selector": "window_context",
+              "text": "window_context",
+              "type": "string"
+            },
+            {
+              "selector": "sessions",
+              "text": "sessions",
               "type": "number"
             }
           ]

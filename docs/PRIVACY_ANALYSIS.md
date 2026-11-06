@@ -134,19 +134,42 @@ Per-field budget:
 | `build_channel` | 3 | 1.58 | ~0.05 (`public` ≫ rest) | src/types/index.ts:655 |
 | `app_version` | ~5–10 active | ~2.5 | ~2.0 | session.ts:121 |
 | `schema_version` | 1–2 active | ~1.0 | ~0.2 | session.ts:66 |
+| `window_context` | 4 (top / top-embed / framed / framed-embed) | 2.0 | ~0.5 (`top` dominates) | `detectWindowContext` in session.ts |
 | **server-stamped `country`** | 250 ISO codes | ~7.96 | ~5.5 (US/EU skew) | ingest.ts:206 |
 | **server-stamped `internal`** | 2 | 1.0 | ~0.05 (rare) | ingest.ts:232 |
 | **server-stamped `environment`** | 3 | 1.58 | ~0.0 (filtered to prod) | ingest.ts:195 |
 
-**Sum, effective.** ≈ **20.8 bits** for a typical session.
+**Sum, effective.** ≈ **21.8 bits** for a typical session. (This
+section gave 20.8 before `window_context` was added, but the column
+above it already summed to 21.3.)
 
-**Per Eckersley.** ~33 bits singles out a user globally. ~20.8
+**Per Eckersley.** ~33 bits singles out a user globally. ~21.8
 bits puts a session in an anonymity set of order
-2^(33−20.8) ≈ 2^12 ≈ 4,700 users *of the same configuration in
+2^(33−21.8) ≈ 2^11.2 ≈ 2,350 users *of the same configuration in
 the same country*. That is, an external observer cannot
 single out an individual from `session_start` alone unless
 the population of Terraviz users in that anonymity bucket
 is small.
+
+**`window_context`** (added 2026-11-06) is the one field that
+describes the visitor's surroundings rather than their device:
+whether another page framed the app, and whether the address asked
+for the embed view. The framing page's address was left out on
+purpose — `document.referrer` and `location.ancestorOrigins` are
+never read — because an address names a page and a small page's
+audience in one country on one day can be a handful of people.
+
+**The page can often be inferred anyway.** An embed code usually
+pins a dataset or a tour (`?dataset=`, `?tour=`), so the same
+session's first `layer_loaded.layer_id`, joined on `index1`, names
+the embed code, and where only one page uses that code it names the
+page. Before this field the same load was ambiguous between an
+embed and a shared link; `framed-embed` removes the ambiguity. For
+whoever holds the dataset, that is close to a referrer for embedded
+sessions that pin a dataset, and nothing for those that do not. What
+the field adds to identifiability is concentrated in that embedded
+minority: a `framed-embed` session sits in a far smaller set than a
+`top` one. §9l lists every route and the decisions taken on them.
 
 **Compared with raw fingerprinting.** A typical browser leaks
 ~18 bits via raw User-Agent alone (Eckersley 2010, Table 3),
@@ -158,7 +181,7 @@ exact resolution, or User-Agent into storage
 where available, otherwise pattern-matches a substring; the
 raw UA never leaves the function). The budget gap is real:
 the same browser on raw fingerprinting leaks ~33 bits; via
-this pipeline it leaks ~21.
+this pipeline it leaks ~22.
 
 ### 2b. Other Tier A events — incremental entropy
 
@@ -267,19 +290,21 @@ permits.
 
 ### 3a. `session_start` quasi-identifier set
 
-Take the seven enrichment fields plus server-stamped country:
+Take the eight enrichment fields plus server-stamped country:
 
 ```
 { platform, os, locale, viewport_class, aspect_class,
-  screen_class, vr_capable, country }
+  screen_class, vr_capable, window_context, country }
 ```
 
 Worst-case Cartesian product:
-3 × 6 × 200 × 5 × 6 × 5 × 4 × 250 ≈ 5.4 × 10⁹ unique tuples.
+3 × 6 × 200 × 5 × 6 × 5 × 4 × 4 × 250 ≈ 2.2 × 10⁹ unique tuples
+(the product before `window_context` was 5.4 × 10⁸, not the
+5.4 × 10⁹ this section used to give).
 
 But the empirical distribution is *not* uniform. The dominant
 bucket is plausibly something like
-`(web, windows, en-US, lg, landscape, 1080p, none, US)` —
+`(web, windows, en-US, lg, landscape, 1080p, none, top, US)` —
 that bucket alone contains millions of equivalent users in
 the broader web. For Terraviz specifically, with a smaller
 user population, the *effective* anonymity-set size for a
@@ -288,7 +313,7 @@ anonymity tables from Eckersley 2010, scaled by an assumed
 ~10⁵ active users).
 
 For users in **rare buckets** the picture changes. A user
-with `(desktop, linux, lt-LT, xl, ultrawide, 4k+, both, LT)`
+with `(desktop, linux, lt-LT, xl, ultrawide, 4k+, both, top, LT)`
 is plausibly *the only such user in the dataset* — `k = 1`.
 This is the classic critique of demographic-bucket anonymity:
 the median user is safe; the tail is not.
@@ -329,7 +354,7 @@ SELECT index1 FROM terraviz_events
 WHERE blob1 = 'session_start'
   AND blob3 = 'IS'        -- country
   AND blob9 = 'mac'       -- os
-  AND blob13 = '4k+'      -- screen_class
+  AND blob12 = '4k+'      -- screen_class (blob13 if resumed is present)
   AND timestamp BETWEEN '2026-04-15 14:00:00'
                     AND '2026-04-15 14:15:00'
 ```
@@ -339,6 +364,12 @@ plausibly a single session. From that `index1`, the adversary
 recovers every Tier A event Alice fired: layers loaded,
 camera trajectory, errors. Tier B (research mode) on top of
 that recovers `dwell` and `browse_search`.
+
+`window_context` sharpens it for embedded sessions. An adversary
+who knows Alice read a particular page that embeds TerraViz adds
+`AND blob15 = 'framed-embed'` (blob16 if `resumed` is present),
+which drops the `top` majority in one filter, and the page's pinned
+dataset in the session's `layer_loaded` confirms the match.
 
 This attack succeeds. It is the worst case, but it is not
 hypothetical, and §9 enumerates the only structural
@@ -949,6 +980,93 @@ The opt-in narrows the exposure to globes someone chose to measure.
 That someone may be the venue itself, so the request that owners
 disclose in-world is the visitor's only notice.
 
+### 9l. Embedded views and the site around them
+
+A TerraViz page framed by another site (a StoryMap, a Hub page, a
+WordPress post) reports the Essential tier exactly as it does on its
+own site, and `session_start.window_context` (added 2026-11-06) makes
+those sessions separable from the rest. The framing page's address is
+never read (`detectWindowContext` reads neither `document.referrer` nor
+`location.ancestorOrigins`, and a test with throwing getters on both
+holds that), but five routes reach the page, or the visitor's time on
+it:
+
+- **The pinned dataset.** An embed code usually pins `?dataset=` or
+  `?tour=`, so the session's first `layer_loaded.layer_id`, joined on
+  `index1`, names the embed code, and where one page uses that code it
+  names the page.
+- **The node's own embedding policy.** In `list` mode
+  (`src/types/node-embedding.ts`) every framed session came from a
+  listed site or the node itself (`list` always includes `'self'`), so
+  with one listed site `framed` names that site or the node, whatever
+  was opened. In `self` mode it means the node framed itself; a
+  `file:` page can frame the app only when `file:` is a `list` entry,
+  or in `any` mode, which sends no header.
+- **Time on the host page.** `session_end` fires on hide and
+  `pagehide` (`src/analytics/session.ts`), and inside a frame
+  `document.visibilityState` follows the host page's tab, not whether
+  the frame is in view. So for framed sessions `duration_ms`,
+  `visible_ms` and the `perf_sample` cadence measure roughly how long
+  the visitor had *someone else's page* open, from when the frame
+  loaded (for a lazy-loaded embed, from when they scrolled to it) until
+  they first switched away from it or closed it; later events still
+  carry their offset from the session's start. The
+  tier table puts "how long the user dwelled on something" in Tier B;
+  these fields were already Tier A for every session, and the new field
+  is what makes the framed slice queryable.
+- **The host's own logs.** A host page's operator keeps its own visit
+  logs (address, time, sometimes a signed-in account). Where the same
+  organisation runs the node, the realistic case being a lab that
+  embeds its own node's globe on its own site, matching `framed-embed`,
+  arrival time and country against those logs can tie a visitor to
+  every Tier A row of the session: layers, camera positions to about
+  111 m, map clicks. It is §9k's venue pattern without §9k's
+  mitigations.
+- **Frame size.** `viewport_class` and `aspect_class` read
+  `innerWidth` / `innerHeight`, which inside a frame are the box the
+  embed code set: a second fingerprint of the embed code, and not the
+  visitor's window. (`screen_class` reads `screen.width`, the device's
+  screen, frame or not.)
+
+And in the embed view none of it has a notice or a switch, while in
+any frame on another site a choice made on the node's own site does
+not apply. Embed mode (`?embed=1`, not framing itself) skips the
+first-run banner (`src/main.ts`, "the host page owns consent") and
+hides `#map-controls`, which holds the Privacy entry; and a stored Off
+from the node's own site does not reach a frame on another site,
+because current browsers partition a framed page's storage by the
+top-level site, so `loadConfig()` falls back to `essential`. The
+WordPress plan's host switch (its Integration J) is not built, and the
+main app does not honour Global Privacy Control.
+
+**Decisions** (the maintainer's, 6 November 2026, after the privacy
+review):
+
+- **The field stays Tier A.** It is a four-value enum, sent once per
+  session, describing where the app runs rather than anything the
+  visitor did. A Tier B embed event would count almost nothing, since
+  embedded visitors cannot reach Research mode.
+- **The public promise is narrowed** from "anything about other sites
+  you visit" to their addresses, and `PRIVACY.md` discloses the routes
+  above in plain language.
+- **Session length is kept for framed sessions**, and the policy says
+  what it measures there.
+- **The documents are corrected now, and the host controls come next:**
+  a `telemetry=0` parameter an embed code can carry, and Global Privacy
+  Control honoured where no notice is shown (the output page already
+  honours it, `src/output/webTelemetry.ts`).
+
+**Open:**
+
+- **Keep `window_context` out of `analytics_dataset_daily`.** Per-dataset
+  counts of embedded loads would be counts of one page's audience. Today
+  only the generic dimension mix carries it; the planned Delivery panel
+  (`DATA_DELIVERY_PLAN.md`, #520) must keep it that way.
+- **Row-level retention.** The R2 raw archive keeps rows, with session
+  ids, indefinitely (`ANALYTICS_STORAGE_AND_ADMIN_PLAN.md`), so the
+  host-log match stays possible for as long as a host keeps its logs.
+  That plan's pruning question is where to decide it.
+
 ---
 
 ## 10. Comparison to formal frameworks
@@ -959,7 +1077,7 @@ Sweeney's k-anonymity holds when each record's
 quasi-identifier tuple appears in at least `k` other
 records. Treating
 `(platform, os, locale, viewport_class, aspect_class,
-screen_class, vr_capable, country)` as the QI set:
+screen_class, vr_capable, window_context, country)` as the QI set:
 
 - **Median case: k ≫ 100.** Most users share their bucket
   with thousands of others on the public web; within
