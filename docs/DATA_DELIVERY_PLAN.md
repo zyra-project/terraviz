@@ -18,7 +18,7 @@ sibling document already records a test.
 consumer; §9's phased implementation and §9.14's usage metrics added
 the same day.)
 
-**Decisions recorded:** twenty, all 2026-11-06 by the maintainer,
+**Decisions recorded:** twenty-one, all 2026-11-06 by the maintainer,
 logged in §9.2: rasters for analysis carry the producer's own values on
 the producer's own grid, before any regridding (§9.11); use is measured
 per platform and per method (§9.14); five choices about how that
@@ -26,10 +26,11 @@ measuring works (§11 q17–q21); the five D0 blockers (§11 q1, q4, q7,
 q13, q14); and eight more from an interview the same day (§11 q5, q6,
 q8, q9, q10, q12, q15, and counting embedded views). **D0 is
 complete**; D1 is next. q8 was corrected the same day: SOS datasets
-carry varying Creative Commons licences, not public domain. Open: q2,
-q3, q10's date parsing and q11, tested in D1; and q22–q24, on where
-each dataset's licence comes from and what No-Derivatives and
-Non-Commercial licences allow.
+carry varying Creative Commons licences, not public domain. SOS datasets
+whose original terms cannot be traced go out under the SOS catalog's
+published terms (q22). Open: q2, q3, q10's date parsing and q11, tested
+in D1; and q23, now only for datasets whose known licence is
+No-Derivatives.
 
 **Revisit when any of the following becomes true:**
 
@@ -978,23 +979,42 @@ derived from it:
   route answers with `Access-Control-Allow-Origin: *`; the existing
   streaming host is unchanged, so the app's own video keeps its
   narrower policy.
-- **Only what may be redistributed, and always under its own
-  licence.** The same eligibility as STAC: public, published, and a
-  curated licence. A dataset is listed in the SOS catalog only after
-  its provider agrees to a Creative Commons licence, which varies by
-  dataset (§11 q8), and TerraViz's catalog does not yet record which:
-  the importer gives every SOS row one statement deferring to "the
-  originating organisation's terms" (`cli/lib/snapshot-import.ts:209`).
-  So **no SOS dataset is delivered until its own licence is curated**
-  as an identifier (`CC-BY-4.0`, `CC-BY-NC-SA-4.0` and so on). From
-  then on, the licence and the attribution it requires travel with
-  every form the dataset takes: the manifest, the STAC item, each
-  tile and WMS layer's attribution, TileJSON's `attribution` field,
-  the OpenSpace asset's `meta` block, the KML description, the SOS
-  directory, and the MP4's own copyright tag. The licence's conditions
-  also decide which forms a dataset may take at all — a
-  No-Derivatives or Non-Commercial licence above all (§11 q23,
-  q24).
+- **Only what may be redistributed, and always with its terms.** The
+  same eligibility as STAC: public, published, and a licence on record.
+  For the SOS catalogue the record is thin. The snapshot carries no
+  licence field, the importer gives every SOS row one statement
+  deferring to "the originating organisation's terms"
+  (`cli/lib/snapshot-import.ts:209`), and many datasets are old enough
+  that their creators' original terms cannot be traced. What every
+  contributor shares is the aim of teaching people about the Earth
+  without payment (the maintainer, 2026-11-06), which is what the SOS
+  catalog's own published terms say
+  ([copyright](https://sos.noaa.gov/copyright/)): free educational,
+  journalistic and personal use, credit to the sources, nothing
+  implying NOAA's endorsement, commercial use possibly restricted. So
+  (decided, §11 q22):
+  - **Default terms.** An SOS dataset with no traceable licence is
+    delivered under those published terms, stated as what they are —
+    non-commercial educational use, with attribution — and never
+    relabelled with a Creative Commons licence nobody granted. In the
+    catalog that is a terms statement with `license_url` pointing at
+    the SOS copyright page, which the STAC readiness check already
+    accepts as `other` with a link
+    (`functions/api/v1/_lib/metadata-readiness.ts:115-121`), so no new
+    mechanism is needed.
+  - **A known licence wins.** Where a dataset's own licence is known —
+    the NASA and WHOI datasets under CC BY-NC-SA, say — it is recorded
+    as an identifier and used instead, with its conditions (q23).
+  - **Credit always travels**: the sources and owners named on the
+    dataset's catalog page, in every form the dataset takes — the
+    manifest, the STAC item, each tile and WMS layer's attribution,
+    TileJSON's `attribution` field, the OpenSpace asset's `meta` block,
+    the KML description, the SOS directory, and the MP4's copyright
+    tag.
+  - **Withdrawal on request.** Every manifest and capabilities document
+    names the node's contact, and an owner who asks has the dataset
+    withdrawn from delivery. Retraction already removes it from
+    capabilities and STAC at once (§5.6).
 
 ---
 
@@ -1304,14 +1324,16 @@ and a Second Life sphere. The maintainer can line up all four.
 | 2026-11-06 | The maintainer | Every tile goes through the Function; none straight from the bucket | §5.6, q12 |
 | 2026-11-06 | The maintainer | A WebAssembly image codec may be added for WMS if the CPU test passes | §9.10, q15 |
 | 2026-11-06 | The maintainer | Count embedded views, as a separate change to the app's analytics | §9.14 |
+| 2026-11-06 | The maintainer | SOS datasets with no traceable licence are delivered under the SOS catalog's published terms (non-commercial educational use, attribution, no implied endorsement); a known licence wins; owners can have a dataset withdrawn | §6.5, q22, q24 |
 
 ### 9.3 D1 — Prove it by hand
 
 No code enters the tree. With GDAL and ffmpeg on a laptop, a scratch R2
 bucket and a throwaway Worker, take one image-sequence dataset and one
 data-encoded dataset through every format this plan proposes, and
-measure. Both are chosen from datasets whose licence is known and
-allows it, since D1 hands its outputs to other organisations (§6.5).
+measure. Both are chosen from datasets whose terms allow it — the SOS
+catalog's published terms or a known licence — since D1 hands its
+outputs to other organisations (§6.5).
 
 | Question | How | Decides |
 |---|---|---|
@@ -1675,11 +1697,12 @@ turned on per dataset.
 files go public, someone with the authority to say so records that it
 may be redistributed in these forms, saying who decided, on what, and
 when, as `CLAUDE.md` asks wherever a person rather than an agent owns a
-decision. For the SOS catalogue that record is the licence each
-provider agreed to when the dataset was listed (§11 q8), but it is not
-in TerraViz's catalog yet, so each dataset's licence is curated first
-(§6.5, §11 q22), and its conditions decide which forms it may take
-(§11 q23, q24). Datasets from other sources need their own record.
+decision. For the SOS catalogue that record exists: the maintainer
+decided on 2026-11-06 that a dataset with no traceable licence goes out
+under the SOS catalog's published terms, a known licence winning where
+there is one (§6.5, §11 q22). What remains per dataset is checking its
+credits against its catalog page and recording any licence that is
+known. Datasets from other sources need their own record.
 
 **Reviewers.** The Video Streaming Engineer; the Scientific Data
 Steward for the licence and provenance metadata.
@@ -1947,11 +1970,8 @@ stays a draft for review.
     domains are hashed with `src/analytics/hash.ts`, and the report
     resolves them against a list of likely names (§9.14).
 22. **Where do the per-dataset licences come from?** The SOS snapshot
-    TerraViz imported carries no licence field at all, and until a
-    dataset's licence is curated it is not delivered as files, tiles or
-    rasters (§6.5). This is the question that most decides how much of
-    the SOS catalogue D2 and D3 can reach. What the public record says
-    (checked 2026-11-06):
+    TerraViz imported carries no licence field at all. What the public
+    record says (checked 2026-11-06):
     - **Dataset pages state no licence**, only a bare "© Science On a
       Sphere" footer
       ([example](https://sos.noaa.gov/catalog/datasets/120-years-earthquakes-tsunamis/)).
@@ -1967,28 +1987,28 @@ stays a draft for review.
       CC BY-NC-SA, which fits the maintainer's recollection that
       providers agree to a Creative Commons licence to be listed.
 
-    So the requirement probably lives in the submission agreement,
-    which is not public, and **the SOS team is the source**. Proposed
-    until they answer: a NOAA-made dataset is delivered crediting NOAA,
-    with nothing implying endorsement; a dataset with non-NOAA owners
-    is treated as non-commercial at most, as the copyright page
-    describes, and goes out only once its owner's terms are known.
-23. **No-Derivatives licences.** Do any SOS datasets carry one, and do
-    TerraViz's derived forms — tiles, resized frames, palette-applied
-    video, re-encoded movies — count as adaptations? Creative Commons
-    4.0 says technical changes needed to use a work in other media and
-    formats never produce adapted material (§2(a)(4)); whether resizing
-    and re-colouring fall under that is for whoever advises on NOAA's
-    licensing, not this plan. Proposed until answered: a
-    No-Derivatives dataset goes out only in forms that change its
-    format and nothing else — its own frames, at their own size and
+    *Decided 2026-11-06 by the maintainer:* tracing every creator's
+    original terms is impossible for much of a catalogue built up over
+    years, and in the maintainer's experience every contributor shares
+    one aim — to teach people about the Earth without payment. So an
+    SOS dataset with no traceable licence is delivered under the SOS
+    catalog's published terms (non-commercial educational use, with
+    attribution and nothing implying NOAA's endorsement), a known
+    licence wins where there is one, and an owner can have a dataset
+    withdrawn (§6.5). The evidence above stays as the record of why.
+23. **No-Derivatives licences: narrowed by q22.** Under the default
+    terms, derived forms — tiles, resized frames, palette-applied video,
+    re-encoded movies — are delivered like any other. Still open, for
+    the few datasets whose *known* licence is No-Derivatives: whether
+    resizing and re-colouring are the technical changes Creative
+    Commons 4.0 allows (§2(a)(4)). Until someone who advises on NOAA's
+    licensing says so, those go out only in forms that change the
+    format and nothing else — their own frames, at their own size and
     colours, and a re-encoded movie.
-24. **Non-Commercial licences.** A Non-Commercial dataset can be
-    delivered with its licence attached, and the licence binds whoever
-    uses it — a planetarium charging for a show included. Proposed:
-    deliver it everywhere with the licence visible, as Creative Commons
-    intends, rather than keep it out of channels where commercial use
-    is common.
+24. *Decided 2026-11-06 (follows q22):* the default terms are
+    themselves non-commercial, so Non-Commercial datasets are delivered
+    everywhere with their terms visible; whoever uses one, a planetarium
+    charging for a show included, is bound by them.
 
 ---
 
