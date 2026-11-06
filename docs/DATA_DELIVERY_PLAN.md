@@ -479,16 +479,110 @@ time-stamped overlays at most 2048×1024 each; web developers by WMTS
 with `{Time}`, TileJSON, and CORS-enabled H.264 video they can put on
 a Cesium or three.js globe.
 
-<!-- §3 capability matrix: filled from research -->
+---
 
-<!-- §4 strategy: filled from research -->
+## 3. What each tool reads, side by side
+
+From §2. "time" means the tool animates that format against dates;
+"?" means the documentation is silent and Phase D1 should find out.
+
+| Tool | WMTS, lat/lon | WMTS, Web Mercator | WMS with time | XYZ / TileJSON | Raster (COG, NetCDF) | KML | MP4 file | HLS stream | Frames (folder or zip) | Web page / embed |
+|---|---|---|---|---|---|---|---|---|---|---|
+| ArcGIS Online (Map, Scene Viewer) | WGS84 scenes only, ? | yes, no time | **yes, time** | Web Mercator, no time | via ArcGIS Image upload | yes, no time | no (UI) | no | no | StoryMaps, Hub |
+| ArcGIS Pro | yes | yes | ? | ? | yes, STAC | yes | no | no | no | no |
+| OpenSpace | yes, time in URL | no (misplaced) | WMS panel; time ? | lat/lon only | COG, ? | no | **yes, time** (local) | no | **yes, time** (Folder) | no |
+| Science On a Sphere | no | no | WMS source | no | no | no | MPEG-4 Part 2 | no | **yes**, dated labels | no |
+| SOS Explorer | no | no | no | no | no | no | MPEG-4 / OGV / WMV | no | DDS only | no |
+| Spherical displays, Digistar | no | no | no | no | no | no | yes (assumed) | no | yes | no |
+| WorldWide Telescope | no | no | yes, time (Windows) | no | no | no | no | no | images | no |
+| Second Life, OpenSimulator | no | no | no | no | no | no | yes, untested | inside a page | still images | **yes** (output page) |
+| QGIS | yes, time (3.28+) | yes | **yes, time** (3.14+) | yes | yes, STAC (3.40+) | partial | no | no | no | no |
+| CesiumJS | yes, time | yes, time | yes, time | yes | no | partial | as a material | as a material | images | host page |
+| Cesium for Unreal / Unity | no time | no time | no time | Unity | no | no | engine's own | no | no | no |
+| Google Earth Pro | no | no | no time | no | no | **yes, time** | no | no | via KML | no |
+| Google Earth (web) | no | no | no | no | no | no time, ≤2048 | no | no | via KML | no |
+
+Read down the columns and three things stand out. **No single format
+reaches more than half the tools.** **The playing tools — domes, SOS,
+spheres, virtual worlds — read files, not services**: frames and MP4s.
+**The GIS tools read services**, and the one service every GIS tool here
+animates is WMS with time, not WMTS.
+
+---
+
+## 4. Recommendation: one channel per kind of use
+
+| Group | Primary format | Also |
+|---|---|---|
+| Dome and planetarium producers (OpenSpace) | Ready-made OpenSpace assets: dated frame zips, or an evenly timed MP4 (§6.4) | Lat/lon WMTS with time in the path, for flying in close (§5) |
+| Science On a Sphere sites | An SOS dataset directory: playlist, labels, 2048×1024 frames, MPEG-4 Part 2 movie (§6.4) | — |
+| Spherical displays, Digistar, other domes | 2:1 H.264 MP4 at 2048 and 4096, plus frames and a manifest (§6.1) | — |
+| Virtual-world educators | The output page, as now, 1024 wide by default (`SECOND_LIFE_COMPAT.md`) | A plain MP4 for viewers without WebGL and for VRChat-style video players (§6.1) |
+| ArcGIS users | WMS with time in Web Mercator, registered as Hub items (§5.9, §4.3) | ArcGIS Image layers for analysis (§4.2); StoryMaps embed and MP4 clips |
+| Desktop GIS users | WMS with time and WMTS; COGs through STAC (§4.2) | A KMZ for Google Earth Pro (§6.4) |
+| Web developers | WMTS with `{Time}`, TileJSON, and CORS-enabled H.264 MP4 and HLS for globe materials | Embed; STAC |
+
+### 4.1 Tiles: WMTS in two grids, then WMS with time
+
+The service in §5. It is the channel for *exploring* — panning, zooming,
+stepping through time — in GIS tools, web maps and OpenSpace close-ups.
+It is not the channel for *playing* a whole-globe animation; §2.2 shows
+OpenSpace refetching every tile at every step, and a dome show would
+stutter on it.
+
+### 4.2 Rasters for analysis
+
+For datasets whose real values exist — Zyra workflows read GRIB2 and
+NetCDF before they render anything — publish those values, not the
+pictures made from them:
+
+- **A Cloud-Optimised GeoTIFF per time step**, written by the Zyra
+  runner from the source field after reprojection and before
+  rendering, listed as an asset on its STAC item. QGIS, ArcGIS Pro
+  and any GDAL-based tool read it over HTTP.
+- **An ArcGIS Image adapter**: a script an operator runs with their own
+  ArcGIS credentials that uploads the source fields as a
+  multidimensional *tiled* imagery layer (the kind that can be public),
+  which ArcGIS Online gives a time slider. It copies data into Esri's
+  store — no in-place read from R2 was found (§2.1) — and spends the
+  operator's credits, so it is the operator's tool, not part of the
+  node.
+
+Legacy SOS animations have no values to publish; they are pictures,
+and they get tiles and video only.
+
+### 4.3 Catalog
+
+The STAC API the node already has, with each item gaining links to its
+tiles, WMS layer and files under the STAC web-map-links extension (§5.7).
+For ArcGIS, a second operator-run script registers public items in an
+ArcGIS organisation — WMS, WMTS, OGC Feature Server and Web Mapping
+Application items pointing at the node — so they appear in that
+organisation's Hub site and, if Hub includes them, its DCAT feed (untested,
+§11). No new catalog format on the node.
+
+### 4.4 Files for players
+
+The channel in §6: video variants, frame packages and per-group
+bundles, each at a stable address. It is the cheapest channel to build
+— the runner already encodes video and holds frames — and it serves the
+groups that asked first.
+
+### 4.5 Pages
+
+The embed and the output page exist. Two small follow-ups: a StoryMaps
+embed under a node's `list` embedding policy needs
+`https://storymaps.arcgis.com` in the list, which admits every StoryMap
+author, so the portal's help should say so; and the embedding
+validator's list of shared hosts (`src/types/node-embedding.ts:123`)
+should refuse `*.hub.arcgis.com`, which would admit every Hub site.
 
 ---
 
 ## 5. The tile service
 
-The one channel that does not exist yet in any form, and the one most
-consumers share. This section is a design sketch for review, not a
+The channel for exploring (§4.1): GIS tools, web maps and OpenSpace
+close-ups. This section is a design sketch for review, not a
 specification; Phase D1 (§9) exists to test it before anything is
 built.
 
@@ -712,11 +806,161 @@ Order-of-magnitude only; Phase D1 replaces these with measurements.
 | Per 1,000 frames, one grid | a few GB to ~15 GB |
 | Runner time per frame | seconds; dominated by PNG encoding |
 
-R2 charges for storage and operations, not for egress, so a popular
-layer costs little more than an unpopular one. The costs that grow are
+R2 charges for storage and operations but not for egress, so a popular
+layer costs requests and Function invocations, not bandwidth. The costs
+that grow with the catalog are
 runner minutes and object counts on long animations, which is why
 §9 tiles datasets that have frames already, and leaves the legacy video
 catalog to a later, opt-in phase.
+
+### 5.9 WMS with time
+
+ArcGIS's time slider follows only WMS time (§2.1), QGIS has animated
+it longest, WorldWide Telescope's Windows client and OpenSpace's v0.22
+server panel read WMS, and GIBS still recommends WMS for time in GIS
+clients. So a WMS 1.3.0 endpoint with a `TIME` dimension is in scope,
+built after the WMTS because it is served from the WMTS's pyramids.
+
+- **Served from the pyramid, never from source frames.** A `GetMap`
+  for a box, a size and a time picks the pyramid level nearest the
+  requested resolution in the matching grid — the lat/lon pyramid for
+  `CRS:84` and `EPSG:4326`, the Mercator pyramid for `EPSG:3857` —
+  stitches the tiles covering the box, and scales the result to the
+  requested size. Nothing is reprojected per request, and those three
+  are the only CRSs offered.
+- **Bounded.** `MaxWidth` and `MaxHeight` are 2048, ArcGIS's own
+  default, which bounds the tiles any one request stitches. Whether
+  that fits a Pages Function's CPU budget is a measurement, not an
+  assumption; Phase D1 makes it.
+- **The final scale follows §7.1.** A data layer is scaled by nearest
+  neighbour, because its pyramid level already carries the dataset's
+  own decimation and interpolating between palette colours would undo
+  it; a picture layer may be scaled bilinearly. Cloudflare's image
+  transformations could do the picture-layer scaling without Worker
+  CPU, but their filters interpolate, so they cannot do the data
+  layers. An option to evaluate, not a decision.
+- **Time follows §5.3, with one difference.** GIBS answers a WMS
+  request for a date in a gap with a blank transparent image rather
+  than a 404 (checked live), because a WMS client shows an error where
+  a tile client shows a gap. This copies that.
+
+---
+
+## 6. Files for players: video and packages
+
+For the groups whose job is to *play* a whole globe — dome shows,
+Science On a Sphere sites, spherical displays, a sphere in a virtual
+world, a clip in a story — the efficient format is a file: a video, or
+a set of frames with dates. TerraViz already makes both (§1), for its
+own player. This section makes them usable by other players: which
+variants, how they carry time, how they are bundled for each group, and
+where they live.
+
+### 6.1 Video variants
+
+| Variant | Encoding | For |
+|---|---|---|
+| `h264-4096` | H.264, 4096×2048, 8-bit 4:2:0, constant frame rate, a keyframe at least every second, `faststart` | OpenSpace, spherical displays, Digistar, web developers' globe materials, Second Life's video-player path |
+| `h264-2048` | The same at 2048×1024 | Smaller domes and spheres, Second Life faces at 2048, StoryMaps clips |
+| `h264-1024` | The same at 1024×512, about 1.5–2 Mbit/s | Second Life's default face and slow links — the rendition `SECOND_LIFE_COMPAT.md` §7 already plans |
+| `sos-mpeg4` | MPEG-4 Part 2, at least 25 Mbit/s, 2048×1024 (4096×2048 on request) | Science On a Sphere, whose guidelines rule out H.264 (§2.4) |
+
+- **One video frame per data frame.** Frame *i* of the file is frame *i*
+  of the dataset, so a player that maps a start and end time linearly
+  onto the file's duration — OpenSpace does exactly that — lands on the
+  right date. A series whose frames are not evenly spaced in time is
+  not offered as a time-synced video; it goes out as frames (§6.4),
+  which carry their own dates. The frame rate sets only how fast the
+  file plays by itself, and defaults to 30 fps, the catalog's encode
+  rate and SOS's recommendation.
+- **Keyframes at least every second** because OpenSpace's time-synced
+  playback seeks on every step, and a seek decodes from the keyframe
+  before it.
+- **H.264 for reach.** It is the one codec every player above decodes —
+  libmpv, LibVLC, every browser, hardware decoders on modest machines.
+  HEVC and AV1 are smaller and can be added as further variants; they
+  are not the default. MPEG-4 Part 2 exists only because SOS asks for
+  it.
+- **HLS stays where it is**: TerraViz's own player, the output page in
+  Second Life, and web developers who stream. OpenSpace and SOS cannot
+  read it, so it is never the only video a dataset offers.
+
+### 6.2 Data-encoded datasets
+
+None of the players in §2 applies a colour palette to a video, so a
+data-encoded dataset reaches them as **palette-applied RGB video**,
+made by colouring the frames after decimating them in value space
+(§7.1) — never by transcoding the luma video, whose encoder would
+average codes and then colour the averages.
+
+Where values must survive, frames are the format. A data-encoded frame
+is a lossless 8-bit PNG whose codes map one to one onto the palette, so
+a frame zip plus the palette as a lookup image carries the dataset
+exactly. OpenSpace can apply that lookup itself (`Colormap`, with
+`Interpolation` on, §2.2), and it blends neighbouring time steps
+*before* colouring — a blend of values, which is the right kind,
+except across the no-data band, where a blend invents values for the
+length of a step. That caveat belongs in the asset's description.
+
+For TerraViz's own output page in Second Life, which can apply the
+palette (§2.3), smaller data-encoded renditions — 2048 and 1024 wide —
+built from value-space-decimated frames would end the 25 Mbit/s worst
+case. They must be **pinned, not adapted**: chosen once for the face
+and held, never switched by bandwidth mid-session, which is the form
+`DATA_ENCODED_VIDEO_PLAN.md` (§Why the frame is 4096×2048) already
+names as workable, because a rung switch changes the value under the
+cursor.
+
+### 6.3 Dates travel with the file
+
+Every video and frame set carries a JSON manifest: dataset id, title,
+credit and licence, variant, size, frame rate, frame count, the date of
+each frame (or start, period and count when regular, computed exactly
+as `/frames` computes them: `start_time + period × index`), the loop
+period, and links to the palette and legend. Each group's own form is
+derived from it:
+
+- **SOS:** `labels.txt`, one line per frame.
+- **OpenSpace video:** the start and end times the asset passes to
+  `VideoTileProvider`.
+- **OpenSpace frames:** dated filenames, `<id>_YYYYmmdd_HHMM.png`, for
+  `TemporalTileProvider`'s Folder mode. Its filename date parsing
+  looked off by one day in OpenSpace's source, so the exact form is
+  settled by a Phase D1 test, not by reading (§11).
+- **KML:** a `TimeSpan` per overlay, from its frame's date to the next.
+
+### 6.4 Bundles per group
+
+| Bundle | Contents | For |
+|---|---|---|
+| OpenSpace asset | A `.asset` file whose `UrlSynchronization` fetches, from R2, either a dated frame zip (Folder mode; greyscale plus palette for data-encoded datasets) or an `h264-4096` MP4 (`VideoTileProvider`, mapped to simulation time), plus the legend as a screen-space image | OpenSpace — on the pattern of the 243 SOS assets it already ships |
+| SOS directory | `playlist.sos`, `labels.txt`, 2048×1024 frames (4096 on request), the `sos-mpeg4` movie, the legend | Science On a Sphere sites |
+| Frame zip | 2:1 JPEG (pictures) or PNG (data) frames at 2048 and 4096, plus the manifest | Spherical displays, Digistar, WorldWide Telescope, anyone |
+| KMZ | One GroundOverlay per frame, at most 2048×1024, each with a TimeSpan | Google Earth Pro; Google Earth on the web without animation |
+
+### 6.5 Where files live, and their addresses
+
+- **Built by the runner** that already encodes the HLS ladder, at
+  publish time, and stored in R2 beside it. A bundle is built for a
+  dataset when the publisher turns it on, not for every dataset by
+  default: frame zips duplicate frames, and the legacy catalog is
+  large.
+- **Stable addresses.** `GET /api/v1/datasets/{id}/files/{name}`
+  answers with a redirect to the current object, so a republished
+  dataset changes the object and not the address a dome's asset file
+  holds. For a legacy SOS video hosted on Vimeo, the same address
+  mints a fresh signed link each time, so a configuration does not
+  break every hour. Whether OpenSpace's `UrlSynchronization` and Second
+  Life's video plugin follow redirects is a Phase D1 check; if either
+  does not, the Function serves the bytes.
+- **Range requests, `Content-Type: video/mp4`, open CORS.** Players
+  outside a browser ignore CORS, but a web developer's globe material
+  needs it — and today the video host allows only the node's own
+  origin (`SECOND_LIFE_COMPAT.md` §4.4). Opening it is a decision for
+  §11, not a default.
+- **Only what may be redistributed.** The same eligibility as STAC
+  (public, published, a curated licence); every file carries the
+  credit and licence in its manifest.
 
 ---
 
@@ -739,9 +983,9 @@ nearest neighbour for data-encoded frames, so every source cell keeps
 its exact value and no boundary moves by more than half a source
 pixel, and by Lanczos for RGB pictures. The capabilities abstract
 states the source resolution, so nobody mistakes the native level for
-finer data. Nothing is cut below the native level; every client in §2
-upscales past a layer's deepest level on its own, or should be
-checked to.
+finer data. Nothing is cut below the native level: OpenSpace, QGIS and
+CesiumJS all stretch the deepest level themselves (§2), and ArcGIS is
+the one client still to check (§11).
 
 **Every level above native is a 2×2 decimation of the one below.**
 Because WorldCRS84Quad's blocks align with the source pixel grid and
@@ -846,8 +1090,10 @@ clients that cache capabilities need to tolerate.
   whose transparency chunk carries the no-data band. That is lossless
   with respect to what the TerraViz globe shows, about a quarter the
   size of RGBA, and keeps an exact code-to-colour mapping a careful
-  client could invert. Whether each consumer reads indexed PNG with
-  transparency correctly is a §2 question.
+  client could invert. ArcGIS reads palette PNGs (Esri's own tile
+  caches use them), GIBS serves its colour-mapped layers that way, and
+  GDAL — so OpenSpace and QGIS — expands them on read; D1 confirms the
+  transparency chunk survives in each.
 - **Never JPEG for data.** JPEG ringing along palette boundaries invents
   colours the palette does not contain — the false-colour failure of
   averaging colours, arriving through compression instead.
@@ -870,6 +1116,189 @@ data raster to a quarter scale" (`cli/lib/ffmpeg-hls.ts:102`;
 encoder's scaler averages luma codes — the
 §7.1 failure again. So any consumer that needs a smaller data-encoded
 video gets one built from decimated *frames* in value space, never one
-transcoded down from the 4K video.
+transcoded down from the 4K video (§6.2).
 
-<!-- §6.5 per-consumer targets, §7 contract, §8 phases, §9 non-goals, §10 open questions, §11 sources: filled after research -->
+### 7.5 What each tool actually uses
+
+The targets the rules above are aimed at, from §2. "Stretches" means
+the tool upscales past a layer's deepest level by itself, so cutting
+deeper than the source would only spend storage.
+
+| Tool | Space | Time | Format |
+|---|---|---|---|
+| OpenSpace | 4096×2048 for 4K domes, 8192×4096 for 8K; stretches | Steps of whole years; months 1–4 or 6; days 1–28; hours 1–4, 6 or 12; minutes 15 or 30. Finer data reaches it through server-side snapping (§5.3) or Folder mode | 8-bit; PNG for data frames with a palette image; H.264, constant rate, keyframe ≤ 1 s |
+| Science On a Sphere | 2048×1024 for series, 4096×2048 for stills | 30 fps, 10–15 for coarse data | MPEG-4 Part 2 ≥ 25 Mbit/s; JPEG or PNG frames |
+| Spherical displays, Digistar | 2048 or 4096 wide | 30 fps | H.264 (assumed; confirm per vendor) |
+| Second Life | The face width: 1024 by default, 2048 for close viewing | Shared clock in the output page; a plain MP4 loops on its own | H.264; the 1024 rendition at 1.5–2 Mbit/s |
+| ArcGIS Online | `GetMap` ≤ 2048; Web Mercator native at level 4 for 4096 sources; zooming past the deepest level unknown | WMS time, as an interval or a list | PNG with a palette, or JPEG; CRF with LERC for analysis |
+| QGIS | Stretches | Rounds down to the period | Any |
+| CesiumJS | Stretches | The interval containing its clock, no blending, prefetches the next | Any |
+| Google Earth | ≤ 2048 a side on the web | One TimeSpan per frame (Pro only) | JPEG or PNG |
+
+---
+
+## 8. Contract and governance
+
+- **A separate projection, like STAC.** Tiles, WMS and files are new
+  routes over the canonical D1 catalog. Nothing is added to
+  `WireDataset`, `/api/v1/catalog` or the signed federation feed —
+  the boundary the metadata audit drew for STAC
+  ([`metadata/README.md`](metadata/README.md) §Relationship to earlier
+  decisions; `architecture/federation-scoping.md` §8 decision 5 as
+  amended).
+- **Pinned when it ships.** Each surface gets its contract in
+  `docs/protocol/` and an entry in its changelog in the same change
+  that adds the route, as `architecture/federation-scoping.md` §7
+  Directive 2 asks of every public wire format.
+- **Advertised only when it answers.** `/.well-known/terraviz.json`
+  gains an additive field naming the capabilities and file roots,
+  present only when the service is on — the pattern `federation.feed`
+  already follows (`functions/.well-known/terraviz.json.ts`).
+- **Vendor-neutral by construction.** Every node-side channel is an
+  open standard or a plain file, which keeps
+  `architecture/federation-scoping.md` Goal 2 ("no required vendors")
+  true. The ArcGIS Image adapter and the Hub registration script are
+  operator tools, run with the operator's credentials and credits,
+  outside the node's contract and out of its dependencies.
+- **Same eligibility as STAC.** Public, published, not retracted, with
+  a curated licence (`functions/api/v1/_lib/metadata-readiness.ts`);
+  every file names its credit and licence.
+- **Reviewers, when it is built**, routed as `CLAUDE.md` §Review agents
+  directs: the TerraViz Federation Reviewer and the API Platform
+  Engineer for the routes, `.well-known` and `docs/protocol/`; the
+  Video Streaming Engineer for the runner's encoding; the Scientific
+  Visualization Reviewer for palette application, colour maps and the
+  decimation methods (with the `terraviz-data-video` skill and
+  `npm run check:luma-range` for data-encoded output); the Application
+  Security Engineer for CORS and header changes; the Code Reviewer for
+  the rest. This document, being a plan, needs none of them.
+
+---
+
+## 9. Phases
+
+**D0 — Decide.** Review this document; settle the §11 questions that
+block D1 (tile size, the snap rule, whether to open video CORS).
+
+**D1 — Prove it by hand, with no code in the tree.** Take one
+image-sequence dataset and one data-encoded dataset and, with GDAL and
+ffmpeg on a laptop:
+
+- cut both pyramids (§5.1), hand-write capabilities documents, put them
+  in a scratch bucket behind a throwaway Worker, and load them in
+  OpenSpace, QGIS, CesiumJS and ArcGIS Map Viewer — checking the time
+  axis, orientation, overzoom, and a WMS `GetMap` stitched from tiles,
+  with its CPU time measured;
+- build the `h264-4096` file and an OpenSpace asset for each, and play
+  them with the OpenSpace collaborators on a dome, timing a step's seek
+  against keyframe interval;
+- build an SOS directory and ask an SOS site to load it;
+- put the `h264-1024` file on a Second Life sphere through the video
+  plugin, in Firestorm and Linden Lab's viewer.
+
+Its output is measurements (bytes, tile counts, cut time, seek time,
+CPU per `GetMap`) and answers to the "?" cells in §3. It decides §5 and
+§6.
+
+**D2 — Files for players.** The runner builds the video variants,
+manifests and per-group bundles for datasets whose publisher turns them
+on; the stable file route and redirects; palette-applied video for
+data-encoded datasets. First because it is the smallest new
+infrastructure — runner work and one route — and it serves the groups
+already asking: OpenSpace, SOS sites, spheres.
+
+**D3 — Tiles.** WMTS in both grids, the capabilities document,
+TileJSON, GDAL XML, colour maps, STAC links, the `.well-known` field.
+
+**D4 — WMS with time**, served from D3's pyramids, if D1's CPU
+measurement says a Function can afford it.
+
+**D5 — Rasters for analysis.** COGs from the Zyra runner as STAC
+assets; the operator-run ArcGIS Image adapter and Hub registration
+script.
+
+**D6 — The legacy video catalog.** Frame extraction with
+de-duplication (§7.2), a licence review per dataset, opt-in.
+
+**Later, on request:** temporal aggregate layers (§7.2), higher-
+efficiency codecs as extra variants, a GeoJSON events layer for GIS
+tools (§1 notes the events endpoint is custom JSON).
+
+The order D2-before-D3 is a judgement call. Tiles were the starting
+point of the conversation that led here; the research moved them second
+because the tools that animate whole globes read files, and the tools
+that read tiles mostly want WMS time, which waits on the tiles anyway.
+
+---
+
+## 10. Non-goals
+
+- **Pushing data into another organisation's system.** Everything is
+  served for others to pull; the ArcGIS adapter is the operator's own
+  tool, run in their own organisation.
+- **GIBS's padded grids, polar projections, any CRS beyond lat/lon and
+  Web Mercator.**
+- **Raw luma tiles, 16-bit or floating-point tiles.** Values travel as
+  rasters (§4.2) or lossless frames (§6.2).
+- **OGC API Tiles, OGC API Maps, PMTiles, GeoZarr in v1.** §2.5 found
+  too few of these tools reading them in 2026; each is a later addition
+  to the same pyramids if that changes.
+- **Tiling datasets with no real time axis.** Looping diagrams and
+  climatologies go out as video and frames.
+- **Restricted datasets.** Public datasets only, as STAC.
+- **Changing `WireDataset`, the native catalog or the federation feed.**
+- **Editing `SECOND_LIFE_COMPAT.md` here.** The corrections in §2.3
+  belong in their own change.
+
+---
+
+## 11. Open questions
+
+1. **Tile size for the lat/lon grid: 512 or 256 pixels?** 512 quarters
+   requests and objects and matches OpenSpace and GIBS; 256 is the
+   registered WorldCRS84Quad. D1 loads both in every client.
+2. **Does ArcGIS stretch WMTS tiles past the deepest level, or go
+   blank?** If blank, cut one or two upsampled levels in the Web
+   Mercator set only.
+3. **Is Esri's "WGS 1984 Version 2" scheme the same as the lat/lon
+   layout?** It decides whether ArcGIS Scene Viewer can use the lat/lon
+   pyramid.
+4. **Snap to the containing period (as GIBS) while `/frames?at=`
+   returns the closest frame** — keep the difference, documented, or
+   align the two?
+5. **No-data threshold for `mean` and `mode`:** half the block's area,
+   or something else?
+6. **Who sets a dataset's decimation method**, and what is the default
+   for each kind — publisher in the portal, Zyra template, or both?
+7. **Open the video host's CORS to every origin?** R2 has no egress
+   fees, but every fetch is an operation, and a popular hotlinked file
+   is someone else's bandwidth bill only in theory.
+8. **Licensing.** Which datasets, legacy SOS ones especially, may be
+   redistributed as derived files and bundles?
+9. **Is SOS's MPEG-4 Part 2 guidance still current**, and would SOS
+   rather receive frames and encode its own movies? A question for the
+   SOS team.
+10. **OpenSpace's Folder-mode date parsing**: off by one day or not?
+    And would the OpenSpace project ship TerraViz assets in its own
+    tree, as it does the 243 SOS ones, rather than users downloading
+    them? Questions for the collaborators.
+11. **Does Hub's DCAT feed include WMS and WMTS items?** Test on a live
+    Hub site before promising data.gov reach.
+12. **Should exact-time tiles also be reachable straight from the
+    bucket**, skipping the Function for clients that never need
+    snapping?
+13. **D2 before D3?** §9's ordering, open to challenge.
+
+---
+
+## 12. Sources
+
+Links are inline where each claim is made, and were checked on
+2026-11-06. Three desk-research passes produced them: ArcGIS (Esri's
+product documentation, developer references and support articles);
+OpenSpace and planetarium systems (OpenSpace's documentation and its
+source at `master`, NOAA's SOS manuals, vendor product sheets);
+and Second Life, Cesium, Google Earth, QGIS and GIBS (viewer and
+library source code, product documentation, and live requests against
+GIBS). Claims about TerraViz cite files in this repository. Nothing
+here was tested hands-on; Phase D1 is where that starts.
