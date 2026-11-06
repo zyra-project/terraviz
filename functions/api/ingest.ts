@@ -294,10 +294,11 @@ async function isKillSwitchOn(env: Env): Promise<boolean> {
  *   - `TelemetryEventBase.client_offset_ms` is optional in source
  *     but is always stamped by `emit()` before the event leaves
  *     the client, so it's effectively present on every datapoint.
- *   - `SessionStartEvent.resumed` is one of two optional fields
- *     (the other is `VoiceInteractionEvent.interrupted`, laid out
- *     in `docs/ANALYTICS_QUERIES.md`); it sorts after `platform`
- *     alphabetically, so the
+ *   - Three fields are optional: the blobs
+ *     `SessionStartEvent.resumed` and
+ *     `VoiceInteractionEvent.interrupted`, and the double
+ *     `OrbitTurnEvent.turn_rounds`, which sorts last. `resumed`
+ *     sorts after `platform` alphabetically, so the
  *     blob5..blob10 positions used by dashboards are stable
  *     whether `resumed` is present or not. Adding any new
  *     optional field that sorts earlier would break this — see

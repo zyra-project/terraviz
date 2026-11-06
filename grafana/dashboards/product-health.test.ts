@@ -486,16 +486,17 @@ describe('product-health dashboard — embedded views panel', () => {
     expect(others).toHaveLength(0)
   })
 
-  it('reads window_context from blob15, or blob16 when resumed is present', () => {
+  it('reads window_context from blob15, leaving out rows that carry resumed', () => {
     // session_start sorts window_context after vr_capable (blob15);
-    // the optional resumed field at blob11 moves it to blob16. The
-    // same test the export decoder uses: resumed reads 'true'/'false'
-    // only when it is there.
+    // the optional resumed field at blob11 would move it to blob16.
+    // No client sends resumed, so the panel keeps to forms other
+    // panels already run on AE (plain comparisons in WHERE) and leaves
+    // those rows out, by the export decoder's own test: resumed reads
+    // 'true'/'false' only when it is there.
     const sql = panel?.targets[0].url_options?.data ?? ''
     expect(sql).toMatch(/blob1\s*=\s*'session_start'/)
-    // Nested if() with = only, the forms other panels already run on
-    // AE, rather than IN inside an expression, which none does.
-    expect(sql).toContain("if(blob11 = 'true', blob16, if(blob11 = 'false', blob16, blob15)) AS window_context")
-    expect(sql).toMatch(/HAVING window_context != ''/)
+    expect(sql).toMatch(/blob15 AS window_context/)
+    expect(sql).toContain("blob11 != 'true' AND blob11 != 'false'")
+    expect(sql).toContain("blob15 != ''")
   })
 })

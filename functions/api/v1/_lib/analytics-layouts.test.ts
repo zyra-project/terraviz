@@ -485,8 +485,9 @@ describe('EVENT_LAYOUTS', () => {
     expect(decoded.fields.window_context).toBe('framed-embed')
   })
 
-  // Rows written before `window_context` existed stay in the archive
-  // and are re-exported by a backfill, so they must still decode. The
+  // Rows written before `window_context` existed stay in Analytics
+  // Engine for its retention window, and a backfill re-exports them
+  // from there, so they must still decode. The
   // case the old last-slot rule got wrong is the second: an older row
   // that carries `resumed` fills exactly as many slots as a newer row
   // that does not.
@@ -537,6 +538,9 @@ describe('EVENT_LAYOUTS', () => {
     expect(withOptional.map(([type]) => type).sort()).toEqual(['session_start', 'voice_interaction'])
     for (const [type, layout] of withOptional) {
       const optional = layout.optionalBlob as string
+      // A name missing from `blobs` would make the decoder read
+      // blob4 (`internal`, always 'true'/'false') as its slot.
+      expect(layout.blobs, type).toContain(optional)
       expect(layout.booleans ?? [], type).toContain(optional)
       const next = layout.blobs[layout.blobs.indexOf(optional) + 1]
       if (next === undefined) continue

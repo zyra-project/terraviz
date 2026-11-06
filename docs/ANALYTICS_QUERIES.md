@@ -145,12 +145,23 @@ the four server-stamped blobs. Order is alphabetical by field name
 > one. No client sets it today (`initSession` runs once per page),
 > so every row so far has `window_context` at `blob15`; filter on
 > its presence rather than its position.
-> A query that must hold either way tests `resumed`'s own slot,
-> which reads `'true'`/`'false'` only when it is there:
+> `resumed`'s own slot reads `'true'`/`'false'` only when it is
+> there, so a query can tell the two layouts apart. The Product
+> Health panel keeps to comparisons in `WHERE` and leaves rows that
+> carry `resumed` out (none exist):
 >
 > ```sql
-> if(blob11 = 'true', blob16, if(blob11 = 'false', blob16, blob15)) AS window_context
+> SELECT blob15 AS window_context, count(DISTINCT index1) AS sessions
+> FROM terraviz_events
+> WHERE blob1 = 'session_start'
+>   AND blob11 != 'true' AND blob11 != 'false' AND blob15 != ''
+> GROUP BY window_context
 > ```
+>
+> A query that must count those rows too reads `blob16` for them,
+> e.g. `if(blob11 = 'true', blob16, if(blob11 = 'false', blob16,
+> blob15))`; check it on the AE SQL API first, since no panel here
+> uses `if()` as a grouping key yet.
 >
 > `window_context` was appended on 2026-11-06 and sorts after every
 > other field, so no existing position moved. Rows from older

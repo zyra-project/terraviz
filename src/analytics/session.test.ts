@@ -321,15 +321,15 @@ describe('session — window_context', () => {
     const doc = Object.getOwnPropertyDescriptor(document, 'referrer')
     const loc = Object.getOwnPropertyDescriptor(window.location, 'ancestorOrigins')
     const read: string[] = []
-    Object.defineProperty(document, 'referrer', {
-      configurable: true,
-      get() { read.push('referrer'); throw new Error('document.referrer read') },
-    })
-    Object.defineProperty(window.location, 'ancestorOrigins', {
-      configurable: true,
-      get() { read.push('ancestorOrigins'); throw new Error('location.ancestorOrigins read') },
-    })
     try {
+      Object.defineProperty(document, 'referrer', {
+        configurable: true,
+        get() { read.push('referrer'); throw new Error('document.referrer read') },
+      })
+      Object.defineProperty(window.location, 'ancestorOrigins', {
+        configurable: true,
+        get() { read.push('ancestorOrigins'); throw new Error('location.ancestorOrigins read') },
+      })
       setTop(() => ({}))
       window.history.replaceState(null, '', '/?embed=1')
       expect(detectWindowContext()).toBe('framed-embed')
