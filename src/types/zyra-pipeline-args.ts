@@ -22,6 +22,17 @@
  *   - `{{cycle_hour:INTERVAL:LAG}}` — zero-padded `HH` of that same
  *     cycle (INTERVAL and LAG must match the `cycle_date` reference
  *     in the same pipeline for the pair to describe one cycle)
+ *   - `{{cycle_month:INTERVAL:LAG}}` — `YYYYMM` of that same cycle,
+ *     for archives that file by month (`.../202611/...YYYYMMDD.nc`,
+ *     NOAA OISST on NODD). The same matching rule applies: pair it
+ *     with a `cycle_date` of identical INTERVAL and LAG, or the
+ *     directory and the file name can name different months.
+ *
+ * A *look-back* window over a daily archive is written with a
+ * different LAG per frame rather than a negative offset: frame k of
+ * `{{cycle_date:P1D:P{k}D}}` is the UTC day k days before the run,
+ * because the cycle is `floor((now − LAG) / INTERVAL)`. Offsets stay
+ * forward-only, the forecast-hour meaning they were built for.
  *   - `{{valid_iso:INTERVAL:LAG[:OFFSET]}}` — the *valid time* of a
  *     frame, as `YYYY-MM-DDTHH:MM:SSZ`. OFFSET is the frame's
  *     forecast hour as an ISO duration, so `f042` of a 6-hourly
@@ -51,17 +62,18 @@ export const PIPELINE_ARG_VARIABLES = [
   'run_id',
   'cycle_date',
   'cycle_hour',
+  'cycle_month',
   'valid_iso',
   'valid_compact',
 ] as const
 
 /** Variables derived from the current model cycle, all of which take
  *  `:INTERVAL:LAG`. */
-const CYCLE_VARIABLES = new Set(['cycle_date', 'cycle_hour', 'valid_iso', 'valid_compact'])
+const CYCLE_VARIABLES = new Set(['cycle_date', 'cycle_hour', 'cycle_month', 'valid_iso', 'valid_compact'])
 
 /** Of those, the ones that also accept a trailing `:OFFSET` (the
- *  forecast hour). `cycle_date`/`cycle_hour` name the cycle itself,
- *  so an offset would be meaningless there. */
+ *  forecast hour). `cycle_date`/`cycle_hour`/`cycle_month` name the
+ *  cycle itself, so an offset would be meaningless there. */
 const OFFSET_VARIABLES = new Set(['valid_iso', 'valid_compact'])
 
 /** Matches `{{name}}` and `{{name:P1:P2...}}`; loose on the inside so
@@ -243,6 +255,10 @@ export function renderPlaceholder(parsed: PipelinePlaceholder, ctx: PipelineArgC
       return placeholderInstant(parsed, ctx).toISOString().slice(0, 10).replace(/-/g, '')
     case 'cycle_hour':
       return placeholderInstant(parsed, ctx).toISOString().slice(11, 13)
+    case 'cycle_month':
+      // 2026-11-03T00:00:00.000Z -> 202611, the month of the same
+      // instant `cycle_date` renders, so the two cannot disagree.
+      return placeholderInstant(parsed, ctx).toISOString().slice(0, 7).replace('-', '')
     case 'valid_iso':
       // The publisher API's ISO_DATE_RE wants no sub-second part.
       return placeholderInstant(parsed, ctx).toISOString().replace(/\.\d+Z$/, 'Z')

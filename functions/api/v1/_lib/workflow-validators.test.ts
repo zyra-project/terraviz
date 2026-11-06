@@ -181,6 +181,29 @@ describe('validatePipeline', () => {
       ],
     })
     expect(runPipeline(good)).toEqual([])
+    // A month-filed archive (NOAA OISST on NODD) needs YYYYMM beside
+    // the date; the save-time validator must accept it.
+    const monthFiled = JSON.stringify({
+      stages: [
+        {
+          stage: 'process',
+          command: 'convert-format',
+          args: {
+            format: 'netcdf',
+            inputs: [
+              'https://x/avhrr/{{cycle_month:P1D:P3D}}/oisst-avhrr-v02r01.{{cycle_date:P1D:P3D}}_preliminary.nc',
+            ],
+            output_dir: '/work/nc',
+          },
+        },
+        {
+          stage: 'visualize',
+          command: 'compose-video',
+          args: { frames: WORKFLOW_FRAMES_OUTPUT_DIR, output: WORKFLOW_OUTPUT_PATH },
+        },
+      ],
+    })
+    expect(runPipeline(monthFiled)).toEqual([])
     const bad = JSON.stringify({
       stages: [
         {
@@ -351,6 +374,7 @@ describe('validateMetadataTemplate', () => {
     expect(runTemplate(JSON.stringify({ start_time: '{{valid_iso:PT6H:7h}}' }))).not.toEqual([])
     // Pipeline-only names stay out of scope for a metadata template.
     expect(runTemplate(JSON.stringify({ title: '{{cycle_date:PT6H:PT7H}}' }))).not.toEqual([])
+    expect(runTemplate(JSON.stringify({ title: '{{cycle_month:P1D:P3D}}' }))).not.toEqual([])
   })
 
   it('rejects unterminated braces that match no placeholder', () => {

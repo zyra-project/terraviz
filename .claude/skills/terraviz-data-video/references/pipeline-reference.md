@@ -70,8 +70,14 @@ failure** (a URL with a missing date would fetch garbage).
 
 - `{{run_date}}` → `YYYY-MM-DD`; `{{run_id}}` → the run ULID.
 - `{{cycle_date:INTERVAL:LAG}}` → `YYYYMMDD` of the latest available cycle;
-  `{{cycle_hour:INTERVAL:LAG}}` → `HH`. cycle = `floor((now−LAG)/INTERVAL)·INTERVAL`,
-  epoch-anchored. INTERVAL/LAG are ISO-8601 durations.
+  `{{cycle_hour:INTERVAL:LAG}}` → `HH`; `{{cycle_month:INTERVAL:LAG}}` →
+  `YYYYMM` (for month-filed archives, e.g. NOAA OISST's
+  `.../avhrr/YYYYMM/oisst-avhrr-v02r01.YYYYMMDD_preliminary.nc`). cycle =
+  `floor((now−LAG)/INTERVAL)·INTERVAL`, epoch-anchored. INTERVAL/LAG are
+  ISO-8601 durations. Give paired placeholders the same INTERVAL and LAG.
+- **Look-back windows** (observations, not forecasts): vary the LAG per frame
+  instead of using an offset. `{{cycle_date:P1D:P3D}}` … `{{cycle_date:P1D:P92D}}`
+  is the last 90 UTC days, newest three days back. Offsets are forward-only.
 - `{{valid_iso:INTERVAL:LAG[:OFFSET]}}` → ISO valid time of a forecast hour
   (cycle + OFFSET). `{{valid_compact:…}}` → `YYYYMMDDTHHMMSS` (filename-safe;
   pairs with `--output-names` + `scan-frames --datetime-format %Y%m%dT%H%M%S`).
@@ -82,7 +88,7 @@ failure** (a URL with a missing date would fetch garbage).
 Filenames like GSL THREDDS's `<YYDDDHHmm><FFF>` (year + day-of-year + hour +
 minute + forecast hour) **cannot be templated** — which, combined with
 Cloudflare, is why that source is a dead end. Use date-pathed S3 sources whose
-names fit `{{cycle_date}}`/`{{cycle_hour}}`.
+names fit `{{cycle_date}}`/`{{cycle_hour}}`/`{{cycle_month}}`.
 
 ## 3. Palettes + `cmap_inline`
 

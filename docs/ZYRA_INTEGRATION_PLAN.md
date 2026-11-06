@@ -785,6 +785,18 @@ names are available to metadata templates, where `valid_iso` is
 the way to get dates onto a dataset whose pipeline has no
 `scan-frames` stage at all.
 
+`{{cycle_month:INTERVAL:LAG}}` renders the same cycle as `YYYYMM`,
+for archives that file each day under a month directory
+(`.../avhrr/202611/oisst-avhrr-v02r01.20261104_preliminary.nc`, NOAA
+OISST on NODD). Pair it with a `cycle_date` of identical INTERVAL and
+LAG so the directory and the file name cannot name different months.
+An observational archive also wants a window that looks *back* from
+the run rather than forward from a cycle. That is written by varying
+the LAG per frame, not with an offset: `{{cycle_date:P1D:P{k}D}}` is
+the UTC day k days before the run. Offsets stay forward-only, the
+forecast-hour meaning they were built for. Worked example:
+[`SST_ANOMALY_DATA_ENCODED_PLAN.md`](SST_ANOMALY_DATA_ENCODED_PLAN.md).
+
 ## Inline palettes
 
 A data-encoded `visualize heatmap` colours frames from a `--cmap-file`

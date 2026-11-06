@@ -71,6 +71,14 @@ describe('parsePlaceholder / validateArgPlaceholders', () => {
     // cycle_date names the cycle itself — an offset there would be
     // silently meaningless, so it is an error rather than ignored.
     expect(typeof parsePlaceholder('cycle_date:PT6H:PT5H:PT42H')).toBe('string')
+    // Same for cycle_month: a look-back window varies the LAG instead.
+    expect(parsePlaceholder('cycle_month:P1D:P3D')).toEqual({
+      name: 'cycle_month',
+      intervalSeconds: 86_400,
+      lagSeconds: 259_200,
+    })
+    expect(typeof parsePlaceholder('cycle_month:P1D:P3D:P1D')).toBe('string')
+    expect(typeof parsePlaceholder('cycle_month')).toBe('string')
     expect(typeof parsePlaceholder('valid_iso:PT6H:PT7H:42h')).toBe('string')
     expect(typeof parsePlaceholder('valid_iso:PT6H')).toBe('string')
     // Four params is past the arity of anything in the vocabulary.
@@ -169,6 +177,57 @@ describe('renderArgPlaceholders', () => {
     const args = JSON.parse(renderPipelineJson(pipeline, CTX)).stages[0].args
     expect(args.inputs[0]).toBe('https://x/gefs.20260724/06/chem/f000.grib2')
     expect(args.output_names).toEqual(['20260724T060000.tif', '20260724T120000.tif'])
+  })
+  it('renders the cycle month beside the cycle date', () => {
+    // Daily cycles, 3-day lag: 2026-07-24T13:07Z -> 2026-07-21.
+    expect(renderArgPlaceholders('{{cycle_month:P1D:P3D}}/{{cycle_date:P1D:P3D}}', CTX)).toBe(
+      '202607/20260721',
+    )
+    // A lag that crosses the month boundary moves both together.
+    expect(renderArgPlaceholders('{{cycle_month:P1D:P24D}}/{{cycle_date:P1D:P24D}}', CTX)).toBe(
+      '202606/20260630',
+    )
+    // ...and the year boundary.
+    const jan = { now: new Date('2027-01-02T09:00:00Z'), runId: CTX.runId }
+    expect(renderArgPlaceholders('{{cycle_month:P1D:P3D}}/{{cycle_date:P1D:P3D}}', jan)).toBe(
+      '202612/20261230',
+    )
+  })
+  it('expresses a daily look-back window by varying the lag', () => {
+    // The shape a month-filed daily archive (NOAA OISST on NODD)
+    // needs: frame k is the UTC day k days back, its directory the
+    // month that day falls in, its output named by that day.
+    const base = 'https://b.s3.amazonaws.com/data/v2.1/avhrr'
+    const now = { now: new Date('2026-11-06T12:00:00Z'), runId: CTX.runId }
+    const lags = ['P8D', 'P7D', 'P6D', 'P3D']
+    const pipeline = JSON.stringify({
+      stages: [
+        {
+          stage: 'process',
+          command: 'convert-format',
+          args: {
+            inputs: lags.map(
+              l =>
+                `${base}/{{cycle_month:P1D:${l}}}/oisst-avhrr-v02r01.{{cycle_date:P1D:${l}}}_preliminary.nc`,
+            ),
+            output_names: lags.map(l => `{{valid_compact:P1D:${l}}}.tif`),
+          },
+        },
+      ],
+    })
+    const args = JSON.parse(renderPipelineJson(pipeline, now)).stages[0].args
+    expect(args.inputs).toEqual([
+      `${base}/202610/oisst-avhrr-v02r01.20261029_preliminary.nc`,
+      `${base}/202610/oisst-avhrr-v02r01.20261030_preliminary.nc`,
+      `${base}/202610/oisst-avhrr-v02r01.20261031_preliminary.nc`,
+      `${base}/202611/oisst-avhrr-v02r01.20261103_preliminary.nc`,
+    ])
+    expect(args.output_names).toEqual([
+      '20261029T000000.tif',
+      '20261030T000000.tif',
+      '20261031T000000.tif',
+      '20261103T000000.tif',
+    ])
   })
   it('throws on malformed placeholders', () => {
     expect(() => renderArgPlaceholders('{{cycle_date}}', CTX)).toThrow(/requires interval/)
