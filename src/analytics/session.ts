@@ -13,6 +13,7 @@
  */
 
 import { emit, getEventCount, getSessionDurationMs, TELEMETRY_SCHEMA_VERSION } from '.'
+import { getEmbedMode } from '../utils/embedMode'
 import {
   isImmersiveArSupported,
   isImmersiveVrSupported,
@@ -28,6 +29,7 @@ import type {
   SessionStartEvent,
   ViewportClass,
   VrCapability,
+  WindowContext,
 } from '../types'
 
 // Vite-injected defines — see vite.config.ts.
@@ -72,6 +74,7 @@ export async function initSession(): Promise<void> {
     build_channel: detectBuildChannel(),
     vr_capable: vrCapable,
     schema_version: TELEMETRY_SCHEMA_VERSION,
+    window_context: detectWindowContext(),
   }
   emit(event)
 
@@ -272,6 +275,27 @@ function detectBuildChannel(): BuildChannel {
     // define absent (e.g. running under vitest without vite) — fall through
   }
   return 'public'
+}
+
+/** Own window or a frame, and whether the address asked for embed
+ * mode. Only the comparison leaves this function: the framing page
+ * is never named, so neither `document.referrer` nor
+ * `location.ancestorOrigins` is read. Reading `window.top` is allowed
+ * across origins (it is a reference, not the page), and comparing it
+ * to `window.self` does not throw in a browser; the `catch` is for an
+ * engine that does, where the app cannot be its own top window. */
+export function detectWindowContext(): WindowContext {
+  const embed = getEmbedMode()
+  let framed = false
+  if (typeof window !== 'undefined') {
+    try {
+      framed = window.self !== window.top
+    } catch {
+      framed = true
+    }
+  }
+  if (framed) return embed ? 'framed-embed' : 'framed'
+  return embed ? 'top-embed' : 'top'
 }
 
 async function detectVrCapability(): Promise<VrCapability> {

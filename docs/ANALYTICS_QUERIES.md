@@ -138,12 +138,27 @@ the four server-stamped blobs. Order is alphabetical by field name
 | `blob13` | `screen_class` |
 | `blob14` | `viewport_class` |
 | `blob15` | `vr_capable` |
+| `blob16` | `window_context` — `top` / `top-embed` / `framed` / `framed-embed` |
 | `double1` | `client_offset_ms` |
 
 > The `resumed` slot is optional — when absent, fields shift up by
-> one. In practice `resumed` only appears on re-starts after the
-> user toggles telemetry back on; for production analytics filter
-> on its presence rather than its position.
+> one. No client sets it today (`initSession` runs once per page),
+> so every row so far has `window_context` at `blob15`; filter on
+> its presence rather than its position.
+> A query that must hold either way tests `resumed`'s own slot,
+> which reads `'true'`/`'false'` only when it is there:
+>
+> ```sql
+> if(blob11 = 'true', blob16, if(blob11 = 'false', blob16, blob15)) AS window_context
+> ```
+>
+> `window_context` was appended on 2026-11-06 and sorts after every
+> other field, so no existing position moved. Rows from older
+> clients have it empty: count it over sessions that report it, not
+> over all sessions. The first half says whether the app had its
+> own window (`top`) or sat in another page's frame (`framed`); the
+> second whether the address carried `?embed=1`. It never names the
+> framing page.
 
 ### `session_end` (Tier A)
 

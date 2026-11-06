@@ -123,6 +123,7 @@ function sessionStart(): SessionStartEvent {
     build_channel: 'public',
     vr_capable: 'none',
     schema_version: '1.0',
+    window_context: 'top',
   }
 }
 
@@ -330,6 +331,26 @@ describe('toDataPoint', () => {
     // field should appear; the event field lands at blob 5+ after
     // alphabetical ordering.
     expect(dp.blobs!.filter((b) => b === 'true').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('encodes session_start at its documented blob positions, with and without resumed', () => {
+    // Mirrors docs/ANALYTICS_QUERIES.md → session_start. window_context
+    // sorts after every other field, so appending it moved none of them;
+    // resumed (optional) shifts only the fields after it.
+    const plain = toDataPoint(
+      { ...sessionStart(), window_context: 'framed-embed' },
+      'sess', 'production', 'US', false,
+    )
+    expect(plain.blobs!.slice(4)).toEqual([
+      '0.2.3', 'wide', 'public', 'en-US', 'mac', 'web',
+      '1.0', '1080p', 'lg', 'none', 'framed-embed',
+    ])
+    const resumed = toDataPoint(
+      { ...sessionStart(), resumed: true, window_context: 'framed-embed' },
+      'sess', 'production', 'US', false,
+    )
+    expect(resumed.blobs![10]).toBe('true') // blob11
+    expect(resumed.blobs![15]).toBe('framed-embed') // blob16
   })
 
   it('encodes voice_interaction at its documented blob/double positions', () => {

@@ -71,7 +71,12 @@ Small, anonymous events about the health of the app:
   browser's language setting, three **bucketed** screen signals
   (browser viewport size class, aspect-ratio class, and physical-
   display class — never your exact resolution), whether your
-  device supports VR or AR, the country your request came from as
+  device supports VR or AR, whether the app is running in its own
+  window or inside a frame on another web page and whether the
+  address asked for the app's minimal embedded view (never *which*
+  page framed it — its address is not read, though when only one
+  site embeds a given dataset, the dataset it opens can point to
+  that site), the country your request came from as
   a 2-letter code (derived by our Cloudflare edge from your IP
   address and attached server-side; the IP itself is never
   written to analytics storage), and which build of the app you
@@ -264,8 +269,10 @@ covered in sections 4 and 5:
   zone, or user-agent string — these are the classic fingerprinting
   signals, and our environment data is bucketed specifically to
   avoid them
-- **Page URLs from outside the app, referrer chains, or anything about
-  other sites you visit**
+- **Page URLs from outside the app, referrer chains, or the addresses
+  of other sites you visit.** When another web page shows the app
+  inside a frame, telemetry records only *that* it is framed, never
+  the page's address
 - **Your IP address in the event stream.** Our server sees your IP
   briefly to rate-limit abuse, then discards it — it is never written
   into analytics storage

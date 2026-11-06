@@ -233,7 +233,8 @@ describe('product-health dashboard — Phase 3b asset migration row', () => {
     //   - 3pa/F: version 10 (publisher portal row)
     //   - multi-monitor rung 13: version 11 (output row)
     //   - Second Life phase 1: version 12 (globe row)
-    expect(dashboard.version).toBe(12)
+    //   - session_start.window_context: version 13 (embedded views)
+    expect(dashboard.version).toBe(13)
   })
 })
 
@@ -472,5 +473,29 @@ describe('product-health dashboard — globe (web output) row', () => {
     }
     expect(sqlOf('Errors by category')).toMatch(/blob1 = 'error' AND blob5 != 'output'/)
     expect(sqlOf('Errors per session')).toMatch(/blob1 = 'error' AND blob5 != 'output'/)
+  })
+})
+
+describe('product-health dashboard — embedded views panel', () => {
+  const dashboard = load()
+  const panel = dashboard.panels.find(p => p.id === 28)
+
+  it('exists on its own grid row', () => {
+    expect(panel?.title).toMatch(/window context/)
+    const others = dashboard.panels.filter(p => p.id !== 28 && p.gridPos.y === panel?.gridPos.y)
+    expect(others).toHaveLength(0)
+  })
+
+  it('reads window_context from blob15, or blob16 when resumed is present', () => {
+    // session_start sorts window_context after vr_capable (blob15);
+    // the optional resumed field at blob11 moves it to blob16. The
+    // same test the export decoder uses: resumed reads 'true'/'false'
+    // only when it is there.
+    const sql = panel?.targets[0].url_options?.data ?? ''
+    expect(sql).toMatch(/blob1\s*=\s*'session_start'/)
+    // Nested if() with = only, the forms other panels already run on
+    // AE, rather than IN inside an expression, which none does.
+    expect(sql).toContain("if(blob11 = 'true', blob16, if(blob11 = 'false', blob16, blob15)) AS window_context")
+    expect(sql).toMatch(/HAVING window_context != ''/)
   })
 })

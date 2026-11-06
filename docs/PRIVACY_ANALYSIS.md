@@ -134,19 +134,42 @@ Per-field budget:
 | `build_channel` | 3 | 1.58 | ~0.05 (`public` ≫ rest) | src/types/index.ts:655 |
 | `app_version` | ~5–10 active | ~2.5 | ~2.0 | session.ts:121 |
 | `schema_version` | 1–2 active | ~1.0 | ~0.2 | session.ts:66 |
+| `window_context` | 4 (top / top-embed / framed / framed-embed) | 2.0 | ~0.5 (`top` dominates) | `detectWindowContext` in session.ts |
 | **server-stamped `country`** | 250 ISO codes | ~7.96 | ~5.5 (US/EU skew) | ingest.ts:206 |
 | **server-stamped `internal`** | 2 | 1.0 | ~0.05 (rare) | ingest.ts:232 |
 | **server-stamped `environment`** | 3 | 1.58 | ~0.0 (filtered to prod) | ingest.ts:195 |
 
-**Sum, effective.** ≈ **20.8 bits** for a typical session.
+**Sum, effective.** ≈ **21.8 bits** for a typical session. (This
+section gave 20.8 before `window_context` was added, but the column
+above it already summed to 21.3.)
 
-**Per Eckersley.** ~33 bits singles out a user globally. ~20.8
+**Per Eckersley.** ~33 bits singles out a user globally. ~21.8
 bits puts a session in an anonymity set of order
-2^(33−20.8) ≈ 2^12 ≈ 4,700 users *of the same configuration in
+2^(33−21.8) ≈ 2^11.2 ≈ 2,350 users *of the same configuration in
 the same country*. That is, an external observer cannot
 single out an individual from `session_start` alone unless
 the population of Terraviz users in that anonymity bucket
 is small.
+
+**`window_context`** (added 2026-11-06) is the one field that
+describes the visitor's surroundings rather than their device:
+whether another page framed the app, and whether the address asked
+for the embed view. The framing page's address was left out on
+purpose — `document.referrer` and `location.ancestorOrigins` are
+never read — because an address names a page and a small page's
+audience in one country on one day can be a handful of people.
+
+**The page can often be inferred anyway.** An embed code usually
+pins a dataset or a tour (`?dataset=`, `?tour=`), so the same
+session's first `layer_loaded.layer_id`, joined on `index1`, names
+the embed code, and where only one page uses that code it names the
+page. Before this field the same load was ambiguous between an
+embed and a shared link; `framed-embed` removes the ambiguity. For
+whoever holds the dataset, that is close to a referrer for embedded
+sessions that pin a dataset, and nothing for those that do not. What
+the field adds to identifiability is concentrated in that embedded
+minority: a `framed-embed` session sits in a far smaller set than a
+`top` one.
 
 **Compared with raw fingerprinting.** A typical browser leaks
 ~18 bits via raw User-Agent alone (Eckersley 2010, Table 3),
@@ -158,7 +181,7 @@ exact resolution, or User-Agent into storage
 where available, otherwise pattern-matches a substring; the
 raw UA never leaves the function). The budget gap is real:
 the same browser on raw fingerprinting leaks ~33 bits; via
-this pipeline it leaks ~21.
+this pipeline it leaks ~22.
 
 ### 2b. Other Tier A events — incremental entropy
 
@@ -267,19 +290,21 @@ permits.
 
 ### 3a. `session_start` quasi-identifier set
 
-Take the seven enrichment fields plus server-stamped country:
+Take the eight enrichment fields plus server-stamped country:
 
 ```
 { platform, os, locale, viewport_class, aspect_class,
-  screen_class, vr_capable, country }
+  screen_class, vr_capable, window_context, country }
 ```
 
 Worst-case Cartesian product:
-3 × 6 × 200 × 5 × 6 × 5 × 4 × 250 ≈ 5.4 × 10⁹ unique tuples.
+3 × 6 × 200 × 5 × 6 × 5 × 4 × 4 × 250 ≈ 2.2 × 10⁹ unique tuples
+(the product before `window_context` was 5.4 × 10⁸, not the
+5.4 × 10⁹ this section used to give).
 
 But the empirical distribution is *not* uniform. The dominant
 bucket is plausibly something like
-`(web, windows, en-US, lg, landscape, 1080p, none, US)` —
+`(web, windows, en-US, lg, landscape, 1080p, none, top, US)` —
 that bucket alone contains millions of equivalent users in
 the broader web. For Terraviz specifically, with a smaller
 user population, the *effective* anonymity-set size for a
@@ -288,7 +313,7 @@ anonymity tables from Eckersley 2010, scaled by an assumed
 ~10⁵ active users).
 
 For users in **rare buckets** the picture changes. A user
-with `(desktop, linux, lt-LT, xl, ultrawide, 4k+, both, LT)`
+with `(desktop, linux, lt-LT, xl, ultrawide, 4k+, both, top, LT)`
 is plausibly *the only such user in the dataset* — `k = 1`.
 This is the classic critique of demographic-bucket anonymity:
 the median user is safe; the tail is not.
@@ -329,7 +354,7 @@ SELECT index1 FROM terraviz_events
 WHERE blob1 = 'session_start'
   AND blob3 = 'IS'        -- country
   AND blob9 = 'mac'       -- os
-  AND blob13 = '4k+'      -- screen_class
+  AND blob12 = '4k+'      -- screen_class (blob13 if resumed is present)
   AND timestamp BETWEEN '2026-04-15 14:00:00'
                     AND '2026-04-15 14:15:00'
 ```
@@ -339,6 +364,12 @@ plausibly a single session. From that `index1`, the adversary
 recovers every Tier A event Alice fired: layers loaded,
 camera trajectory, errors. Tier B (research mode) on top of
 that recovers `dwell` and `browse_search`.
+
+`window_context` sharpens it for embedded sessions. An adversary
+who knows Alice read a particular page that embeds TerraViz adds
+`AND blob15 = 'framed-embed'` (blob16 if `resumed` is present),
+which drops the `top` majority in one filter, and the page's pinned
+dataset in the session's `layer_loaded` confirms the match.
 
 This attack succeeds. It is the worst case, but it is not
 hypothetical, and §9 enumerates the only structural

@@ -21,6 +21,7 @@ import type { TelemetryEvent } from '../../../../src/types'
 import {
   decodeAeRow,
   EVENT_LAYOUTS,
+  type EventLayout,
   type TelemetryEventType,
 } from './analytics-layouts'
 
@@ -40,6 +41,7 @@ const FIXTURES: { [K in TelemetryEventType]: EventFor<K> } = {
     vr_capable: 'none',
     schema_version: '1',
     resumed: true,
+    window_context: 'framed-embed',
     client_offset_ms: 12,
   },
   session_end: {
@@ -480,6 +482,39 @@ describe('EVENT_LAYOUTS', () => {
     expect(decoded.fields.resumed).toBeUndefined()
     expect(decoded.fields.schema_version).toBe('1')
     expect(decoded.fields.vr_capable).toBe('none')
+    expect(decoded.fields.window_context).toBe('framed-embed')
+  })
+
+  // Rows written before `window_context` existed stay in the archive
+  // and are re-exported by a backfill, so they must still decode. The
+  // case the old last-slot rule got wrong is the second: an older row
+  // that carries `resumed` fills exactly as many slots as a newer row
+  // that does not.
+  it('decodes an older session_start row (no window_context, no resumed)', () => {
+    const { resumed: _r, window_context: _w, ...rest } = FIXTURES.session_start
+    const decoded = decodeAeRow(toAeSqlRow(rest as unknown as TelemetryEvent))
+    expect(decoded.fields.resumed).toBeUndefined()
+    expect(decoded.fields.schema_version).toBe('1')
+    expect(decoded.fields.vr_capable).toBe('none')
+    expect(decoded.fields.window_context).toBe('')
+  })
+
+  it('decodes an older session_start row that carries resumed', () => {
+    const { window_context: _w, ...rest } = FIXTURES.session_start
+    const decoded = decodeAeRow(toAeSqlRow(rest as unknown as TelemetryEvent))
+    expect(decoded.fields.resumed).toBe(true)
+    expect(decoded.fields.platform).toBe('web')
+    expect(decoded.fields.schema_version).toBe('1')
+    expect(decoded.fields.vr_capable).toBe('none')
+    expect(decoded.fields.window_context).toBe('')
+  })
+
+  it('reads resumed: false as present, not as an absent field', () => {
+    const event = { ...FIXTURES.session_start, resumed: false } as TelemetryEvent
+    const decoded = decodeAeRow(toAeSqlRow(event))
+    expect(decoded.fields.resumed).toBe(false)
+    expect(decoded.fields.schema_version).toBe('1')
+    expect(decoded.fields.window_context).toBe('framed-embed')
   })
 
   it('round-trips voice_interaction with a barge-in (interrupted present)', () => {
@@ -492,22 +527,34 @@ describe('EVENT_LAYOUTS', () => {
     expect(decoded.fields.lang).toBe('en')
   })
 
-  it('voice_interaction optional-blob precondition: last blob is the never-empty trigger enum', () => {
-    const layout = EVENT_LAYOUTS.voice_interaction
-    expect(layout.blobs[layout.blobs.length - 1]).toBe('trigger')
-    expect(FIXTURES.voice_interaction.trigger).not.toBe('')
+  it('asserts the optional-blob detection precondition for every layout that has one', () => {
+    // The decoder reads an optional blob as present exactly when its
+    // own slot reads 'true' or 'false'. That holds only while the
+    // optional field is a boolean and the field that slides into its
+    // slot when it is absent never is one.
+    const layouts = Object.entries(EVENT_LAYOUTS) as [TelemetryEventType, EventLayout][]
+    const withOptional = layouts.filter(([, layout]) => layout.optionalBlob)
+    expect(withOptional.map(([type]) => type).sort()).toEqual(['session_start', 'voice_interaction'])
+    for (const [type, layout] of withOptional) {
+      const optional = layout.optionalBlob as string
+      expect(layout.booleans ?? [], type).toContain(optional)
+      const next = layout.blobs[layout.blobs.indexOf(optional) + 1]
+      if (next === undefined) continue
+      expect(layout.booleans ?? [], `${type}.${next}`).not.toContain(next)
+      const value = (FIXTURES[type] as unknown as Record<string, unknown>)[next]
+      expect(value, `${type}.${next}`).not.toBe('true')
+      expect(value, `${type}.${next}`).not.toBe('false')
+    }
   })
 
-  it('asserts the optional-blob detection precondition: the last blob field is never empty', () => {
-    // The decoder detects an absent optional blob by checking the
-    // LAST blob slot of the full layout. That only works while the
-    // last field is a never-empty enum — for session_start, that's
-    // `vr_capable`. If a field sorting after `vr_capable` is ever
-    // added (or vr_capable becomes emptyable), the decoder needs a
-    // new detection rule.
-    const layout = EVENT_LAYOUTS.session_start
-    expect(layout.blobs[layout.blobs.length - 1]).toBe('vr_capable')
-    expect(FIXTURES.session_start.vr_capable).not.toBe('')
+  it('pins the fields that slide into an absent optional slot', () => {
+    // A schema change that put a boolean (or a field that could read
+    // 'true') right after either optional field would make the
+    // decoder see the optional field where it is absent.
+    expect(EVENT_LAYOUTS.session_start.blobs[6]).toBe('resumed')
+    expect(EVENT_LAYOUTS.session_start.blobs[7]).toBe('schema_version')
+    expect(EVENT_LAYOUTS.voice_interaction.blobs[0]).toBe('interrupted')
+    expect(EVENT_LAYOUTS.voice_interaction.blobs[1]).toBe('lang')
   })
 
   it('preserves rows of unknown event types positionally, including sentinel values', () => {

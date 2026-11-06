@@ -34,6 +34,23 @@
  */
 
 import { decodeAeRow, type DecodedEventRow } from './analytics-layouts'
+import type { WindowContext } from '../../../../src/types'
+
+/** The four values `session_start.window_context` can take. A
+ * `Record` rather than a list so a value added to the type fails to
+ * compile here instead of being dropped from the rollup. Anything
+ * else a client sends is left out of the mix rather than written to
+ * D1 as a dimension key. */
+const WINDOW_CONTEXTS: Record<WindowContext, true> = {
+  top: true,
+  'top-embed': true,
+  framed: true,
+  'framed-embed': true,
+}
+
+function isWindowContext(value: string): value is WindowContext {
+  return Object.prototype.hasOwnProperty.call(WINDOW_CONTEXTS, value)
+}
 
 export const DEFAULT_AE_DATASET = 'terraviz_events'
 export const ARCHIVE_PREFIX = 'events/v1'
@@ -687,6 +704,12 @@ export function computeRollups(rows: DecodedEventRow[], day: string): DayRollups
     if (row.event_type === 'session_start') {
       const os = str(row.fields, 'os')
       if (os) addDimension(row.environment, 'os', os, w)
+      // Own window or a frame, embed flag or not. Rows from clients
+      // older than the field decode it as '' and are left out, so the
+      // mix covers only sessions that reported it; so is any value
+      // that is not one of the four.
+      const windowContext = str(row.fields, 'window_context')
+      if (isWindowContext(windowContext)) addDimension(row.environment, 'window_context', windowContext, w)
     } else if (row.event_type === 'map_click') {
       const hitKind = str(row.fields, 'hit_kind')
       if (hitKind) addDimension(row.environment, 'click_kind', hitKind, w)

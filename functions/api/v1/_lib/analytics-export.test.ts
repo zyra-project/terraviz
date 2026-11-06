@@ -371,11 +371,15 @@ describe('computeRollups', () => {
     expect(q.response_ms_sum).toBe(3000 + 5000 * 3)
   })
 
-  it('rolls up generic dimension mixes (search, dwell, gestures, os, clicks)', () => {
+  it('rolls up generic dimension mixes (search, dwell, gestures, os, window context, clicks)', () => {
     const rollups = computeRollups(
       [
-        decoded({ event_type: 'session_start', fields: { platform: 'web', os: 'mac' } }),
-        decoded({ event_type: 'session_start', fields: { platform: 'desktop', os: 'windows' } }),
+        decoded({ event_type: 'session_start', fields: { platform: 'web', os: 'mac', window_context: 'framed-embed' } }),
+        decoded({ event_type: 'session_start', fields: { platform: 'desktop', os: 'windows', window_context: 'top' } }),
+        // A row from a client older than window_context decodes it as ''.
+        decoded({ event_type: 'session_start', fields: { platform: 'web', os: 'linux', window_context: '' } }),
+        // A value outside the four is not written as a dimension key.
+        decoded({ event_type: 'session_start', fields: { platform: 'web', os: 'linux', window_context: 'x'.repeat(300) } }),
         decoded({ event_type: 'map_click', fields: { hit_kind: 'marker', hit_id: 'm1', lat: 1, lon: 1, zoom: 5 } }),
         decoded({ event_type: 'browse_search', fields: { query_hash: 'abc123', result_count_bucket: '0', query_length: 7 } }),
         decoded({ event_type: 'dwell', fields: { view_target: 'chat', duration_ms: 15000 } }),
@@ -387,6 +391,9 @@ describe('computeRollups', () => {
     const find = (metric: string, key: string) => rollups.dimensions.find(d => d.metric === metric && d.key === key)
     expect(find('os', 'mac')?.count).toBe(1)
     expect(find('os', 'windows')?.count).toBe(1)
+    expect(find('window_context', 'framed-embed')?.count).toBe(1)
+    expect(find('window_context', 'top')?.count).toBe(1)
+    expect(rollups.dimensions.filter(d => d.metric === 'window_context')).toHaveLength(2)
     expect(find('click_kind', 'marker')?.count).toBe(1)
     expect(find('search', 'abc123')).toMatchObject({ count: 1, value_sum: 7 })
     expect(find('search_zero', 'abc123')?.count).toBe(1) // bucket '0'
