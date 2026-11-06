@@ -1,17 +1,18 @@
-# Tile Service and Decimation Plan — Serving TerraViz Datasets to Outside Tools
+# Data Delivery Plan — Getting TerraViz Datasets to Other User Groups in Efficient Formats
 
 **Status: draft for review.** Nothing in this document has been built.
-It answers two linked questions. First, what would TerraViz have to
-serve so that its datasets can be used *outside* TerraViz — in ArcGIS
-Online and Hub, in the OpenSpace planetarium software, in Second Life,
-on Science On a Sphere systems and spherical displays, and in desktop
-and web GIS tools? Second, since each of those tools wants the data at
-a different size, pace and precision, how should TerraViz *decimate*
-it — reduce it in space, in time and in bit depth — so that what each
-tool shows is still true to the data? The research behind it is desk
-research (vendor documentation, source code and release notes, cited
-in the sources section), not hands-on testing, except where a sibling
-document already records a test.
+Today a TerraViz dataset reaches people one way: through TerraViz
+itself, or a TerraViz page embedded somewhere else. This plan asks how
+to get the same data to the groups who work in other tools — GIS
+analysts in ArcGIS and QGIS, planetarium and dome producers in
+OpenSpace, Science On a Sphere sites and spherical-display owners,
+educators in Second Life, web developers building their own globes —
+in the format that is efficient for each. Sometimes that is map tiles,
+sometimes a georeferenced raster, and for anything that plays a whole
+globe as an animation it is usually video. The research behind it is
+desk research (vendor documentation, source code and release notes,
+cited in the sources section), not hands-on testing, except where a
+sibling document already records a test.
 
 **Last reviewed:** 2026-11-06 (first draft, from desk research on each
 consumer.)
@@ -22,11 +23,12 @@ consumer.)
   drops one it assumes it has: the ArcGIS Map Viewer time slider for
   WMTS layers, the OpenSpace video layer, OGC API Tiles support in
   ArcGIS or OpenSpace.
-- Phase D1 of §7 (the hand-built tile prototype) has run against
-  OpenSpace and QGIS. Its result decides most of §5.
+- Phase D1 of §9 (the hand-built prototypes) has run: tiles against
+  OpenSpace and QGIS, a packaged video on a dome or sphere. Its results
+  decide most of §5 and §6.
 - The STAC API (`docs/metadata/PHASE4_IMPLEMENTATION.md`) clears its
   rollout gate, or is withdrawn. §4.3 leans on it.
-- A funded partner names a consumer this plan does not cover.
+- A funded partner names a user group this plan does not cover.
 
 **Companions.** [`metadata/README.md`](metadata/README.md) (the STAC
 projection this plan's catalog channel builds on),
@@ -49,28 +51,45 @@ tool?* Today the honest answer is "only by embedding TerraViz itself".
 Each of those tools reads data in its own way, and TerraViz speaks
 almost none of them.
 
+**There is no single efficient format.** What is efficient depends on
+what the group does with the data:
+
+| What the user does | Efficient format | Why |
+|---|---|---|
+| Plays a whole-globe animation: a dome show, a sphere, a virtual world, a presentation | **Video** | Compression across frames. The catalog's 4096×2048 rung is capped at 25 Mbit/s (`cli/lib/ffmpeg-hls.ts:91`), about 100 KB a frame at 30 fps; the same frame as a still image is one to several megabytes. One file, one request, and every player on every platform reads H.264. |
+| Browses a map, zooms into a region, steps through time at their own pace | **Tiles** | Fetches only the part of the globe on screen, at the zoom shown, for any time in any order. Video cannot serve a region, and reaching one frame means decoding from the keyframe before it. |
+| Analyses values: statistics, overlays with their own data | **Georeferenced raster** (COG, NetCDF) | Real numbers, with the placement in the file. Neither video nor coloured tiles carry them. |
+| Looks for datasets | **Catalog** (STAC, OGC API Features, DCAT) | Metadata, not pixels. |
+| Wants the TerraViz experience itself in their page | **Embed or output page** | Already built. |
+
 The temptation is to answer each request with a bespoke export — an
 ArcGIS publishing script here, an OpenSpace asset there. This plan
 argues for the opposite: a small number of **channels**, each built on
-an open standard that several consumers already read, so that one piece
-of work serves many tools. It names the channels, says which consumer
-each serves and how well, designs the one channel that does not exist
-yet in any form (a tile service), and orders the work.
+a format and standard that several groups already read, so that one
+piece of work serves many tools. It surveys the groups (§2), compares
+what each reads (§3), recommends a channel per group (§4), and designs
+the two channels that need new work: a **tile service** (§5) and
+**video packaged for players other than TerraViz's own** (§6). Today
+a video reaches another player only through TerraViz's manifest
+(`functions/api/v1/datasets/[id]/manifest.ts`: an HLS playlist for a
+published upload, a signed MP4 link that expires in about an hour for
+the legacy SOS catalog) or through a person's by-hand zip download.
+There is no stable file URL a dome or a sphere can be pointed at, and
+no per-frame record of dates a player could sync to.
 
-**Decimation is where that one piece of work can quietly go wrong.**
-Every consumer asks for less than the node holds: a lower zoom level, a
-coarser time step, a smaller video, fewer colours. How the node makes
-"less" decides whether a smoke plume survives the zoom-out, whether a
-diverging palette keeps its meaning, and whether an hourly field
-stepped daily shows the same hour of the day forever. §6 sets those
-rules. They matter more than the URL grammar, because a wrong URL fails
-loudly and a wrong decimation draws a plausible picture of something
-the data never said.
+**Making smaller versions honestly** is the part that can quietly go
+wrong in every channel. Every group asks for less than the node holds:
+a lower zoom level, a coarser time step, a smaller video, fewer
+colours. How the node makes "less" decides whether a smoke plume
+survives the zoom-out, whether a diverging palette keeps its meaning,
+and whether an hourly field stepped daily shows the same hour of the
+day forever. §7 sets those rules. A wrong URL fails loudly; a wrong
+reduction draws a plausible picture of something the data never said.
 
-Every channel below serves from the node; none pushes data into
-another organisation's system without that organisation pulling it,
-with one deliberate exception (§4.2's ArcGIS Image adapter, which an
-operator runs with their own credentials).
+Every channel serves from the node; none pushes data into another
+organisation's system without that organisation pulling it, with one
+deliberate exception (§4.2's ArcGIS Image adapter, which an operator
+runs with their own credentials).
 
 ---
 
@@ -118,7 +137,7 @@ service (a tile grid). That is the gap.
 
 The one channel that does not exist yet in any form, and the one most
 consumers share. This section is a design sketch for review, not a
-specification; Phase D1 (§7) exists to test it before anything is
+specification; Phase D1 (§9) exists to test it before anything is
 built.
 
 ### 5.1 Tile grids
@@ -142,7 +161,7 @@ catalog's 4096×2048 frames stop at level 3: **170 tiles per frame**
 source image at its native level, which is why cutting needs no
 resampling at the deepest level and only 2×2 decimation above it.
 Frames at other widths — a 0.1° science grid is 3600 wide, a 0.25° one
-1440 — are handled in §6.1.
+1440 — are handled in §7.1.
 
 **Secondary: WebMercatorQuad** (`GoogleMapsCompatible`), for clients
 whose basemaps are Web Mercator and which require the tile grid to
@@ -160,7 +179,7 @@ existing GIBS configurations at the cost of resampling every frame.
 Copying GIBS's *URL grammar* (§5.2) while using the standard grid gets
 most of the benefit; a client that reads the capabilities document, or
 GDAL with an explicit data window, handles the difference. This is a
-judgement call — §9 lists it as an open question.
+judgement call — §11 lists it as an open question.
 
 ### 5.2 URL grammar
 
@@ -184,7 +203,7 @@ TerraViz:  /api/v1/wmts/epsg4326/{datasetId}/{style}/{time}/WorldCRS84Quad/{z}/{
 
 Living under `/api/v1/` puts the service inside the node's existing
 versioned surface: a breaking change is a `/v2/`, and the contract is
-pinned in `docs/protocol/` the way STAC's is (§6).
+pinned in `docs/protocol/` the way STAC's is (§8).
 
 ### 5.3 Time
 
@@ -199,7 +218,7 @@ pinned in `docs/protocol/` the way STAC's is (§6).
   A tile request for a time inside the dataset's span returns the
   frame at or before it, not a 404. The existing `/frames?at=` query
   returns the *closest* frame; the tile service should not silently
-  differ from it, so which rule to use is open (§9).
+  differ from it, so which rule to use is open (§11).
 - **`default` is the latest frame**, matching GIBS, so a client that
   sends no time gets the most recent picture.
 - **Datasets with no real time axis** — a looping diagram animation, a
@@ -221,7 +240,7 @@ pinned in `docs/protocol/` the way STAC's is (§6).
   clients are TerraViz. Analysis on values goes through §4.2's rasters,
   which carry real numbers rather than a 256-level code.
 - **How a style's lower levels are made is not a style choice.** It is
-  set per dataset by what the data is (§6.1), because the same field
+  set per dataset by what the data is (§7.1), because the same field
   decimated two ways is two different claims about the world.
 
 ### 5.5 Normalising a frame before cutting
@@ -260,7 +279,7 @@ against its own idea of where a texel lands.
   (rather than a public bucket URL) is what makes time snapping, KVP
   requests, CORS and visibility checks possible. Its cost is one Worker
   invocation per tile request; at Cloudflare's request pricing that is
-  small next to the storage, but it is not zero, and §9 asks whether
+  small next to the storage, but it is not zero, and §11 asks whether
   exact-time tiles should also be reachable straight from the bucket.
 - **Visibility follows the catalog.** Only public, published,
   non-retracted datasets get tiles, the same predicate the STAC
@@ -298,12 +317,12 @@ Order-of-magnitude only; Phase D1 replaces these with measurements.
 R2 charges for storage and operations, not for egress, so a popular
 layer costs little more than an unpopular one. The costs that grow are
 runner minutes and object counts on long animations, which is why
-§7 tiles datasets that have frames already, and leaves the legacy video
+§9 tiles datasets that have frames already, and leaves the legacy video
 catalog to a later, opt-in phase.
 
 ---
 
-## 6. Decimation
+## 7. Making smaller versions: decimation
 
 Every consumer reaches its view by asking for less than the node
 holds, along four axes: space (a zoom level), time (a step), bit depth
@@ -312,7 +331,7 @@ The node decides how "less" is made. The rule that runs through this
 section is short: **decimate values, not colours; choose time samples
 on purpose; never present more precision than the source had.**
 
-### 6.1 Space: building the pyramid
+### 7.1 Space: building the pyramid
 
 **The native level.** A dataset's deepest level is the smallest
 WorldCRS84Quad level that holds its source frame without loss:
@@ -359,7 +378,7 @@ Four rules apply whatever the method.
   `mode` when less than half the block's area is valid, under `max`
   only when none of it is, because the point of `max` is that one fire
   pixel survives the zoom-out. The half-area threshold is a judgement
-  call (§9).
+  call (§11).
 - **Area, not pixel count.** An equirectangular row's cells shrink
   toward the poles, so the two rows of a block weigh differently. The
   weights are the exact band areas `datasetStats.ts` already uses
@@ -379,7 +398,7 @@ its ±85.05° edge Mercator *stretches* rows, so there the warp is
 upsampling, and a data-encoded layer should use nearest neighbour
 rather than interpolate values that were never measured.
 
-### 6.2 Time: choosing samples
+### 7.2 Time: choosing samples
 
 **A client chooses times; the node chooses frames.** Snapping a
 requested time to a frame (§5.3) is decimation by *selection*, and
@@ -418,7 +437,7 @@ only a window of frames (`cli/lib/r2-frames.ts`); their tiles follow
 the same window, so a layer's time dimension has a moving start, which
 clients that cache capabilities need to tolerate.
 
-### 6.3 Bit depth and format
+### 7.3 Bit depth and format
 
 - **JPEG** (quality around 85) for opaque RGB pictures, as GIBS does
   for its opaque layers.
@@ -441,7 +460,7 @@ clients that cache capabilities need to tolerate.
   through the raster channel (§4.2), which carries them without a
   256-level code.
 
-### 6.4 Video, for consumers that play it
+### 7.4 Video, for consumers that play it
 
 The HLS ladder already decimates display video by rung, and the web
 output caps the rung at its own frame width (`capLevelForWidth`,
@@ -451,7 +470,7 @@ pinned to one 4096×2048 rung on purpose: lower rungs "would resample a
 data raster to a quarter scale" (`cli/lib/ffmpeg-hls.ts:102`;
 `DATA_ENCODED_VIDEO_PLAN.md` §Why the frame is 4096×2048), and an
 encoder's scaler averages luma codes — the
-§6.1 failure again. So any consumer that needs a smaller data-encoded
+§7.1 failure again. So any consumer that needs a smaller data-encoded
 video gets one built from decimated *frames* in value space, never one
 transcoded down from the 4K video.
 
