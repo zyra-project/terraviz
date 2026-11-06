@@ -1670,7 +1670,8 @@ your localhost.
 
 Routing Workers AI through an AI Gateway is a **code change** — the
 `AI.run()` call accepts a `gateway` option but the current code
-doesn't pass one. A gateway URL in config does nothing on its own.
+doesn't pass one. For chat, a gateway URL in config does nothing on
+its own. (Realtime voice does use a gateway; see 14.5.)
 
 ## 8.8 Redeploy
 
@@ -1983,9 +1984,12 @@ thing you may genuinely skip.
 
 **The repo ships no CSP for the app.** `src/index.html` has no
 `<meta>` policy, and `public/_headers` sets `X-Content-Type-Options`,
-`Referrer-Policy` and `Permissions-Policy` everywhere. Its only CSP
-is `frame-ancestors 'self'` on `/publish`, so no other site can
-frame the publisher portal. Keep that rule if you edit the file.
+`Referrer-Policy` and `Permissions-Policy` everywhere.
+`Permissions-Policy` turns off the camera and location, and lets only
+this site's own pages ask for the microphone, which Orbit's voice
+input needs (to turn voice off, see 14.5). The file's only CSP is
+`frame-ancestors 'self'` on `/publish`, so no other site can frame
+the publisher portal. Keep that rule if you edit the file.
 Upstream's production deploy enforces a strict `connect-src` policy
 **at the Cloudflare edge** via Transform Rules — which a fork does
 **not** inherit. Your node works without one; you should still add your
@@ -2269,11 +2273,64 @@ with `root_selector: "data"`.
 
 | Feature | Variables | Notes |
 |---|---|---|
-| Orbit voice (batch speech-to-text and text-to-speech) | none | Runs on the `AI` binding. `KILL_VOICE=1` is the kill switch. |
-| Realtime streaming STT | `CF_ACCOUNT_ID`, `CF_AI_GATEWAY`, `CF_AIG_TOKEN` (**secret**), optional `VOICE_STREAM_MODEL` | Opt-in. Absent any of them, `/api/voice/stream` sends a JSON error frame and the client falls back to batch Whisper. See [`ORBIT_VOICE_PLAN.md`](ORBIT_VOICE_PLAN.md) §3. |
+| Orbit voice (batch speech-to-text and text-to-speech) | none | Runs on the `AI` binding. `KILL_VOICE=1` stops these and the realtime route, but not the browser's own speech engine; see **Turning voice off** below. |
+| Realtime streaming STT | `CF_ACCOUNT_ID`, `CF_AI_GATEWAY`, `CF_AIG_TOKEN` (**secret**), optional `VOICE_STREAM_MODEL`; `VITE_VOICE_WS_STREAMING=true` (build-time) | Opt-in. Without the three server variables, `/api/voice/stream` sends a JSON error frame and the client falls back to batch Whisper. Set up the gateway as described under this table first. See [`ORBIT_VOICE_PLAN.md`](ORBIT_VOICE_PLAN.md) §3. |
 | Wake word | `VITE_VOICE_WAKEWORD_MODEL_URL` (build-time) | [`ORBIT_WAKEWORD.md`](ORBIT_WAKEWORD.md) |
 | YouTube media suggestions | `YOUTUBE_API_KEY` (**secret**) | Absent = source stays off, nothing errors. [`YOUTUBE_API_KEY.md`](YOUTUBE_API_KEY.md) |
 | Current events / blog | none beyond Phase 8 | Feeds console at `/publish/feeds`. [`CURRENT_EVENTS_PLAN.md`](CURRENT_EVENTS_PLAN.md) |
+
+**The realtime gateway must not keep logs.** Visitors' microphone
+audio and its transcripts pass through it, and an AI Gateway logs
+by default.
+
+- Create a new gateway for this alone, and set `CF_AI_GATEWAY` to
+  its name. Logs is one switch for the whole gateway. On a shared
+  one, turning logs back on for other traffic starts storing
+  visitors' audio too.
+- On the dashboard's **AI Gateway** page, open that gateway's
+  **Settings** and turn **Logs** off.
+- The proxy also sends `cf-aig-collect-log: false`. Cloudflare does
+  not say whether that header covers a WebSocket, so do not rely on
+  it.
+- **Gate:** after one spoken turn, the gateway's Logs page is
+  empty.
+
+The route does not check how the site was built. Once the three
+server variables are set, it answers any client that sends this
+site's `Origin` header, and a script can send one. So set them only
+on a build with `VITE_VOICE_WS_STREAMING=true`. Each stream closes
+after 60 seconds, or 60 seconds of audio, whichever comes first.
+That also limits how long an open stream outlasts `KILL_VOICE=1`.
+Visitors reach the route only with Orbit's **Voice engine** set to
+**Cloud (Cloudflare)** and **Hands-free** set to anything but
+**Off**.
+
+**Exhibits and kiosks.** The first time a browser uses voice, Orbit
+says where the audio will go and listens only after **Start
+listening**. It asks again for each voice engine, and for each of
+open mic and wake word; push to talk asks at its first press. A kiosk
+set up before this notice existed shows it on its next load and stays
+silent until someone answers it. If a visitor chooses **Not now**,
+Hands-free is set to Off on that kiosk. So answer it yourself while
+setting up, with the voice engine and Hands-free mode the exhibit will
+use, and tell exhibit operators before you deploy this.
+
+Once you have pressed Start listening, visitors at that kiosk never
+see the notice. Post a sign saying the microphone is on: it is how
+they are told. Pin **Cloud (Cloudflare)** there too, so visitors'
+voices do not go to a browser maker. The desktop app has no Cloud
+engine.
+
+**Turning voice off.** `KILL_VOICE=1` stops only the Cloud engine.
+The default engine is the visitor's browser, which sends audio to the
+browser's maker rather than to your node. To block more, change
+`microphone=(self)` to `microphone=()` in `public/_headers`. Chrome
+and Edge then refuse the microphone to the Cloud engine and every
+hands-free mode. Whether they also refuse their own speech
+recognition, which the default engine uses, has not been tested.
+Either way the microphone button still shows, and fails when pressed.
+Other browsers may ignore the header. Turning Orbit off on the
+**Features** card removes voice along with the rest of Orbit.
 
 # Phase 15 — Desktop app fork (Tier 3)
 
@@ -2494,11 +2551,11 @@ is [`scripts/lib/expected-bindings.ts`](../scripts/lib/expected-bindings.ts).
 | `CF_ACCOUNT_ID` | plaintext | 14.2 / 14.5 | AE SQL API, voice gateway |
 | `ANALYTICS_SQL_TOKEN` | secret | 14.2 | AE SQL API |
 | `ANALYTICS_AE_DATASET` | plaintext | 14.2 | Renamed AE dataset |
-| `CF_AI_GATEWAY` | plaintext | 14.5 | Realtime STT |
+| `CF_AI_GATEWAY` | plaintext | 14.5 | Realtime STT: a gateway of its own, Logs off |
 | `CF_AIG_TOKEN` | secret | 14.5 | Realtime STT |
 | `VOICE_STREAM_MODEL` | plaintext | 14.5 | STT model override |
 | `YOUTUBE_API_KEY` | secret | 14.5 | YouTube suggestions |
-| `KILL_VOICE` | plaintext | — | Voice kill switch |
+| `KILL_VOICE` | plaintext | 14.5 | Stops the Cloud voice engine, not the browser's |
 | `KILL_TELEMETRY` | plaintext | — | Telemetry kill switch (410) |
 | `FEEDBACK_ADMIN_TOKEN` | secret | 6.4 | Bearer fallback for legacy admin routes |
 | `CATALOG_R2_BUCKET` | plaintext | — | Bucket-name override |

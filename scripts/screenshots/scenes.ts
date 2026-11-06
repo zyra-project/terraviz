@@ -314,6 +314,20 @@ export const scenes: Scene[] = [
     },
   },
   {
+    name: 'orbit-voice-notice',
+    description:
+      'Orbit — the first-use voice notice, shown before the microphone is first used (browser engine)',
+    fixtures: catalogReportFixtures(),
+    async setup(page) {
+      await openCatalog(page)
+      await page.locator('#browse-chat-btn').click()
+      await page.locator('#chat-panel').waitFor({ state: 'visible' })
+      // Each capture starts with empty storage, so the first tap asks.
+      await page.locator('#chat-mic').click()
+      await page.locator('dialog.voice-notice').waitFor({ state: 'visible' })
+    },
+  },
+  {
     name: 'help-panel',
     description: 'Help & feedback panel (Guide tab + feedback form)',
     fixtures: catalogReportFixtures(),

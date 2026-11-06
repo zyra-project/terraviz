@@ -15,7 +15,7 @@
  * secret): `CF_ACCOUNT_ID`, `CF_AI_GATEWAY` (gateway name),
  * `CF_AIG_TOKEN` (AI Gateway authorization). Absent any of them — or
  * with `KILL_VOICE` set, the node's `orbit` feature off, or over the
- * per-IP rate cap — the proxy
+ * per-caller rate cap — the proxy
  * accepts the socket and sends a JSON error frame
  * (`{ type: 'error', code }`) before closing, since a browser
  * WebSocket can't read an HTTP status. The client cools down on that
@@ -45,11 +45,71 @@ function baseLang(lang: string): string {
   return (lang || '').toLowerCase().split('-')[0]?.trim() ?? ''
 }
 
-// Per-IP new-connection cap. Streaming sockets are long-lived, so the
-// abuse vector is opening many of them; 20 fresh connections/min/IP is
-// generous for a real user (a few barge-in reopens) but caps a flood.
-// In-memory per-isolate, like the POST voice routes.
+// Per-caller new-connection cap, a caller being an IPv4 address or an
+// IPv6 /64 (`clientRateKey`). Streaming sockets are long-lived, so the
+// abuse vector is opening many of them; 20 fresh connections a minute
+// is generous for a real user (a few barge-in reopens) but caps a flood.
+// In-memory per-isolate, like the POST voice routes, so it bounds one
+// isolate's share rather than a caller's total: what bounds each
+// connection is the per-stream cap below.
 const isRateLimited = makeRateLimiter(20)
+
+/**
+ * The most one stream may cost: 60 seconds open, and 60 seconds' worth of
+ * audio. The client opens one socket per spoken turn, bounded by the
+ * voice detector in open mic, the button in push-to-talk and 8 s after a
+ * wake word, so a real turn never comes near either. Without them a
+ * socket ran for as long as anyone kept it open, and the Origin check
+ * stops only browsers: a script that sets its own Origin could stream
+ * audio through the operator's gateway, on the operator's bill, for as
+ * long as it liked. The byte cap is the half a script cannot outrun,
+ * since it can send an hour of recorded audio inside the first minute.
+ * The lifetime also bounds how long a socket outlives a `KILL_VOICE` or
+ * an Orbit switch-off, which are checked only at connect.
+ *
+ * Hitting either closes the client's socket with 1008 and no error frame
+ * (the gateway's is closed plainly): the client ends that turn and
+ * listens on, where an error frame would put the realtime path into
+ * cooldown for the rest of the page's session.
+ */
+export const MAX_STREAM_MS = 60_000
+/** 60 s of linear16 PCM, 16 kHz mono: 2 bytes × 16,000 samples/s. */
+export const MAX_STREAM_BYTES = 2 * 16_000 * (MAX_STREAM_MS / 1000)
+
+/**
+ * The bytes a binary frame carries, or `null` for a frame of any other
+ * type. With `binaryType = 'arraybuffer'` workerd delivers only an
+ * `ArrayBuffer` or a string, so `null` is defence: a type this cannot
+ * measure must not cross the cap uncounted, so it ends the stream.
+ */
+function frameBytes(data: unknown): number | null {
+  if (data instanceof ArrayBuffer || ArrayBuffer.isView(data)) return data.byteLength
+  return null
+}
+
+/**
+ * How the client's socket is closed for each reason the proxy ends a
+ * stream itself.
+ *
+ * A text frame closes with 1003. The real client sends only binary PCM
+ * (`src/services/voiceWsStreaming.ts`), and this keeps the relay's
+ * interface to that, so nothing can drive Deepgram's control messages
+ * through it. It is defence in depth, **not** what bounds an idle
+ * stream: Deepgram closes a stream after about 10 s with neither audio
+ * nor a `KeepAlive`, and any binary frame resets that clock as a
+ * `KeepAlive` would, so a few bytes of PCM every few seconds hold a
+ * stream open just as well. `MAX_STREAM_MS` is what bounds that, and
+ * this rule is no reason to loosen it. If the client is ever changed to
+ * send `CloseStream` or `Finalize` to flush its last transcript
+ * (Deepgram's documented clean end), this rule will close those streams,
+ * and needs an exact-match allowlist first.
+ */
+const PROXY_CLOSE = {
+  time: { code: 1008, reason: 'stream_limit', log: 'closed at the stream limit (time)' },
+  bytes: { code: 1008, reason: 'stream_limit', log: 'closed at the stream limit (bytes)' },
+  text: { code: 1003, reason: 'binary_only', log: 'closed on a text frame from the client' },
+  unmeasured: { code: 1003, reason: 'unsupported_frame', log: 'closed on a frame it could not measure' },
+} as const
 
 /**
  * Accept the WebSocket and hand the client a single JSON error frame
@@ -92,7 +152,17 @@ export function streamConfigured(env: StreamEnv): boolean {
   return !!(accountId && gateway && token)
 }
 
-/** Build the AI Gateway realtime WS URL for a locale. Pure — tested. */
+/**
+ * Build the AI Gateway realtime URL for a locale. Pure — tested.
+ *
+ * `https://`, not the `wss://` the gateway's docs show for a browser
+ * client: a Worker opens an outbound WebSocket by `fetch()` with an
+ * `Upgrade: websocket` header, and the Workers runtime refuses a
+ * `wss://` URL outright ("Fetch API cannot load"). With `wss://` here
+ * the upstream fetch always threw, the handler reported
+ * `upstream_unavailable`, and every client fell back to batch Whisper
+ * without a word.
+ */
 export function buildGatewayUrl(env: StreamEnv, lang: string): string {
   const params = new URLSearchParams({
     model: env.VOICE_STREAM_MODEL?.trim() || '@cf/deepgram/nova-3',
@@ -103,7 +173,7 @@ export function buildGatewayUrl(env: StreamEnv, lang: string): string {
   const base = baseLang(lang)
   if (base) params.set('language', base)
   const { accountId, gateway } = gatewayConfig(env)
-  return `wss://gateway.ai.cloudflare.com/v1/${accountId}/${gateway}/workers-ai?${params.toString()}`
+  return `https://gateway.ai.cloudflare.com/v1/${accountId}/${gateway}/workers-ai?${params.toString()}`
 }
 
 /**
@@ -149,13 +219,34 @@ export const onRequest: PagesFunction<StreamEnv> = async (context) => {
   const lang = new URL(request.url).searchParams.get('lang') ?? 'en'
 
   // Open the upstream gateway socket (server-side, with the secret).
+  // A fresh header set, so nothing of the visitor's request (cookies,
+  // Origin, IP, user agent) reaches the gateway; the test pins it to
+  // exactly these three. `cf-aig-collect-log: false` because a gateway
+  // logs requests and responses by default, and docs/ORBIT_VOICE_PLAN.md
+  // §6 says no audio is ever persisted. Cloudflare does not say whether
+  // the header covers a WebSocket session, so the plan's live validation
+  // checks the gateway's Logs page, and docs/SELF_HOSTING.md §14.5 has
+  // operators turn the gateway's logs off rather than rely on it.
   let upstream: WebSocket | null = null
   try {
     const resp = await fetch(buildGatewayUrl(env, lang), {
-      headers: { Upgrade: 'websocket', 'cf-aig-authorization': gatewayConfig(env).token ?? '' },
+      headers: {
+        Upgrade: 'websocket',
+        'cf-aig-authorization': gatewayConfig(env).token ?? '',
+        'cf-aig-collect-log': 'false',
+      },
     })
     upstream = resp.webSocket
-  } catch {
+    // Say why, in the server log only: a refusal that left no trace is
+    // how this route went unnoticed while it relayed nothing. Status
+    // only; never the URL's account path, the token, or a body.
+    if (!upstream) {
+      console.warn(`[voice/stream] gateway did not upgrade: HTTP ${resp.status}`)
+      // Unread, it would hold the subrequest's connection until collected.
+      resp.body?.cancel().catch(() => { /* already closed */ })
+    }
+  } catch (err) {
+    console.warn('[voice/stream] gateway fetch failed:', err instanceof Error ? err.name : 'UnknownError')
     upstream = null
   }
   // Same reasoning: a 502 is unreadable by a browser WS. Report the
@@ -167,18 +258,56 @@ export const onRequest: PagesFunction<StreamEnv> = async (context) => {
   const server = pair[1]
   server.accept()
   upstream.accept()
+  // From compatibility date 2026-03-17 (`websocket_standard_binary_type`)
+  // a Worker-held socket delivers binary messages as a `Blob`, and
+  // `send()` takes no Blob: it stringifies it, so the gateway received
+  // the text "[object Blob]" in place of every audio frame, and nothing
+  // threw. Ask both sockets for bytes. The project runs a date past that
+  // one (wrangler.toml says which, and why it must match).
+  server.binaryType = 'arraybuffer'
+  upstream.binaryType = 'arraybuffer'
 
-  // Audio up (binary), transcripts down (JSON) — opaque pass-through.
-  server.addEventListener('message', (ev) => { try { upstream!.send(ev.data) } catch { /* closing */ } })
-  upstream.addEventListener('message', (ev) => { try { server.send(ev.data) } catch { /* closing */ } })
-  const closeBoth = (): void => {
-    try { server.close() } catch { /* already closed */ }
+  let closed = false
+  let bytesUp = 0
+  const closeBoth = (why?: keyof typeof PROXY_CLOSE): void => {
+    if (closed) return
+    closed = true
+    clearTimeout(lifetime)
+    if (why) {
+      const { code, reason, log } = PROXY_CLOSE[why]
+      // Server log only, and no more than why: no audio, no IP.
+      console.warn(`[voice/stream] ${log}`)
+      try { server.close(code, reason) } catch { /* already closed */ }
+    } else {
+      try { server.close() } catch { /* already closed */ }
+    }
     try { upstream!.close() } catch { /* already closed */ }
   }
-  server.addEventListener('close', closeBoth)
-  server.addEventListener('error', closeBoth)
-  upstream.addEventListener('close', closeBoth)
-  upstream.addEventListener('error', closeBoth)
+  const lifetime = setTimeout(() => closeBoth('time'), MAX_STREAM_MS)
+
+  // Audio up (binary only), transcripts down (JSON). The audio is counted
+  // against MAX_STREAM_BYTES; a frame that would cross it is dropped, not
+  // sent in part.
+  server.addEventListener('message', (ev) => {
+    if (closed) return
+    if (typeof ev.data === 'string') { closeBoth('text'); return }
+    const bytes = frameBytes(ev.data)
+    if (bytes === null) { closeBoth('unmeasured'); return }
+    bytesUp += bytes
+    if (bytesUp > MAX_STREAM_BYTES) { closeBoth('bytes'); return }
+    try { upstream!.send(ev.data) } catch { /* closing */ }
+  })
+  upstream.addEventListener('message', (ev) => {
+    if (closed) return
+    try { server.send(ev.data) } catch { /* closing */ }
+  })
+  // Wrapped, not passed bare: a bare closeBoth would take the event as its
+  // `limit` argument and report every ordinary hang-up as a limit hit.
+  const hangUp = (): void => closeBoth()
+  server.addEventListener('close', hangUp)
+  server.addEventListener('error', hangUp)
+  upstream.addEventListener('close', hangUp)
+  upstream.addEventListener('error', hangUp)
 
   return new Response(null, { status: 101, webSocket: client })
 }

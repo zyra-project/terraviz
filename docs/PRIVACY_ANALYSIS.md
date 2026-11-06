@@ -602,7 +602,7 @@ we judge the trade correct.
 
 ## 7. Tier A vs Tier B — is the partition principled?
 
-`TIER_B_EVENT_TYPES` (`src/types/index.ts:623–634`):
+`TIER_B_EVENT_TYPES` (`src/types/index.ts:1143–1159`):
 
 ```ts
 export const TIER_B_EVENT_TYPES = [
@@ -610,13 +610,19 @@ export const TIER_B_EVENT_TYPES = [
   'orbit_interaction', 'orbit_turn', 'orbit_tool_call',
   'orbit_load_followed', 'orbit_correction',
   'browse_search',
+  'catalog_graph_node_clicked', 'catalog_timeline_brush_applied',
+  'catalog_map_region_drawn',
   'vr_interaction',
   'error_detail',
   'tour_question_answered',
+  'publisher_validation_failed',
+  'voice_interaction',
 ] as const
 ```
 
-Walking each:
+Walking each. The three `catalog_*` events and
+`publisher_validation_failed` were added after this section was
+written and are not walked here yet.
 
 - **`dwell`** (Tier B). Carries `view_target` + `duration_ms`.
   Knowing how long someone stared at the chat panel vs the
@@ -661,6 +667,28 @@ Walking each:
   personally identifying, but the policy treats *educational
   performance data* with extra care because of children's-
   education contexts (`PRIVACY.md` §9). **Correctly Tier B.**
+
+- **`voice_interaction`** (Tier B). `mode`, `provider`,
+  `trigger`, `duration_ms`, `lang`, `success`, `interrupted`; no
+  audio and no transcript, hashed or otherwise. Four things make it
+  more than an operational count:
+  - `lang` is the *recognition* language, which a user can set
+    apart from the app's locale. A row whose `lang` differs from
+    the same session's `session_start` locale marks a bilingual
+    user, a quasi-identifier `session_start` alone does not carry.
+  - `provider: 'browser'` on a speech-to-text row says the browser
+    has Web Speech recognition, which narrows its family (Chromium
+    or Safari, not Firefox). `session_start` deliberately reports
+    no browser at all.
+  - `duration_ms` is unbucketed, the continuous-value concern of
+    §2f.
+  - At an exhibit, a `trigger: 'wake-word'` row timestamps a person
+    speaking at a known installation, which is the venue-linkage
+    risk of §9k in another form.
+
+  None of these is identifying alone, and each is a property of how
+  someone talks to Orbit rather than of whether the app works.
+  **Correctly Tier B.**
 
 ### 7a. Are any Tier A events arguably Tier B?
 

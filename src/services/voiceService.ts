@@ -201,6 +201,10 @@ export interface StreamingSttSession {
 
 export interface StreamingSttEngine {
   readonly provider: VoiceProvider
+  /** Audio streams live through a relay (the realtime AI Gateway path)
+   *  rather than going up one recording per utterance. The first-use
+   *  voice notice says so, and asks again, for an engine that does. */
+  readonly live?: boolean
   supportsLanguage(lang: string): boolean
   isAvailable(caps: VoiceCapabilities): boolean
   /** Begin a continuous, turn-detected recognition session. */

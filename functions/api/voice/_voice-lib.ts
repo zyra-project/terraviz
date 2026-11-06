@@ -13,6 +13,7 @@
  */
 
 import type { OrbitGateEnv } from '../_lib/orbit-gate'
+import { clientRateKey } from '../_lib/client-rate-key'
 
 /** Workers AI binding (subset we use), plus the catalog bindings the
  *  per-node `orbit` gate reads (`_lib/orbit-gate.ts`). */
@@ -91,20 +92,42 @@ export function voiceError(
   })
 }
 
-// --- Rate limiting (in-memory, per-isolate) — the practical per-IP cap ---
+// --- Rate limiting (in-memory, per-isolate) — the practical per-caller cap ---
 
 interface RateEntry { count: number; resetAt: number }
 export const RATE_WINDOW_MS = 60_000
+/** The most callers one limiter holds before it drops the oldest. */
+export const RATE_MAP_MAX = 10_000
 
+/**
+ * `limit` requests per caller per minute. A caller is
+ * `clientRateKey(ip)`, not the raw address: keyed raw, an IPv6 client
+ * rotating through its /64 never tripped the limit, and grew the map by
+ * one entry per request. So devices sharing one IPv6 /64 now share one
+ * count, as devices behind one IPv4 NAT always have.
+ *
+ * Every window is the same length, so inserting in arrival order keeps
+ * the map in expiry order and the sweep can stop at the first live
+ * entry. Under a steady clock the sweep has already removed a
+ * restarting entry, since everything ahead of an expired entry has
+ * expired too; deleting it first is what keeps the order when the clock
+ * steps back. The hard cap is the federation feed's: past it the oldest
+ * caller is dropped, which costs that caller its count rather than
+ * costing the isolate its memory.
+ */
 export function makeRateLimiter(limit: number) {
   const map = new Map<string, RateEntry>()
   return function isRateLimited(ip: string, now: number = Date.now()): boolean {
-    const entry = map.get(ip)
+    const key = clientRateKey(ip)
+    const entry = map.get(key)
     if (!entry || now > entry.resetAt) {
-      map.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS })
-      if (map.size > 1000) {
-        for (const [k, v] of map) if (now > v.resetAt) map.delete(k)
+      if (entry) map.delete(key)
+      for (const [k, v] of map) {
+        if (now <= v.resetAt) break
+        map.delete(k)
       }
+      if (map.size >= RATE_MAP_MAX) map.delete(map.keys().next().value!)
+      map.set(key, { count: 1, resetAt: now + RATE_WINDOW_MS })
       return false
     }
     entry.count++
