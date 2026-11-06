@@ -1485,13 +1485,56 @@ preview deploy, and QGIS's Temporal Controller does the same.
 
 ### 9.11 D5a — Analysis rasters
 
-**Builds.** A Cloud-Optimised GeoTIFF per time step, written by the
-Zyra runner from the reprojected source field, floating point with its
-no-data value, units and scale recorded, stored in R2 by digest and
-listed as a STAC asset with the projection and raster extension
-fields. Whether the reprojected field exists as a file the runner can
-read today, or needs a step added to the pipeline, is the first thing
-to find out (§11 q16).
+**Builds.** A Cloud-Optimised GeoTIFF per time step, made by the Zyra
+runner from the field before it is rendered, floating point, stored in
+R2 by digest and listed as a STAC asset with the projection and raster
+extension fields.
+
+**What is already on the runner's disk** (checked against
+`.github/workflows/zyra-run.yml` and Zyra v0.1.52, the release its
+pinned image carries):
+
+- **The files exist when the publish step runs.** The container's
+  `/work` is the runner's `_work/` (`docker run -v "$PWD/_work:/work"`),
+  the pipeline and the publish step run in one job, and nothing deletes
+  `_work/` in between. Both shipped templates write the reprojected
+  field to `/work/wrapped/` (`src/ui/publisher/workflow-templates.ts`,
+  `.claude/skills/terraviz-data-video/assets/`), one GeoTIFF per time
+  step, and Zyra's `reproject` keeps each input's filename, which
+  `convert-format` set to the valid time. So the date is in the name.
+- **But the location is a convention, not a rule.** The validator
+  checks only that a pipeline writes the final MP4 or frames directory
+  (`functions/api/v1/_lib/workflow-validators.ts:172`); a reproject
+  stage may write anywhere, and image-only workflows have no field at
+  all. The COG step reads `_work/pipeline.json`, finds the reproject
+  stage's `output_dir`, and treats its absence as "no rasters for this
+  dataset", never as an error.
+- **They are plain GeoTIFFs, not COGs**: EPSG:4326 with a geotransform,
+  but no tiling, compression or overviews (`raster_reproject.py`'s
+  write profile). A `gdal_translate -of COG` pass is needed.
+- **No no-data value is tagged.** Neither `convert-format`'s GeoTIFF
+  writer nor `reproject` sets one when the source has none, so missing
+  values travel as NaN in a floating-point raster. The COG step tags
+  no-data explicitly.
+- **Units are not in the file.** They are in the heatmap stage's
+  arguments and the `color-scale.json` sidecar it writes; the COG step
+  takes them from there.
+- **They last one job.** Only the current run's steps are on disk;
+  history accumulates in R2 only if each run uploads its own.
+
+**Which grid is a person's decision.** In the canonical template,
+`reproject` upsamples the 0.25° source to 4096×2048 *bilinearly* — new
+values between the producer's grid points. Those are right for the
+picture and are not what the producer published. The pre-regrid files
+in `/work/tif/` are the producer's own values on its own grid, on the
+0–360° longitude layout `reproject` exists to unwrap. Publishing the
+first as "the data" is the case `CLAUDE.md` sends to a person: the node
+deriving a value its producer never published. The proposal is to
+publish from `/work/tif/`, wrapped to ±180° losslessly at native
+resolution with nearest-neighbour resampling, and to let the
+regridded files go only where a workflow already reprojects at native
+resolution. The Scientific Data Steward reviews it; the dataset's
+producer or the node's science reviewer decides it.
 
 **Tests.** Values at sample points equal the source field's within the
 compression's stated error; the STAC validators pass with the new
@@ -1620,9 +1663,12 @@ stays a draft for review.
     dependency, or Cloudflare's image transformations for picture
     layers only, leaving data layers without WMS? D4's CPU gate
     measures the first; this question decides whether to try it.
-16. **Is the Zyra runner's reprojected field available as a file**
-    after the pipeline runs, or does D5a need a pipeline step? A
-    question for the Zyra Workflow Author before D5a is sized.
+16. **Which grid do D5a's COGs carry**: the producer's own (`/work/tif/`,
+    wrapped losslessly) or the regridded field (`/work/wrapped/`,
+    bilinear in the canonical template)? Whether the field is on the
+    runner's disk at all is answered — it is, for workflows built from
+    the shipped templates (§9.11). Which values to publish is a
+    person's decision, not this plan's.
 
 ---
 
