@@ -2457,7 +2457,7 @@ Numbering is kept from the first version, so a reference like
       **full size**: the viewer shrinks a low-priority plugin only when
       the plugin reports `allow_downsample`, and the web-page plugin
       never does (§11), so every loaded globe costs its visitor the
-      full face width, wherever it stands in the field;
+      face's full media size, wherever it stands in the field;
     - any others update only occasionally, and past 8 nothing loads;
     - globes off screen are hidden;
     - switching away from the viewer window drops every page to low
@@ -2466,8 +2466,14 @@ Numbering is kept from the first version, so a reference like
     These are viewer settings (`PluginInstancesTotal`, `…Normal`,
     `…Low`) a visitor can raise, but the defaults are what an audience
     has, and Firestorm's are the same: 8, 2 and 4 (§11). Because a
-    page is never shrunk, the face width set in its address is the
-    only thing that bounds what a distant globe costs. §7 item 4 says
+    page is never shrunk, what a distant globe costs is bounded in two
+    places, both set by whoever builds the globe. The face's **media
+    size** (its media width and height, at most 2048 on a side) is the
+    browser surface the viewer renders and uploads every update. The
+    address's **`width`** is the page's own drawing buffer and caps the
+    video it streams (`framebufferFor` and `maxVideoWidth` in
+    `src/output/`); without one the page sizes both to the media size.
+    Lowering `width` alone does not shrink the surface. §7 item 4 says
     why the clock keeps a field in step anyway.
 
 ---
