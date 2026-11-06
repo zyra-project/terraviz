@@ -18,11 +18,12 @@ sibling document already records a test.
 consumer; §9's phased implementation and §9.14's usage metrics added
 the same day.)
 
-**Decisions recorded:** seven so far, all 2026-11-06 by the maintainer,
+**Decisions recorded:** twelve, all 2026-11-06 by the maintainer,
 logged in §9.2: rasters for analysis carry the producer's own values on
 the producer's own grid, before any regridding (§9.11); use is measured
-per platform and per method (§9.14); and five choices about how that
-measuring works (§11 q17–q21).
+per platform and per method (§9.14); five choices about how that
+measuring works (§11 q17–q21); and the five D0 blockers (§11 q1, q4,
+q7, q13, q14). **D0 is complete**; D1 is next.
 
 **Revisit when any of the following becomes true:**
 
@@ -626,8 +627,9 @@ difference between an animation that keeps up and one that does not.
 the two sizes ArcGIS Scene Viewer accepts, and CesiumJS's geographic
 scheme takes any tile width. It quarters the object count in R2 too.
 The cost is that a client hard-coded to the registered 256-pixel
-WorldCRS84Quad will not read it without the capabilities document; §11
-keeps the choice open until Phase D1 has loaded both in each client.
+WorldCRS84Quad will not read it without the capabilities document.
+Decided provisionally (§11 q1): 512, with D1 loading both sizes in
+every client and free to reverse it.
 
 **Secondary: WebMercatorQuad** (`GoogleMapsCompatible`, the standard
 256-pixel set), for clients
@@ -704,7 +706,7 @@ pinned in `docs/protocol/` the way STAC's is (§8).
   *closest* frame. A closest-frame rule shows a frame up to half a
   period before its own time, which for a forecast is showing the
   future. The difference is documented on both routes rather than
-  resolved by changing the existing one.
+  resolved by changing the existing one (decided, §11 q4).
 - **`default` is the latest frame**, matching GIBS, so a client that
   sends no time gets the most recent picture. GIBS does not accept a
   `current` keyword, and neither should this.
@@ -963,8 +965,10 @@ derived from it:
 - **Range requests, `Content-Type: video/mp4`, open CORS.** Players
   outside a browser ignore CORS, but a web developer's globe material
   needs it — and today the video host allows only the node's own
-  origin (`SECOND_LIFE_COMPAT.md` §4.4). Opening it is a decision for
-  §11, not a default.
+  origin (`SECOND_LIFE_COMPAT.md` §4.4). Decided (§11 q7): the files
+  route answers with `Access-Control-Allow-Origin: *`; the existing
+  streaming host is unchanged, so the app's own video keeps its
+  narrower policy.
 - **Only what may be redistributed.** The same eligibility as STAC
   (public, published, a curated licence); every file carries the
   credit and licence in its manifest.
@@ -1246,8 +1250,12 @@ Settle the questions in §11 that change what D1 builds: tile size
 (q1), the snap rule (q4), whether video CORS opens (q7), the D2/D3
 order (q13), and who owns the operator scripts of D5b (q14). Each
 decision is recorded here as a dated amendment naming who made it, the
-way `architecture/federation-scoping.md` records its own. Nothing else
-starts until those five are written down.
+way `architecture/federation-scoping.md` records its own.
+
+**D0's gate is met:** all five were decided on 2026-11-06, so D1 can
+start once its people and places are lined up — a dome session with
+the OpenSpace collaborators, an SOS contact, a test ArcGIS organisation
+and a Second Life sphere.
 
 **Decided so far:**
 
@@ -1260,6 +1268,11 @@ starts until those five are written down.
 | 2026-11-06 | The maintainer | Keep country, by month, except for virtual-world viewers | §9.14, q19 |
 | 2026-11-06 | The maintainer | Record `major.minor` versions of known platforms, on layer loads and downloads only | §9.14, q20 |
 | 2026-11-06 | The maintainer | Hash unrecognised names and domains; resolve them against a list of likely names | §9.14, q21 |
+| 2026-11-06 | The maintainer | **D0:** 512-pixel tiles for the lat/lon grid, provisionally; D1 loads both sizes and may reverse it | §5.1, q1 |
+| 2026-11-06 | The maintainer | **D0:** tiles snap to the period containing the requested time; `/frames?at=` keeps returning the closest frame; the difference is documented on both routes | §5.3, q4 |
+| 2026-11-06 | The maintainer | **D0:** open CORS on the new files route only; the existing streaming host is unchanged | §6.5, q7 |
+| 2026-11-06 | The maintainer | **D0:** files (D2) before tiles (D3), the order §9 argues for; the two tracks may still run side by side after D1 | §9.1, q13 |
+| 2026-11-06 | The maintainer | **D0:** the ArcGIS scripts are maintained in this repository and run by each organisation with its own credentials and credits | §9.12, q14 |
 
 ### 9.3 D1 — Prove it by hand
 
@@ -1593,9 +1606,11 @@ Engineer for the STAC asset shape.
 
 ### 9.12 D5b — Operator scripts
 
-**Builds.** Two scripts under `scripts/`, run by an operator with
-their own ArcGIS credentials from the environment, never stored by the
-node, and dry-run by default as `npm run setup` is:
+**Builds.** Two scripts under `scripts/`, maintained in this
+repository and run by each organisation with its own ArcGIS credentials
+and credits (decided, §11 q14) — the maintainer's organisation first.
+Credentials come from the environment, are never stored by the node,
+and the scripts are dry-run by default as `npm run setup` is:
 
 - **The ArcGIS Image adapter** uploads D5a's rasters for a dataset as
   a multidimensional *tiled* imagery layer, the kind that can be public.
@@ -1832,25 +1847,24 @@ stays a draft for review.
 
 ## 11. Open questions
 
-1. **Tile size for the lat/lon grid: 512 or 256 pixels?** 512 quarters
-   requests and objects and matches OpenSpace and GIBS; 256 is the
-   registered WorldCRS84Quad. D1 loads both in every client.
+1. *Decided provisionally 2026-11-06 by the maintainer:* 512 pixels for
+   the lat/lon grid; D1 loads both 512 and 256 in every client and may
+   reverse it (§5.1).
 2. **Does ArcGIS stretch WMTS tiles past the deepest level, or go
    blank?** If blank, cut one or two upsampled levels in the Web
    Mercator set only.
 3. **Is Esri's "WGS 1984 Version 2" scheme the same as the lat/lon
    layout?** It decides whether ArcGIS Scene Viewer can use the lat/lon
    pyramid.
-4. **Snap to the containing period (as GIBS) while `/frames?at=`
-   returns the closest frame** — keep the difference, documented, or
-   align the two?
+4. *Decided 2026-11-06 by the maintainer:* tiles snap to the containing
+   period as GIBS does, `/frames?at=` keeps the closest frame, and the
+   difference is documented on both routes (§5.3).
 5. **No-data threshold for `mean` and `mode`:** half the block's area,
    or something else?
 6. **Who sets a dataset's decimation method**, and what is the default
    for each kind — publisher in the portal, Zyra template, or both?
-7. **Open the video host's CORS to every origin?** R2 has no egress
-   fees, but every fetch is an operation, and a popular hotlinked file
-   is someone else's bandwidth bill only in theory.
+7. *Decided 2026-11-06 by the maintainer:* open CORS on the new files
+   route only; the existing streaming host is unchanged (§6.5).
 8. **Licensing.** Which datasets, legacy SOS ones especially, may be
    redistributed as derived files and bundles?
 9. **Is SOS's MPEG-4 Part 2 guidance still current**, and would SOS
@@ -1865,10 +1879,11 @@ stays a draft for review.
 12. **Should exact-time tiles also be reachable straight from the
     bucket**, skipping the Function for clients that never need
     snapping?
-13. **D2 before D3?** §9's ordering, open to challenge.
-14. **Who owns the operator scripts of D5b** — the node's maintainers,
-    or each organisation that runs them? They act in someone else's
-    ArcGIS organisation and spend its credits.
+13. *Decided 2026-11-06 by the maintainer:* files (D2) before tiles
+    (D3), as §9 argues; the tracks may run side by side after D1.
+14. *Decided 2026-11-06 by the maintainer:* the scripts are maintained
+    in this repository and run by each organisation with its own
+    credentials and credits (§9.12).
 15. **A WebAssembly image codec in the Functions for D4**, a new
     dependency, or Cloudflare's image transformations for picture
     layers only, leaving data layers without WMS? D4's CPU gate
