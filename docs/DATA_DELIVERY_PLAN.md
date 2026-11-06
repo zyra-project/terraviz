@@ -235,7 +235,97 @@ level 4 of Web Mercator. Analysis rasters go up as CRF with LERC
 compression, whose maximum error should be set below the field's
 meaningful precision.
 
-<!-- §2.2 planetarium and dome producers: filled from research -->
+### 2.2 Planetarium and dome producers: OpenSpace, and others
+
+**OpenSpace** (latest release v0.22.0, June 2026; checked against its
+documentation and its source at `master`) is the collaboration that
+prompted this plan, and it reads more of what TerraViz has than any
+other tool here.
+
+- **It already plays NOAA Science On a Sphere datasets.** OpenSpace
+  ships 243 SOS datasets as assets
+  (`data/assets/scene/solarsystem/planets/earth/noaa-sos/` in its
+  repository; "image sequences available from NOAA's
+  Science-on-a-Sphere datasets" since 0.18.0). All are zips of frames,
+  in 4096 and 2048 folders; 60 use a time-linked layer with timestamped
+  filenames, 78 a plain image sequence not linked to time, and none use
+  video. TerraViz datasets packaged the same way would feel native.
+- **Assets are Lua files that fetch their own data.** A `.asset` file's
+  `UrlSynchronization` downloads any URL, unzipping if asked and
+  re-checking on a schedule — the route a third party like TerraViz
+  uses, pointing at R2. There is no third-party catalog; users drop
+  asset files into a folder.
+- **Video on a globe, synced to simulation time.** The
+  `VideoTileProvider` (since 0.19.0) maps a whole 2:1 video onto a
+  globe, decoded by libmpv, so any codec FFmpeg reads; the official
+  example is an H.264 MP4
+  ([VideoTileProvider](https://docs.openspaceproject.com/latest/reference/asset-components/TileProvider/VideoTileProvider.html)).
+  In `MapToSimulationTime` mode, a start and end time map linearly onto
+  the video's duration, so **frames must be evenly spaced in time**, and
+  playback **seeks on every time step** — frame-accurate, at a cost
+  that grows with the distance between keyframes. **Local files only**:
+  a remote MP4 is downloaded once by `UrlSynchronization`; HLS is not
+  an input.
+- **Images and tiles through GDAL, in latitude/longitude only.** A
+  layer is whatever GDAL opens; OpenSpace reads the geotransform as
+  degrees and does no reprojection, so Web Mercator sources land in
+  the wrong place. A raster with no geotransform is taken to cover the
+  whole globe, so **a plain 2:1 PNG or JPEG works with no world file**
+  ([readable datasets](https://docs.openspaceproject.com/releases-v0.22/building-content/globebrowsing/creation/readable-datasets.html)).
+  Tiled sources are described by a GDAL XML file. OpenSpace's own GIBS
+  helper sets a data window of −180, 90, 396, −198 to cope with GIBS's
+  padded grid; the §5.1 layout needs the plain −180, 90, 180, −90.
+- **Time in tiles has to be in the URL.** GDAL's WMTS driver has no
+  time option
+  ([GDAL WMTS](https://gdal.org/en/stable/drivers/raster/wmts.html)),
+  so OpenSpace's `TemporalTileProvider` substitutes the time into a URL
+  template read by GDAL's TMS driver. In its `Prototyped` mode the time
+  is floored onto a grid anchored at a start time, with steps limited
+  to whole years, months in {1, 2, 3, 4, 6}, days 1–28, hours in
+  {1, 2, 3, 4, 6, 12} and minutes in {15, 30} — no seconds, no 5- or
+  10-minute steps. A 404 renders as a transparent tile. Its `Folder`
+  mode reads a *local* directory, parses each filename as a date, and
+  handles irregular series; the day parsing looked off by one in the
+  source and needs a test (§11).
+- **No prefetch, so tiles do not suit shows.** Each new time step opens
+  a new dataset and refetches every tile on screen. Only with
+  `Interpolation` on does it preload neighbouring steps and blend them
+  on the GPU; and only then does `Colormap` recolour a greyscale layer
+  through a lookup table — which is how a data-encoded dataset's luma
+  frames could reach OpenSpace with their palette applied by OpenSpace.
+- **Detail is set by angle, not by output resolution.** OpenSpace picks
+  a level from each chunk's apparent size times a scale factor, never
+  deeper than the source holds (it stretches the deepest tile instead).
+  By that formula, 4096×2048 gives about two dome pixels per texel on a
+  4K fisheye at the default setting, and 8192×4096 about one on an 8K
+  fisheye — the useful ceiling.
+- **WMS servers can be added at runtime** through a panel new in v0.22
+  ([0.22.0 changelog](https://docs.openspaceproject.com/releases-v0.22/about/releases/changelogs/0.22.0/index.html)).
+
+**Other planetarium systems**, more briefly. **WorldWide Telescope**
+takes planetary imagesets as equirectangular images or TOAST tiles,
+and its Windows client loads WMS overlays with a time scrubber
+([WWT WMS](https://docs.worldwidetelescope.org/layer-guide/1/web-mapping-service/)).
+**Evans & Sutherland's Digistar** advertises SOS content (over 200
+datasets and real-time feeds) in its product sheet, which implies it
+reads SOS-format frames and movies; no public format specification was
+found. **Uniview** has offered WMS globe layers since 2006 by one
+conference abstract; **Sky-Skan DigitalSky** publishes nothing
+findable. The common denominator for these is the one SOS already
+established: 2:1 equirectangular frames and movies.
+
+**What this means.** For dome *shows*, the efficient formats are frame
+zips with dated filenames and evenly timed MP4s, packaged as ready-made
+OpenSpace assets on the pattern OpenSpace already uses for SOS data.
+Tiles serve the other OpenSpace use — flying in close to a region — and
+must be latitude/longitude, with time in the path.
+
+**Size, pace, precision.** 4096×2048 for 4K domes, 8192×4096 where a
+dataset has it, for 8K. Every OpenSpace colour layer is 8-bit, and
+video is 8-bit 4:2:0, so nothing wider is worth producing. An MP4 for
+time-synced playback needs a constant frame rate, one video frame per
+data frame, and a keyframe at least every second, because every time
+step is a seek.
 
 ### 2.3 Virtual-world educators: Second Life and OpenSimulator
 
@@ -300,9 +390,48 @@ enough beyond about 7 m. That supports the output page's
 default for exhibits, and the low-bitrate 1024×512 rendition
 `SECOND_LIFE_COMPAT.md` §7 already plans. Data-encoded video, at one
 4096×2048 rung of up to 25 Mbit/s per visitor, is the worst case;
-§6.3 proposes smaller renditions made the honest way.
+§6.2 proposes smaller renditions made the honest way.
 
-<!-- §2.4 Science On a Sphere sites and spherical displays: filled from research -->
+### 2.4 Science On a Sphere sites and spherical displays
+
+**Science On a Sphere** is where much of the catalog came from, and its
+format is documented:
+
+- **A dataset is a directory with a `playlist.sos`** naming its data —
+  an image, an MP4, or a directory of frames — plus an optional
+  `labels.txt` with one date label per frame and a default of 30 fps
+  ([playlist format](https://sos.noaa.gov/support/sos/manuals/playlist-format/)).
+  Remote URLs and WMS sources are allowed.
+- **Its content guidelines are specific**
+  ([guidelines](https://sos.noaa.gov/support/sos/manuals/content-creation-guidelines/all/)):
+  2048×1024 for time series and 4096×2048 for still textures; 4096×2048
+  movies work on 4K systems but may need a lower frame rate; 30 fps, or
+  10–15 for coarse data; JPEG or PNG frames; labels kept outside the
+  picture. And, notably: movies in **MPEG-4 Part 2 at 25 Mbit/s or
+  more** — "The H.264 codec should not be used because it can cause
+  errors in the SOS software."
+- **Sites receive datasets by a weekly sync from NOAA's FTP server**,
+  with real-time datasets refreshed by cron
+  ([datasets](https://sos.noaa.gov/support/sos/manuals/datasets/all/)).
+- **SOS Explorer**, the flat-screen and kiosk version, is different
+  again: DDS image sequences, MPEG-4, OGV or WMV movies, up to 60 fps,
+  and dates from an ISO 8601 period plus a filename mask
+  ([SOSx guidelines](https://sos.noaa.gov/support/sosx/manuals/content-creation-guidelines/all/)).
+
+**Spherical displays** — PufferSphere, OmniGlobe, Magic Planet — publish
+no format specifications that were found. Institutional user guides
+agree on 2:1 equirectangular images, JPEG or PNG sequences, and
+ordinary video files
+([one example](https://libguides.mines.edu/globe/formatglobedata)), and
+Magic Planet's software warps the equirectangular frame through its
+fisheye lens itself ([Bourke](https://paulbourke.net/dome/magicplanet)).
+Codec limits should be checked with each vendor.
+
+**What this means.** An SOS site needs an SOS dataset directory —
+playlist, labels, 2048×1024 frames, an MPEG-4 Part 2 movie — not a
+service. A spherical display needs a 2:1 MP4 and the frames. Neither
+reads tiles, and neither applies a colour palette to anything, so a
+data-encoded dataset must arrive with its palette already applied.
 
 ### 2.5 Desktop GIS users and web developers
 
@@ -365,28 +494,42 @@ built.
 
 ### 5.1 Tile grids
 
-**Primary: WorldCRS84Quad** (OGC Two Dimensional Tile Matrix Set
-standard, OGC 17-083r4). Plain latitude/longitude, origin at
-(−180°, 90°), two 180°×180° tiles at level 0, each level splitting every
-tile into four, 256-pixel tiles.
+**Primary: the WorldCRS84Quad layout at 512 pixels.** Plain
+latitude/longitude, origin at (−180°, 90°), two 180°×180° tiles at
+level 0, each level splitting every tile into four — the layout of the
+OGC Two Dimensional Tile Matrix Set standard's WorldCRS84Quad
+(OGC 17-083r4) — but with 512-pixel tiles rather than the registered
+set's 256, declared in the capabilities document under its own
+identifier.
 
 | Level | Tiles across × down | Image width it fills exactly |
 |---|---|---|
-| 0 | 2 × 1 | 512 |
-| 1 | 4 × 2 | 1024 |
-| 2 | 8 × 4 | 2048 |
-| 3 | 16 × 8 | 4096 |
-| 4 | 32 × 16 | 8192 |
+| 0 | 2 × 1 | 1024 |
+| 1 | 4 × 2 | 2048 |
+| 2 | 8 × 4 | 4096 |
+| 3 | 16 × 8 | 8192 |
 
-A W×W/2 frame fills level *n* exactly when W = 512 × 2ⁿ, so the
-catalog's 4096×2048 frames stop at level 3: **170 tiles per frame**
-(2 + 8 + 32 + 128). Every tile edge falls on a pixel boundary of the
-source image at its native level, which is why cutting needs no
-resampling at the deepest level and only 2×2 decimation above it.
-Frames at other widths — a 0.1° science grid is 3600 wide, a 0.25° one
-1440 — are handled in §7.1.
+A W×W/2 frame fills level *n* exactly when W = 1024 × 2ⁿ, so the
+catalog's 4096×2048 frames stop at level 2: **42 tiles per frame**
+(2 + 8 + 32), and an 8192×4096 frame 170. Every tile edge falls on a
+pixel boundary of the source image at its native level, which is why
+cutting needs no resampling at the deepest level and only 2×2
+decimation above it. Frames at other widths — a 0.1° science grid is
+3600 wide, a 0.25° one 1440 — are handled in §7.1.
 
-**Secondary: WebMercatorQuad** (`GoogleMapsCompatible`), for clients
+**Why 512 pixels.** A time step through tiles costs one request per
+tile on screen, and OpenSpace refetches every tile at every step with
+no prefetch (§2.2); a quarter as many requests per step is the
+difference between an animation that keeps up and one that does not.
+512 is also OpenSpace's default tile size, GIBS's tile size, and one of
+the two sizes ArcGIS Scene Viewer accepts, and CesiumJS's geographic
+scheme takes any tile width. It quarters the object count in R2 too.
+The cost is that a client hard-coded to the registered 256-pixel
+WorldCRS84Quad will not read it without the capabilities document; §11
+keeps the choice open until Phase D1 has loaded both in each client.
+
+**Secondary: WebMercatorQuad** (`GoogleMapsCompatible`, the standard
+256-pixel set), for clients
 whose basemaps are Web Mercator and which require the tile grid to
 match the basemap (ArcGIS Map Viewer in 2D; most XYZ web maps). This
 grid *does* need reprojection, and it cannot show latitudes beyond
@@ -404,7 +547,7 @@ resampling every frame, and CesiumJS's own GIBS example avoids them by
 using GIBS's Web Mercator endpoint. WorldCRS84Quad is what CesiumJS's
 `GeographicTilingScheme` (2×1 at the root) and QGIS read directly.
 Copying GIBS's *URL grammar and time rules* (§5.2, §5.3) while using
-the standard grid keeps most of the familiarity; GDAL-based clients
+the standard layout keeps most of the familiarity; GDAL-based clients
 such as OpenSpace need a data window that says so (§2.2).
 
 ### 5.2 URL grammar
@@ -415,7 +558,7 @@ set — not the structure:
 
 ```
 GIBS:      /wmts/epsg4326/best/{Layer}/default/{Time}/{TileMatrixSet}/{TileMatrix}/{TileRow}/{TileCol}.{ext}
-TerraViz:  /api/v1/wmts/epsg4326/{datasetId}/{style}/{time}/WorldCRS84Quad/{z}/{y}/{x}.{ext}
+TerraViz:  /api/v1/wmts/epsg4326/{datasetId}/{style}/{time}/CRS84Quad512/{z}/{y}/{x}.{ext}
            /api/v1/wmts/epsg3857/{datasetId}/{style}/{time}/WebMercatorQuad/{z}/{y}/{x}.{ext}
            /api/v1/wmts/1.0.0/WMTSCapabilities.xml
 ```
@@ -424,8 +567,16 @@ TerraViz:  /api/v1/wmts/epsg4326/{datasetId}/{style}/{time}/WorldCRS84Quad/{z}/{
 - `{style}` is `default` in v1 (§5.4).
 - `{ext}` is `png` (alpha) or `jpg` (opaque); WebP is not offered,
   because GDAL builds and GIS clients do not uniformly read it.
+- `{time}` accepts any ISO 8601 UTC form a client is likely to build —
+  a date (`2026-05-16`), a date and time with or without seconds, with
+  or without `Z` — because OpenSpace formats the time from a
+  per-layer picture string the producer writes, and a strict parser
+  would turn every mismatch into a 404.
 - KVP `GetTile` requests are accepted and mapped onto the same handler,
-  since some clients only issue KVP.
+  since some clients only issue KVP. Time must be in the *path* for
+  OpenSpace regardless: GDAL's WMTS driver has no time option, so
+  OpenSpace reaches time-varying tiles only through a URL template read
+  by GDAL's TMS driver (§2.2).
 
 Living under `/api/v1/` puts the service inside the node's existing
 versioned surface: a breaking change is a `/v2/`, and the contract is
@@ -555,8 +706,8 @@ Order-of-magnitude only; Phase D1 replaces these with measurements.
 
 | Quantity | Estimate |
 |---|---|
-| Tiles per 4096×2048 frame, WorldCRS84Quad | 170 |
-| Tiles per frame, WebMercatorQuad to level 4 | 341 |
+| Tiles per 4096×2048 frame, WorldCRS84Quad layout at 512 px | 42 |
+| Tiles per frame, WebMercatorQuad at 256 px to level 4 | 341 |
 | Bytes per frame, all levels | ~1.3× the frame itself; a few MB as JPEG, more as PNG |
 | Per 1,000 frames, one grid | a few GB to ~15 GB |
 | Runner time per frame | seconds; dominated by PNG encoding |
@@ -582,8 +733,8 @@ on purpose; never present more precision than the source had.**
 
 **The native level.** A dataset's deepest level is the smallest
 WorldCRS84Quad level that holds its source frame without loss:
-⌈log₂(W / 512)⌉ for a frame W pixels wide. Sources whose width is not
-512 × 2ⁿ are resampled *up* to that level once, at cut time — by
+⌈log₂(W / 1024)⌉ for a frame W pixels wide at 512-pixel tiles. Sources
+whose width is not 1024 × 2ⁿ are resampled *up* to that level once, at cut time — by
 nearest neighbour for data-encoded frames, so every source cell keeps
 its exact value and no boundary moves by more than half a source
 pixel, and by Lanczos for RGB pictures. The capabilities abstract
