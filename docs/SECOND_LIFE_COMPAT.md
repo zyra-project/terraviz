@@ -17,7 +17,13 @@ you don't need it. Every claim about TerraViz cites a file and line.
 Every claim about Second Life cites a public source, the viewer's
 source code, or a test result in §4, all collected in §11.
 
-**Last reviewed:** 2026-10-25 (in-world: the exhibit controller from
+**Last reviewed:** 2026-11-06 (desk check against the viewers' source,
+found while researching `docs/DATA_DELIVERY_PLAN.md`: Firestorm does not
+auto-play shared media by default, a media address is capped at 1,024
+characters, and a web page is never scaled down at low priority — §4.3,
+§6, §7, §10 question 13 and §11 corrected; Firestorm's media limits
+match Linden Lab's, which closes question 13's "Firestorm may differ".)
+2026-10-25 (in-world: the exhibit controller from
 #500 ran, and its scripts ran out of their 64 KB, first the globe
 script and then the info script; fixed in #501, and §9 Phase 2's status
 note updated. The same day, the page camera of §7 item 7 and §9 Phase 4
@@ -377,8 +383,13 @@ The limits that remain are structural:
 - **It runs once per person.** Every avatar's viewer runs its own
   copy of the page: its own GPU work, its own video stream, its own
   connections to TerraViz.
-- **One face per call**, and an **address whitelist** capped at 64
-  entries or 1024 characters. Neither came up in testing.
+- **One face per call**, an **address whitelist** capped at 64
+  entries or 1024 characters, and the **address itself** capped at
+  1,024 characters (`PRIM_MEDIA_CURRENT_URL`, and the home address
+  the same), with the script sleeping a second on every call. None
+  came up in testing, but the address cap bounds what §7's address can
+  carry: the whole address, host, query and `#` part together, must
+  fit in 1,024 characters.
 
 ### 4.4 Video
 
@@ -599,6 +610,12 @@ face's Media Settings should then be:
   move everyone's panel off-site.
 - **General: Auto play and Auto scale on.** Auto zoom is a choice: on a
   large panel it pulls each visitor's camera in when they click.
+  Auto play is necessary but not sufficient. A visitor's viewer starts
+  shared media by itself only if its own `ParcelMediaAutoPlayEnable`
+  setting allows it (`LLViewerMediaImpl::isAutoPlayable`, §11), and
+  that is on by default in Linden Lab's viewer and **off by default in
+  Firestorm**, so a Firestorm visitor sees the face blank until they
+  press play.
 - **An optional reset.** A few lines of LSL can read the face's current
   address every minute or so and, after a few idle minutes away from
   the homepage, put the homepage back, so one visitor's click on the
@@ -768,7 +785,10 @@ The work, smallest first:
    - **Sharing between walk-up visitors is a must.** Everyone at a
      globe always sees the same dataset and moment. Shared media
      already gives this: the address the script sets reaches every
-     viewer.
+     viewer whose copy is loaded or auto-playing. A Firestorm visitor
+     who has not pressed play is not one (§6, Option E), and joins on
+     the shared moment when they do, because a copy that loads reads
+     the address it is given.
    - **"Close" while playing means about a second.** Today's behaviour
      meets it (the status note below has the numbers). Copies agree to
      the millisecond once settled, differ briefly after a jump or a
@@ -905,7 +925,9 @@ The work, smallest first:
    covers playback nobody touches: a pause, a jump or a switch has to
    reach every visitor's copy. Second Life already has one channel
    that does.
-   - **The globe's media address reaches every viewer near it.** The
+   - **The globe's media address reaches every viewer near it** whose
+     copy is loaded or auto-playing (Firestorm's default leaves a copy
+     unstarted until its visitor presses play; §6, Option E). The
      in-world script sets the address, and it knows who touched the
      globe, so it can check the presenter list.
    - **So all control has to go through the script.**
@@ -968,8 +990,10 @@ The work, smallest first:
      - **Each visitor's viewer runs only a few globes properly.** The
        viewer's source caps how many web pages run at once (8 by
        default), and only the 2 that look largest on that visitor's
-       screen run at full priority. The rest are scaled down, update
-       only now and then, or don't load.
+       screen run at full priority. The rest update only now and
+       then, or don't load. None is shrunk: the viewer scales a
+       low-priority plugin down only when the plugin allows it, and
+       the web-page plugin never does (§10 question 13).
      - **So past about six globes,** the distant ones in a field will
        barely move.
      - **The clock makes that harmless.** A globe that drops out and
@@ -2429,8 +2453,11 @@ Numbering is kept from the first version, so a reference like
     - at most **8 load at once**, or 6 on a machine with under 8 GB of
       memory;
     - the **2 largest on screen run at full priority**;
-    - the **next 4 run at low priority**, scaled down to the size
-      they're shown at;
+    - the **next 4 run at low priority**, updating less often but at
+      **full size**: the viewer shrinks a low-priority plugin only when
+      the plugin reports `allow_downsample`, and the web-page plugin
+      never does (§11), so every loaded globe costs its visitor the
+      full face width, wherever it stands in the field;
     - any others update only occasionally, and past 8 nothing loads;
     - globes off screen are hidden;
     - switching away from the viewer window drops every page to low
@@ -2438,8 +2465,10 @@ Numbering is kept from the first version, so a reference like
 
     These are viewer settings (`PluginInstancesTotal`, `…Normal`,
     `…Low`) a visitor can raise, but the defaults are what an audience
-    has. Firestorm may differ. §7 item 4 says why the clock keeps a
-    field in step anyway.
+    has, and Firestorm's are the same: 8, 2 and 4 (§11). Because a
+    page is never shrunk, the face width set in its address is the
+    only thing that bounds what a distant globe costs. §7 item 4 says
+    why the clock keeps a field in step anyway.
 
 ---
 
@@ -2468,8 +2497,11 @@ Numbering is kept from the first version, so a reference like
 - `indra/newview/llvovolume.cpp:2825`, `:2842`, `:2846`, `:2868` (`mediaNavigated`) — a navigation made inside a viewer's copy of the page is checked against the media's URL whitelist and the visitor's interaction permission. If either refuses it, it bounces back (`:2861`). If both allow it, it is broadcast as the object's new address, for every viewer
 - `indra/newview/llviewermedia.cpp:3530` — the viewer already recognises a `#`-only change of location reported by the browser as internal navigation (its comment cites SL-1005)
 - `indra/newview/llviewermedia.cpp:86-87`, `:258-271` (`setMaxInstances`) — 8 in-world media at once by default, 2 fewer on a machine with under 8 GB of memory, never below 6
-- `indra/newview/llviewermedia.cpp:727`, `:769`, `:779`, `:785`, `:798`, `:813`, `:818` (`updateMedia`) — past the limit, unloaded; off screen, hidden; the first `PluginInstancesNormal` at normal priority; the next `PluginInstancesLow` at low priority, scaled to their on-screen size; any more as "slideshow"; with the viewer window minimised, everything hidden; with it out of focus, nothing above low. `:599` (`priorityComparitor`) ranks larger on-screen area first
+- `indra/newview/llviewermedia.cpp:727`, `:769`, `:779`, `:785`, `:798`, `:813`, `:818` (`updateMedia`) — past the limit, unloaded; off screen, hidden; the first `PluginInstancesNormal` at normal priority; the next `PluginInstancesLow` at low priority, scaled to their on-screen size only for a plugin that allows it (below); any more as "slideshow"; with the viewer window minimised, everything hidden; with it out of focus, nothing above low. `:599` (`priorityComparitor`) ranks larger on-screen area first
 - `indra/newview/app_settings/settings.xml:6651-6684` — defaults `PluginInstancesLow` 4, `PluginInstancesNormal` 2, `PluginInstancesTotal` 8
+- `indra/llplugin/llpluginclassmedia.cpp:355`, `:1091` (`develop`, checked 2026-11-06) — a low-priority plugin's texture is halved toward the size limit only when the plugin's `texture_params` message sets `allow_downsample`; `indra/media_plugins/cef/media_plugin_cef.cpp`, the web-page plugin, never sets it, so a web page always renders at its full media size
+- `indra/newview/llviewermedia.cpp:4078-4083` (`isAutoPlayable`, `develop`) — media starts by itself only when the object's auto-play flag is set **and** the viewer's `ParcelMediaAutoPlayEnable` is non-zero
+- `ParcelMediaAutoPlayEnable` defaults to 1 in [Linden Lab's `settings.xml`](https://github.com/secondlife/viewer/blob/develop/indra/newview/app_settings/settings.xml) and to 0 in [Firestorm's](https://github.com/FirestormViewer/phoenix-firestorm/blob/master/indra/newview/app_settings/settings.xml) (`master`, checked 2026-11-06), whose `PluginInstancesTotal`, `…Normal` and `…Low` are 8, 2 and 4 as Linden Lab's are
 
 **Platform state**
 - [SLua open beta announcement](https://community.secondlife.com/news/featured-news/announcing-the-slua-open-beta-modern-scripting-comes-to-second-life-r11237/) — Luau, 2 Dec 2025, runtime selection, memory claim
@@ -2483,7 +2515,7 @@ Numbering is kept from the first version, so a reference like
 **Constraints**
 - [secondlife/viewer#5189](https://github.com/secondlife/viewer/issues/5189) — the WebGL crash; filed by a Linden Lab developer 28 Dec 2025; `SLPlugin.exe` access violation in `libcef.dll`; CEF 139.0.7258.139, Dullahan 1.24.0; reproduced with the WebGL Aquarium; still open and unassigned as of 23 Oct 2026, stale-labelled Feb 2026
 - [Project Valhalla, 2015](https://modemworld.me/2015/10/08/vallhalla-cef-comes-to-second-life/) — Chrome comes to Second Life's shared media, with a WebGL promise
-- [`llSetPrimMediaParams`](https://wiki.secondlife.com/wiki/LlSetPrimMediaParams) — size parameters, whitelist cap, one-face-per-call, permissions
+- [`llSetPrimMediaParams`](https://wiki.secondlife.com/wiki/LlSetPrimMediaParams) — size parameters, whitelist cap, one-face-per-call, permissions; `PRIM_MEDIA_CURRENT_URL` and `PRIM_MEDIA_HOME_URL` "1024 characters max", and "This function causes the script to sleep for 1.0 seconds"
 - [`llHTTPRequest`](https://wiki.secondlife.com/wiki/LlHTTPRequest) — reply and request size limits, rate limits, timeout, header rules
 - [`llJsonGetValue`](https://wiki.secondlife.com/wiki/LlJsonGetValue) — native JSON parsing in LSL since 20 May 2013 (server 13.05.20)
 - [`llSetContentType`](https://wiki.secondlife.com/wiki/LlSetContentType) and [`llHTTPResponse`](https://wiki.secondlife.com/wiki/LlHTTPResponse) — a script-served page renders as HTML only for the object's owner, in their viewer, in the same region; no size limit beyond script memory; 25 seconds to answer
