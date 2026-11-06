@@ -1946,12 +1946,33 @@ stays a draft for review.
 21. *Decided 2026-11-06 by the maintainer:* unrecognised names and
     domains are hashed with `src/analytics/hash.ts`, and the report
     resolves them against a list of likely names (§9.14).
-22. **Where do the per-dataset licences come from?** The SOS catalog's
-    own records, the SOS team, or each provider? The SOS snapshot
+22. **Where do the per-dataset licences come from?** The SOS snapshot
     TerraViz imported carries no licence field at all, and until a
     dataset's licence is curated it is not delivered as files, tiles or
     rasters (§6.5). This is the question that most decides how much of
-    the SOS catalogue D2 and D3 can reach.
+    the SOS catalogue D2 and D3 can reach. What the public record says
+    (checked 2026-11-06):
+    - **Dataset pages state no licence**, only a bare "© Science On a
+      Sphere" footer
+      ([example](https://sos.noaa.gov/catalog/datasets/120-years-earthquakes-tsunamis/)).
+    - **The SOS copyright page names no Creative Commons licence**
+      ([copyright](https://sos.noaa.gov/copyright/)). NOAA-made media
+      is "in general … not copyrighted", to be credited to NOAA and
+      never used to imply NOAA's endorsement. Media owned by others is
+      available "for educational, journalistic, and personal uses",
+      with other uses, "such as commercial", possibly restricted. Each
+      dataset's catalog page notes non-NOAA ownership in a table.
+    - **Some partner datasets do carry Creative Commons licences.** A
+      NASA dataset and a WHOI package found in search are both
+      CC BY-NC-SA, which fits the maintainer's recollection that
+      providers agree to a Creative Commons licence to be listed.
+
+    So the requirement probably lives in the submission agreement,
+    which is not public, and **the SOS team is the source**. Proposed
+    until they answer: a NOAA-made dataset is delivered crediting NOAA,
+    with nothing implying endorsement; a dataset with non-NOAA owners
+    is treated as non-commercial at most, as the copyright page
+    describes, and goes out only once its owner's terms are known.
 23. **No-Derivatives licences.** Do any SOS datasets carry one, and do
     TerraViz's derived forms — tiles, resized frames, palette-applied
     video, re-encoded movies — count as adaptations? Creative Commons
