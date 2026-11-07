@@ -208,7 +208,10 @@ footer.site-footer {
       <hr>
       <h2>2. What we collect, in detail</h2>
       <p>The app has three telemetry modes. You can see which mode is active —
-      and change it — under <strong>Tools → Privacy</strong>.</p>
+      and change it — under <strong>Tools → Privacy</strong>, except in the app&#39;s minimal
+      embedded view (an address with <code>embed=1</code>, which sites embedding the app
+      normally use), which has no Tools menu (see &quot;The app inside another
+      site&#39;s page&quot; under Mode 1).</p>
       <h3>Mode 1 — Essential (on by default)</h3>
       <p>Small, anonymous events about the health of the app:</p>
       <ul>
@@ -218,7 +221,11 @@ footer.site-footer {
       browser&#39;s language setting, three <strong>bucketed</strong> screen signals
       (browser viewport size class, aspect-ratio class, and physical-
       display class — never your exact resolution), whether your
-      device supports VR or AR, the country your request came from as
+      device supports VR or AR, whether the app is running in its own
+      window or inside a frame on another web page and whether the
+      address asked for the app&#39;s minimal embedded view (never <em>which</em>
+      page framed it — its address is not read; see &quot;The app inside
+      another site&#39;s page&quot; below), the country your request came from as
       a 2-letter code (derived by our Cloudflare edge from your IP
       address and attached server-side; the IP itself is never
       written to analytics storage), and which build of the app you
@@ -312,6 +319,38 @@ footer.site-footer {
       keeps its own browser, so there your control is the viewer&#39;s media
       settings, which stop the globe&#39;s page from loading at all, picture
       included</p>
+      </li>
+      <li><p><strong>The app inside another site&#39;s page</strong> — for example a story map,
+      an ArcGIS Hub site or a WordPress post that shows TerraViz in a
+      frame. The app records the events above as it does on its own site,
+      and notes that it is in a frame. It never reads the address of the
+      page around it. Even so, some of what it records says something
+      about that page:</p>
+      <ul>
+      <li><strong>Which site it was can often be worked out.</strong> An embedded view
+      usually opens one particular dataset or tour, and that is
+      recorded. Where only one site embeds it, the record points to that
+      site. The same is true when this node allows only one site to embed
+      it.</li>
+      <li><strong>How long you had that site&#39;s page open.</strong> Your browser tells
+      the app it is hidden when the page around it is hidden, so the
+      session length recorded is roughly how long that site&#39;s page was
+      open, from when the frame loaded until you first switched away from
+      it or closed it.</li>
+      <li><strong>The viewport and aspect-ratio classes describe the frame</strong>, the
+      box the other site gave the app, not your browser window. (The
+      physical-display class is still your screen&#39;s.)</li>
+      <li>If the people who run the other site also run the TerraViz node
+      it reports to, they hold their own records of visits to their page
+      as well as these events, and could match the two by time and
+      country.</li>
+      </ul>
+      <p>The minimal embedded view (an address with <code>embed=1</code>, which sites
+      embedding the app normally use) shows no Tools menu and no first-run
+      notice, so there is no Privacy panel to reach. And in any frame on
+      another site, a mode you chose on this site does not carry over:
+      current browsers keep a framed page&#39;s storage separate for each site
+      it appears on. Section 8 says what you can do instead</p>
       </li>
       <li><p>When something goes wrong — a classification of the error (tile
       fetch, video stream, AI model, uncaught exception, browser-console
@@ -414,8 +453,11 @@ footer.site-footer {
       zone, or user-agent string — these are the classic fingerprinting
       signals, and our environment data is bucketed specifically to
       avoid them</li>
-      <li><strong>Page URLs from outside the app, referrer chains, or anything about
-      other sites you visit</strong></li>
+      <li><strong>Page URLs from outside the app, referrer chains, or the addresses
+      of other sites you visit.</strong> When another web page shows the app
+      inside a frame, telemetry notes that it is framed and never reads
+      the page&#39;s address; section 2 says what can still be worked out
+      about that page</li>
       <li><strong>Your IP address in the event stream.</strong> Our server sees your IP
       briefly to rate-limit abuse, then discards it — it is never written
       into analytics storage</li>
@@ -697,6 +739,13 @@ footer.site-footer {
       <ul>
       <li><strong>Change telemetry mode</strong> at any time: <strong>Tools → Privacy</strong>. Changes
       take effect immediately — no restart required</li>
+      <li><strong>Inside another site&#39;s page</strong> a mode you chose on this site does
+      not reach the frame, and the minimal embedded view has no Privacy
+      panel at all (section 2). A switch
+      that sites embedding the app can set, and support for your browser&#39;s
+      Global Privacy Control setting there, are planned. Until then, a
+      browser content blocker that blocks requests to this site&#39;s
+      <code>/api/ingest</code> stops an embedded view from reporting</li>
       <li><strong>Disable telemetry entirely</strong>: pick &quot;Off&quot; in the same panel</li>
       <li><strong>Run a telemetry-free build</strong>: the source code is public; you or
       someone you trust can build the app with the compile-time

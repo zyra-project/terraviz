@@ -61,12 +61,21 @@ export interface EventLayout {
   /** Subset of `blobs` carrying `'true'`/`'false'` — decoded back
    * to booleans. */
   readonly booleans?: readonly string[]
-  /** The single present-or-absent blob field (only
-   * `session_start.resumed` today). When absent on the wire, every
-   * later blob shifts up one position. Presence is detected by
-   * whether the *last* blob slot of the full layout is populated —
-   * valid only while the last field is a never-empty enum, which
-   * the round-trip test asserts. */
+  /** The single present-or-absent blob field
+   * (`session_start.resumed`, `voice_interaction.interrupted`). When
+   * absent on the wire, every later blob shifts up one position.
+   * It must be a boolean, and presence is read off its own slot: the
+   * field is there exactly when that slot reads `'true'` or
+   * `'false'`. When it is absent the slot holds the next field, which
+   * must therefore never be a boolean — the round-trip test asserts
+   * both.
+   *
+   * This replaced a last-slot rule (present when the layout's last
+   * slot is filled), which assumed every row carries every other
+   * field. Appending `session_start.window_context` broke that: a row
+   * from an older client that sent `resumed` fills as many slots as a
+   * newer row that did not, so the last-slot rule would read the
+   * first as the second. */
   readonly optionalBlob?: string
 }
 
@@ -76,7 +85,7 @@ export const EVENT_LAYOUTS = {
     blobs: [
       'app_version', 'aspect_class', 'build_channel', 'locale', 'os',
       'platform', 'resumed', 'schema_version', 'screen_class',
-      'viewport_class', 'vr_capable',
+      'viewport_class', 'vr_capable', 'window_context',
     ],
     doubles: ['client_offset_ms'],
     booleans: ['resumed'],
@@ -289,9 +298,10 @@ export const EVENT_LAYOUTS = {
   },
   voice_interaction: {
     // `interrupted` is optional (TTS barge-in only) and sorts first, so
-    // it's the optional-blob: present → blob5, absent → everything
-    // shifts up one and the last slot (`trigger`, a never-empty enum)
-    // reads empty. Keeps existing blob positions for the common case.
+    // it's the optional-blob: present → blob5 reads 'true'/'false',
+    // absent → everything shifts up one and blob5 holds `lang`, which
+    // is never a boolean. Keeps existing blob positions for the common
+    // case.
     blobs: ['interrupted', 'lang', 'mode', 'provider', 'success', 'trigger'],
     doubles: ['client_offset_ms', 'duration_ms'],
     booleans: ['interrupted', 'success'],
@@ -375,14 +385,17 @@ export function decodeAeRow(row: Record<string, unknown>): DecodedEventRow {
     return { ...base, layout: 'unknown', fields }
   }
 
-  // Resolve the optional-blob shift: if the last slot of the full
-  // layout is unpopulated, the optional field was absent on the
-  // wire and everything after its sorted position sits one slot
-  // earlier.
+  // Resolve the optional-blob shift: the optional field is a boolean,
+  // so it was on the wire exactly when its own slot reads 'true' or
+  // 'false'. Otherwise that slot holds the next field (never a
+  // boolean), and everything after its sorted position sits one slot
+  // earlier. See `EventLayout.optionalBlob` for why this is not read
+  // off the last slot.
   let blobNames: readonly string[] = layout.blobs
   if (layout.optionalBlob) {
-    const lastSlot = ENVELOPE_BLOBS + layout.blobs.length
-    if (blobAt(row, lastSlot) === '') {
+    const slot = ENVELOPE_BLOBS + 1 + layout.blobs.indexOf(layout.optionalBlob)
+    const raw = blobAt(row, slot)
+    if (raw !== 'true' && raw !== 'false') {
       blobNames = layout.blobs.filter((name) => name !== layout.optionalBlob)
     }
   }

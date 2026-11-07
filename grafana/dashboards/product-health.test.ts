@@ -233,7 +233,8 @@ describe('product-health dashboard — Phase 3b asset migration row', () => {
     //   - 3pa/F: version 10 (publisher portal row)
     //   - multi-monitor rung 13: version 11 (output row)
     //   - Second Life phase 1: version 12 (globe row)
-    expect(dashboard.version).toBe(12)
+    //   - session_start.window_context: version 13 (embedded views)
+    expect(dashboard.version).toBe(13)
   })
 })
 
@@ -472,5 +473,30 @@ describe('product-health dashboard — globe (web output) row', () => {
     }
     expect(sqlOf('Errors by category')).toMatch(/blob1 = 'error' AND blob5 != 'output'/)
     expect(sqlOf('Errors per session')).toMatch(/blob1 = 'error' AND blob5 != 'output'/)
+  })
+})
+
+describe('product-health dashboard — embedded views panel', () => {
+  const dashboard = load()
+  const panel = dashboard.panels.find(p => p.id === 28)
+
+  it('exists on its own grid row', () => {
+    expect(panel?.title).toMatch(/window context/)
+    const others = dashboard.panels.filter(p => p.id !== 28 && p.gridPos.y === panel?.gridPos.y)
+    expect(others).toHaveLength(0)
+  })
+
+  it('reads window_context from blob15, leaving out rows that carry resumed', () => {
+    // session_start sorts window_context after vr_capable (blob15);
+    // the optional resumed field at blob11 would move it to blob16.
+    // No client sends resumed, so the panel keeps to forms other
+    // panels already run on AE (plain comparisons in WHERE) and leaves
+    // those rows out, by the export decoder's own test: resumed reads
+    // 'true'/'false' only when it is there.
+    const sql = panel?.targets[0].url_options?.data ?? ''
+    expect(sql).toMatch(/blob1\s*=\s*'session_start'/)
+    expect(sql).toMatch(/blob15 AS window_context/)
+    expect(sql).toContain("blob11 != 'true' AND blob11 != 'false'")
+    expect(sql).toContain("blob15 != ''")
   })
 })
