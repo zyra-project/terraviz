@@ -900,10 +900,18 @@ where they live.
 
 | Variant | Encoding | For |
 |---|---|---|
-| `h264-4096` | H.264, 4096×2048, 8-bit 4:2:0, constant frame rate, a keyframe at least every second, `faststart` | OpenSpace, spherical displays, Digistar, web developers' globe materials, Second Life's video-player path |
+| `h264-4096` | H.264 High@5.1, 4096×2048, 8-bit 4:2:0, constant frame rate, a keyframe at least every second, `faststart` | OpenSpace, spherical displays, Digistar, web developers' globe materials |
 | `h264-2048` | The same at 2048×1024 | Smaller domes and spheres, Second Life faces at 2048, StoryMaps clips |
-| `h264-1024` | The same at 1024×512, about 1.5–2 Mbit/s | Second Life's default face and slow links — the rendition `SECOND_LIFE_COMPAT.md` §7 already plans |
-| `sos-mpeg4` | MPEG-4 Part 2, at least 25 Mbit/s, 2048×1024 (4096×2048 on request) | Science On a Sphere, whose guidelines rule out H.264 (§2.4) |
+| `h264-1024` | The same at 1024×512, about 1.5–2 Mbit/s | Second Life's default face and slow links. A plain MP4 for its video-player path; `SECOND_LIFE_COMPAT.md` §7's 1024 rendition is an HLS rung for the output page, a different file with a different GOP |
+| `sos-mpeg4` | MPEG-4 Part 2 at a quantiser floor (`-q:v` 1–2), 2048×1024 (4096×2048 on request, at a proportionally higher rate) | Science On a Sphere, whose guidelines rule out H.264 and ask for at least 25 Mbit/s (§2.4) |
+
+Second Life is not on the 4096 row: its media is capped at 2048, so
+LibVLC would decode 4K and scale it in software for every visitor. A
+bitrate target for `sos-mpeg4` undershoots on easy content (18 Mbit/s
+measured at 2048×1024 against a 25 Mbit/s target), so the floor is a
+quantiser, and ffmpeg's `mpeg4` encoder labels every stream Simple
+Profile @ Level 1 whatever its size. Zyra's `compose-video` `sos`
+preset rescales luma and is never used for data-encoded content.
 
 - **One video frame per data frame.** Frame *i* of the file is frame *i*
   of the dataset, so a player that maps a start and end time linearly
@@ -911,11 +919,38 @@ where they live.
   right date. A series whose frames are not evenly spaced in time is
   not offered as a time-synced video; it goes out as frames (§6.4),
   which carry their own dates. The frame rate sets only how fast the
-  file plays by itself, and defaults to 30 fps, the catalog's encode
-  rate and SOS's recommendation.
-- **Keyframes at least every second** because OpenSpace's time-synced
-  playback seeks on every step, and a seek decodes from the keyframe
-  before it.
+  file plays by itself, and is the dataset's own `playback_fps`, not
+  30: the catalog's encode holds each frame across a 30 fps file
+  (`cli/transcode-from-dispatch.ts`), but one frame per data frame at
+  30 fps loops a 41-frame dataset in 1.4 s, which matters to every
+  player that plays the file by itself. The SOS bundle writes the same
+  rate as `playlist.sos`'s `fps`.
+- **Keyframes at least every second** (`-g` of max(1, round(fps)))
+  because OpenSpace's time-synced playback seeks on every step, and a
+  seek decodes from the keyframe before it. OpenSpace uses hardware
+  decoding and skips a seek while one is in flight, so a slow seek
+  drops steps rather than stalling; D1 compares 1 s against shorter
+  GOPs, and all-intra for short series, with hardware decoding on and
+  off, and checks keyframe positions with `ffprobe` rather than trusting
+  the flags.
+- **Everything else pinned.** `-profile:v high -level:v 5.1`, so a
+  variant above 30 fps fails a test rather than quietly needing level
+  5.2 (4096×2048 at 30 fps is exactly 5.1's macroblock rate). No audio
+  (`-an`), since mpv's duration includes it and OpenSpace divides by the
+  duration. Constant frame rate with the first timestamp at 0, and no
+  B-frames (`-bf 0`) for the widest support. A bitrate or quality
+  policy per size, set in D1, since a 1 s GOP costs bits against
+  today's 6 s. An 8192×4096 variant would need H.264 level 6.0, beyond
+  common hardware decoders, so it is HEVC or frames.
+- **Colour tagged.** ffmpeg converts RGB to YUV with BT.601 and leaves
+  the stream untagged, and mpv and VLC guess BT.709 for HD-sized video:
+  RdBu's red (178, 24, 43) decodes as (190, 39, 40). Palette-applied
+  and picture video is encoded with
+  `scale=out_color_matrix=bt709:out_range=tv` and the full tag set,
+  `DATA_ENCODED_VIDEO_PLAN.md`'s rule of tagging everything or only the
+  range, never in between. SOS's own matrix is unknown, so D1's SOS
+  test carries a palette swatch. Today's image-sequence HLS encodes are
+  untagged BT.601 too, which is a separate fix.
 - **H.264 for reach.** It is the one codec every player above decodes —
   libmpv, LibVLC, every browser, hardware decoders on modest machines.
   HEVC and AV1 are smaller and can be added as further variants; they
@@ -931,16 +966,52 @@ None of the players in §2 applies a colour palette to a video, so a
 data-encoded dataset reaches them as **palette-applied RGB video**,
 made by colouring the frames after decimating them in value space
 (§7.1) — never by transcoding the luma video, whose encoder would
-average codes and then colour the averages.
+average codes and then colour the averages. It is a picture: 4:2:0 and
+the DCT invent in-between colours at class boundaries, which is §7.3's
+objection to JPEG, so a categorical (`mode`) dataset's OpenSpace asset
+prefers frames.
 
-Where values must survive, frames are the format. A data-encoded frame
-is a lossless 8-bit PNG whose codes map one to one onto the palette, so
-a frame zip plus the palette as a lookup image carries the dataset
-exactly. OpenSpace can apply that lookup itself (`Colormap`, with
-`Interpolation` on, §2.2), and it blends neighbouring time steps
-*before* colouring — a blend of values, which is the right kind,
-except across the no-data band, where a blend invents values for the
-length of a step. That caveat belongs in the asset's description.
+**What shows where the palette is transparent.** The palette's alpha
+is not all-or-nothing: 0 below `transparentRange`, and ramps elsewhere
+(`src/types/color-scale.ts`), which TerraViz mixes over its own base
+imagery. RGB video has no alpha, so a background is baked in, stated in
+the manifest, and chosen not to lie on the palette: Blue Marble's ocean
+is near-black (`rgb(2, 5, 20)`), as are many palettes' low ends, so a
+black background would let no-data borrow a data colour. The legend
+says what showing through means ("Earth visible: no data, or below
+X"). The producer or the node's science reviewer chooses the
+background, and D2a's parity test compares against the composited
+colour, not the LUT entry. The same question applies to opaque SOS
+frames.
+
+**Where values must survive, frames are the format.** A data-encoded
+frame is an 8-bit PNG whose codes map one to one onto the palette. It
+is lossless only where the dataset was uploaded as frames; a
+data-encoded MP4 upload has only its lossy video (§9.4). A lookup
+image carries colours, not values, so with the frames go a manifest
+embedding the full colour scale — `vmin`, `vmax`, units, `dataMinLuma`,
+`transparentRange`, the code-to-value formula, and what clipping at
+the ends means — the source resolution, the decimation method, and a
+labelled legend, which data-encoded rows lack today because the
+colorbar replaced the uploaded image (`src/ui/colorbarUI.ts`).
+
+OpenSpace can apply the palette itself (`Colormap`, which requires
+`Interpolation`, §2.2), but not faithfully:
+- it blends neighbouring time steps *before* colouring, so a moving
+  plume shows twice at half strength, and a blend across the no-data
+  band invents values for the length of a step;
+- its tile textures are always linear or mipmapped
+  (`memoryawaretilecache.cpp`), so codes blend across no-data edges
+  before colouring, the fringe TerraViz avoids with nearest sampling
+  (`earthTileLayer.ts`);
+- alpha comes from the greyscale frame, not the colormap
+  (`interpolate_fs.glsl`), so a plain greyscale PNG paints the no-data
+  band opaque, and frames would have to be grey plus alpha.
+
+Palette-applied RGBA PNG frames, with interpolation off, may be the
+more faithful default for public shows. D1 compares the two, and the
+producer chooses; either way the asset's description states the
+blending.
 
 For TerraViz's own output page in Second Life, which can apply the
 palette (§2.3), smaller data-encoded renditions — 2048 and 1024 wide —
@@ -949,7 +1020,15 @@ case. They must be **pinned, not adapted**: chosen once for the face
 and held, never switched by bandwidth mid-session, which is the form
 `DATA_ENCODED_VIDEO_PLAN.md` (§Why the frame is 4096×2048) already
 names as workable, because a rung switch changes the value under the
-cursor.
+cursor. Pinning means holding `hls.currentLevel`, since
+`capLevelForWidth` only caps and leaves the adaptive logic free
+beneath it. These rungs depart from that plan's nearest-neighbour rule
+for lower rungs (`flags=neighbor`), so it is updated with them: its
+encoder rules kept, the bitrate scaled with the pixel count, each rung
+added as a `check:luma-range` variant with an occupancy check, which
+that check cannot see, and hover and Analyze kept on the full rung,
+which `DATA_ANALYSIS_PLAN.md` calls load-bearing. They are output-page
+work for `SECOND_LIFE_COMPAT.md`, not one of §9's phases.
 
 ### 6.3 Dates travel with the file
 
@@ -957,16 +1036,30 @@ Every video and frame set carries a JSON manifest: dataset id, title,
 credit and licence, variant, size, frame rate, frame count, the date of
 each frame (or start, period and count when regular, computed exactly
 as `/frames` computes them: `start_time + period × index`), the loop
-period, and links to the palette and legend. Each group's own form is
-derived from it:
+period, and links to the palette and legend. For a calendar period
+that computation is wrong today: `frameTimestamp` uses average months
+and years (`functions/api/v1/_lib/iso-duration.ts`), which dates
+frame 1 of a monthly series starting 1 January at 31 January 10:29.
+D2a fixes it at the source with calendar arithmetic, so the route stays
+the one computation. Each group's own form is derived from it:
 
 - **SOS:** `labels.txt`, one line per frame.
 - **OpenSpace video:** the start and end times the asset passes to
-  `VideoTileProvider`.
-- **OpenSpace frames:** dated filenames, `<id>_YYYYmmdd_HHMM.png`, for
-  `TemporalTileProvider`'s Folder mode. Its filename date parsing
+  `VideoTileProvider`, set half a mean step outside the first and last
+  dates (start = t₀ − P̄/2, end = t₍N−1₎ + P̄/2), so each date lands
+  mid-frame. OpenSpace floors the frame position
+  (`modules/video/src/videoplayer.cpp`), and with the bounds on the
+  dates themselves a monthly series shows the previous month on nearly
+  every month-start step. D1 steps across month boundaries.
+- **OpenSpace frames:** dated filenames, `<id>_YYYYmmdd_HHMMSS.png`, for
+  `TemporalTileProvider`'s Folder mode, seconds included so that a
+  sub-minute cadence does not collide. Its filename date parsing
   looked off by one day in OpenSpace's source, so the exact form is
   settled by a Phase D1 test, not by reading (§11).
+- **OpenSpace sync:** `SecondsUntilResync` set for a dataset that
+  updates, since the default caches forever and each resync downloads
+  the whole file again, and `PlaybackMode = RealTimeLoop` for the 130
+  of 204 snapshot rows that have no period.
 - **KML:** a `TimeSpan` per overlay, from its frame's date to the next.
 
 ### 6.4 Bundles per group
@@ -978,6 +1071,27 @@ derived from it:
 | Frame zip | 2:1 JPEG (pictures) or PNG (data) frames at 2048 and 4096, plus the manifest | Spherical displays, Digistar, WorldWide Telescope, anyone |
 | KMZ | One GroundOverlay per frame, at most 2048×1024, each with a TimeSpan | Google Earth Pro; Google Earth on the web without animation |
 
+**Packaging rules.**
+- `UrlSynchronization` names the local file after the address's last
+  segment with `?` deleted, and unzips only names ending `.zip`
+  (`modules/sync/syncs/urlsynchronization.cpp`). With D2b's `via` tag,
+  `frames.zip?via=x` would become `frames.zipvia=x` and never unzip.
+  So the asset sets `Filename` explicitly, and files-route names carry
+  real extensions.
+- OpenSpace refuses Zip64, and a 4096-wide zip of a long series can
+  pass 4 GiB. So a zip holds one resolution, a long series is split,
+  and the writer adds no Zip64 record it does not need.
+- One 2048×1024 overlay per frame runs a long KMZ to hundreds of
+  megabytes, so it caps its frame count, decimating in time with
+  §7.2's caveat.
+- Every dataset reaching a player that maps a whole 2:1 frame onto
+  −180…180 is normalised first, by §5.5's rules: a dateline-centred
+  frame is rolled, a regional one is placed on a global canvas (with
+  the resolution loss stated) or sent only in forms that carry bounds
+  (SOS `layernorth`/`south`/`east`/`west`, KML `LatLonBox`,
+  georeferenced frames), and a non-Earth dataset goes to the right
+  OpenSpace globe or is excluded.
+
 ### 6.5 Where files live, and their addresses
 
 - **Built by the runner** that already encodes the HLS ladder, at
@@ -985,15 +1099,34 @@ derived from it:
   dataset when the publisher turns it on, not for every dataset by
   default: frame zips duplicate frames, and the legacy catalog is
   large.
-- **Stable addresses.** `GET /api/v1/datasets/{id}/files/{name}`
-  answers with a redirect to the current object, so a republished
-  dataset changes the object and not the address a dome's asset file
-  holds. For a legacy SOS video hosted on Vimeo, the same address
-  mints a fresh signed link each time, so a configuration does not
-  break every hour. Whether OpenSpace's `UrlSynchronization` and Second
-  Life's video plugin follow redirects is a Phase D1 check; if either
-  does not, the Function serves the bytes.
-- **Range requests, `Content-Type: video/mp4`, open CORS.** Players
+- **Stable addresses, served by the node.**
+  `GET /api/v1/datasets/{id}/files/{name}` answers with a redirect to
+  an immutable, digest-named path on the same route, which the Function
+  serves from the R2 binding with `Range`, `ETag`, `Accept-Ranges` and
+  an explicit `HEAD` handler, checking the `files` switch on every
+  request, the way `functions/api/v1/media/video-proxy.ts` already
+  serves video. A republished dataset changes the digest path and not
+  the address a dome's asset file holds, and a player's range requests
+  keep hitting an object that never changes.
+  - **Never a presigned or expiring link.** Second Life's LibVLC loops
+    and reconnects against the redirected address, so a link that
+    expires in minutes stops the globe on its first loop after expiry.
+    A presigned link is signed for one method, so the viewer's `HEAD`
+    probe for `video/mp4` fails. A cross-origin hop sends
+    `Origin: null` to the second host. Serving both hops from the node
+    avoids all three, and needs no storage credentials on the read path.
+  - **Followed redirects are confirmed in source:** OpenSpace's
+    `UrlSynchronization` uses libcurl with `CURLOPT_FOLLOWLOCATION`, and
+    Second Life's `HEAD` probe follows redirects.
+  - **A legacy SOS video hosted on Vimeo** is Vimeo's own rendition,
+    not an `h264-4096` meeting §6.1, behind a signed link that lasts
+    about an hour (`functions/api/v1/datasets/[id]/manifest.ts`). It gets
+    its own name with no time-sync promise, or it is re-encoded (§9.13).
+  - **Each kind has its own `Content-Type`**, the redirect included,
+    plus `Content-Disposition` and
+    `Access-Control-Expose-Headers: Content-Length, Content-Range, Accept-Ranges`,
+    as `video-proxy.ts` sends.
+- **Range requests, open CORS.** Players
   outside a browser ignore CORS, but a web developer's globe material
   needs it — and today the video host allows only the node's own
   origin (`SECOND_LIFE_COMPAT.md` §4.4). Decided (§11 q7): the files
@@ -1262,10 +1395,11 @@ deeper than the source would only spend storage.
     cache lifetime ends.
   - **Off withdraws the bytes, not only the address.** That holds only
     if nothing can be fetched past the Function. So files and rasters
-    follow the tiles rule (§5.6, q12): a redirect goes to a link that
-    expires within minutes, or the Function serves the bytes itself
-    (§6.5), and no delivery object sits under the bucket's public
-    domain.
+    follow the tiles rule (§5.6, q12): the Function serves the bytes
+    from the R2 binding, at an immutable path on its own route (§6.5),
+    and no delivery object sits under the bucket's public domain. Not a
+    presigned link: it would outlive the switch for its lifetime, and
+    an expiring one breaks players that loop or reconnect.
   - **Off stops building and deletes nothing.** Stored outputs stay,
     so turning a channel back on serves them again at once. Anything
     missing is built on each dataset's next publish or by a requested
@@ -1434,7 +1568,7 @@ outputs to other organisations (§6.5).
 | What does a `GetMap` cost? | Stitch-and-scale in the Worker; read Cloudflare's CPU time, not elapsed time | D4's go / no-go |
 | What does a time step cost OpenSpace? | `h264-4096` at keyframe intervals of 1 s and 6 s (today's encode, `cli/lib/ffmpeg-hls.ts:352-357`), time-mapped, on the collaborators' dome | §6.1's keyframe rule |
 | Does OpenSpace's Folder mode read the dates right? | Dated frame names across a month boundary | §6.3, §11 q10 |
-| Do redirects survive? | Point OpenSpace's `UrlSynchronization` and Second Life's video plugin at a 302 to a link that expires in minutes, as §8's switches need | §6.5, §8 |
+| Do redirects survive a real session? | Point OpenSpace's `UrlSynchronization`, Second Life's video plugin and a browser globe material at a 302 to a digest path on the same route, and play longer than any cache lifetime, with a loop, a seek, a reconnect and a `HEAD` | §6.5, §8 |
 | Does an SOS site accept the directory? | Hand one to an SOS site or the SOS team | §6.4, §11 q9 |
 | Does a plain MP4 play on a Second Life sphere? | `h264-1024` through the video plugin, in Firestorm and Linden Lab's viewer | §2.3, §4 |
 | What does a pyramid cost? | Bytes, object count and cut time per frame on a GitHub runner | §5.8, D3a sizing |
@@ -1478,10 +1612,28 @@ contradict.
   A new table rather than columns on `datasets`, so `WireDataset`, the
   native catalog and the federation feed are untouched (§8).
 - **The files route**, `functions/api/v1/datasets/[id]/files/[name].ts`:
-  a redirect to the current object; for a legacy Vimeo-hosted video, a
-  freshly signed link through the proxy `manifest.ts` already uses;
-  404 unless `FILES_ENABLED`, and `403 feature_disabled` while the
-  `files` switch is off.
+  a redirect to an immutable digest path on the same route, served
+  from the R2 binding with `Range`, `ETag` and `HEAD` (§6.5); 404
+  unless `FILES_ENABLED`, and `403 feature_disabled` while the `files`
+  switch is off.
+- **Frames for datasets that have none.** Data-encoded datasets
+  published through `compose-video` or as an uploaded MP4, and the
+  legacy SOS videos, have no frame set to colour from, and D6's
+  extraction depends on this phase, so the order would be circular.
+  D2a decodes the kept upload (`uploads/{id}/{upload}/source.mp4`, whose
+  retention D1 confirms) at its own rate, or selects one frame in every
+  30/`playbackFps` from the catalog's encode. Exact de-duplication does
+  not work: decoded x264 output does not repeat held frames exactly (12
+  source frames held to 30 fps came back as 84 to 89 distinct ones).
+  Decoding luma video matches the browsers' limited-to-full expansion,
+  which is where `check:luma-range` applies.
+- **Content-addressed keys** include the palette's digest, the
+  normalisation, the background and an encoder-recipe version (the
+  `segmentDescriptorHash` `v:` lesson in `DATA_ENCODED_VIDEO_PLAN.md`),
+  and a bundle that embeds dates or credits keys on them too. The MP4's
+  copyright tag is written by ffmpeg, which drops a `license` tag
+  without `+use_metadata_tags`; a credit edit is a remux with `-c copy`,
+  not a re-encode.
 - **The `files` switch** (§8): its key in `src/types/node-features.ts`,
   its row in the Features card, its check in the files route and in
   the publish dispatch, and its tests, in the same change as the route.
@@ -1493,17 +1645,22 @@ contradict.
 
 **Tests.** Pure tests for the encoder arguments and the manifest; a
 runner smoke test that checks the result with `ffprobe` (constant
-rate, keyframe spacing, frame count equal to the dataset's); a parity
-test that a palette-applied frame's colour at a texel is the LUT's
-entry for that texel's luma; route tests for the redirect, the flag
-and an ineligible dataset.
+rate, keyframe spacing, frame count equal to the dataset's, profile and
+level, colour tags); a parity test that decodes the palette-applied
+video through ffmpeg and compares each texel, within a stated
+tolerance, with the LUT's entry for its luma composited over the
+background; date tests across month and year boundaries; route tests
+for the redirect, `Range`, `HEAD`, the flag, the switch and an
+ineligible dataset.
 
 **Gate.** An `h264-4096` file plays time-synced in OpenSpace on the
 collaborators' setup, and the route serves on a preview deploy.
 
 **Reviewers.** The Video Streaming Engineer for the encode and the
 workflow change, with the `terraviz-data-video` skill and
-`npm run check:luma-range` for data-encoded output; the Scientific
+`npm run check:luma-range` where luma video is read or written (the
+pinned renditions, and decoding a data-encoded upload); palette-applied
+RGB and PNG frames need a colour check instead; the Scientific
 Visualization Reviewer for palette application and reduction; the
 API Platform Engineer for the route's shape; the Application Security
 Engineer for headers and CORS; and, because a D1 migration is one of
@@ -1793,11 +1950,15 @@ handling; the Code Reviewer.
 
 ### 9.13 D6 — The legacy video catalog
 
-**Builds.** Frame extraction for video-only datasets: decode, drop
-duplicates (exact duplicates only for data-encoded video, `mpdecimate`
-for pictures, §7.2), assign dates, and refuse a dataset whose
-de-duplicated frames do not fit its span evenly. Off by default and
-turned on per dataset.
+**Builds.** Frame extraction for video-only datasets, by D2a's rule:
+decode the kept upload at its own rate where there is one, otherwise
+select one frame in every 30/`playbackFps` from the catalog's encode
+(§7.2). Not by dropping duplicates: decoded x264 output does not repeat
+held frames exactly, and an SOS animation's held title and end frames
+are real repeats. Assign dates, and refuse a dataset whose frames do
+not fit its span evenly; a wrong count that happens to divide the span
+passes that check, so the count is checked against the source's own
+rate as well. Off by default and turned on per dataset.
 
 **The gate is a person, not a test.** Before a dataset's tiles or
 files go public, someone with the authority to say so records that it
