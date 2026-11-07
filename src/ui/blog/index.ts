@@ -16,7 +16,10 @@
  *     globe (`/dataset/:id` deep links), and the cited event's source
  *     attribution (only present while that event is approved).
  *
- * Static content pages — no router; navigation is plain links.
+ * Static content pages — no router; navigation is plain links. Every
+ * link that loads a page of this app carries the address's
+ * `telemetry` switch (`appLink`), since the next page reads it afresh
+ * (`src/analytics/pageOptOut.ts`).
  */
 
 import { t } from '../../i18n'
@@ -65,6 +68,119 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return node
 }
 
+/** The two parts of an address that can carry `telemetry`. */
+export interface AddressParts {
+  /** `location.search`, or `''`. */
+  search: string
+  /** `location.hash`, or `''`. */
+  hash: string
+}
+
+/** The address this page loaded at, set by `bootBlogPage`. */
+let bootAddress: AddressParts = { search: '', hash: '' }
+
+/** The `telemetry` values in one part of an address (`?…` or `#…`). */
+function telemetryValues(part: string): string[] {
+  return new URLSearchParams(part.replace(/^[?#]/, '')).getAll('telemetry')
+}
+
+/** `extra` joined onto one part of an address with `&`, or as the
+ *  whole part when it is empty. */
+function joinPart(part: string, extra: string): string {
+  return part === '' || part.endsWith('&') ? `${part}${extra}` : `${part}&${extra}`
+}
+
+/**
+ * `dest`, a path on this site, with the `telemetry` values of this
+ * page's address added in the part each came from: a query value to
+ * the query, a value after `#` to the part after `#`. Only that key
+ * travels. The blog holds no catalog, layout or tour state for the next
+ * page to keep, the part after `#` on a post is more often an anchor
+ * than a setting, and `telemetry` is the one key whose loss changes
+ * what the next page sends.
+ *
+ * The values are those of the address the page loaded at **and** of
+ * the address now, without repeats. The page reads the switch once and
+ * keeps it for its life, so a link has to carry what it loaded with
+ * even after an in-page anchor has replaced the part after `#`; and a
+ * host that sets `#telemetry=0` after the page loaded has asked the
+ * next page not to report. Carrying both can only turn reporting off,
+ * as the switch itself can only lower. A value the destination already
+ * carries in that part is not added twice.
+ */
+export function carryTelemetry(dest: string, now: AddressParts, boot: AddressParts): string {
+  const hashAt = dest.indexOf('#')
+  let path = hashAt < 0 ? dest : dest.slice(0, hashAt)
+  let fragment = hashAt < 0 ? '' : dest.slice(hashAt + 1)
+  const queryAt = path.indexOf('?')
+  const query = queryAt < 0 ? '' : path.slice(queryAt + 1)
+
+  const missing = (from: string[], present: string): string[] => {
+    const have = new Set(telemetryValues(present))
+    return [...new Set(from)].filter((value) => !have.has(value))
+  }
+  const toQuery = missing([...telemetryValues(boot.search), ...telemetryValues(now.search)], query)
+  const toFragment = missing([...telemetryValues(boot.hash), ...telemetryValues(now.hash)], fragment)
+  const pairs = (values: string[]): string =>
+    new URLSearchParams(values.map((value) => ['telemetry', value])).toString()
+
+  if (toQuery.length > 0) {
+    path = queryAt < 0 ? `${path}?${pairs(toQuery)}` : `${path.slice(0, queryAt)}?${joinPart(query, pairs(toQuery))}`
+  }
+  if (toFragment.length > 0) fragment = joinPart(fragment, pairs(toFragment))
+  return fragment ? `${path}#${fragment}` : path
+}
+
+/**
+ * Point `link` at `dest`, a page of this app, carrying the address's
+ * `telemetry` switch (`carryTelemetry`). The `href` is the real
+ * destination, so a middle click, "Open link in new tab" or a copied
+ * link carries it too, and it is rebuilt as the visitor reaches for the
+ * link, the way the info panel's related links are
+ * (`src/services/datasetLoader.ts`), since the part after `#` can
+ * change after the page has rendered. `click` covers a link followed
+ * from the keyboard, whose `focus` may have come before the change.
+ */
+function appLink(link: HTMLAnchorElement, dest: string): HTMLAnchorElement {
+  const refresh = (): void => {
+    link.setAttribute(
+      'href',
+      carryTelemetry(dest, { search: location.search, hash: location.hash }, bootAddress),
+    )
+  }
+  refresh()
+  for (const type of ['pointerdown', 'focus', 'contextmenu', 'click'] as const) {
+    link.addEventListener(type, refresh)
+  }
+  return link
+}
+
+/**
+ * Give the links in a rendered post body that load a page of this site
+ * the address's `telemetry` switch. A link to another site is left
+ * alone, so the switch never leaves the node; so is one that only moves
+ * within this page (`#…`), which loads nothing. The body's links are
+ * already sanitized (`sanitizeMarkdownHtml` keeps `http(s):`, `mailto:`,
+ * `/` and `#`), and a protocol-relative `//host/…` resolves to its own
+ * host's origin here, so one naming another site is left alone too.
+ */
+function carryTelemetryInBody(body: HTMLElement): void {
+  for (const link of body.querySelectorAll<HTMLAnchorElement>('a[href]')) {
+    const raw = (link.getAttribute('href') ?? '').trim()
+    if (raw.startsWith('#')) continue
+    let url: URL
+    try {
+      url = new URL(raw, location.href)
+    } catch {
+      continue
+    }
+    // The protocol test as well as the origin: an opaque origin (a
+    // sandboxed frame) is "null", and so is a `mailto:` link's.
+    if (!/^https?:$/.test(url.protocol) || url.origin !== location.origin) continue
+    appLink(link, `${url.pathname}${url.search}${url.hash}`)
+  }
+}
+
 /**
  * Fetch the public host-org identity for the header, plus whether the
  * node's blog feature is enabled (the same payload carries the
@@ -100,12 +216,12 @@ async function fetchIdentity(): Promise<{ identity: PublicIdentity | null; blogE
 function chrome(content: HTMLElement, identity: PublicIdentity | null = null): HTMLElement {
   const root = el('div', { className: 'blog-root' })
   const header = el('header', { className: 'blog-header' })
-  const home = el('a', { className: 'blog-home-link', href: '/' })
+  const home = appLink(el('a', { className: 'blog-home-link' }), '/')
   if (identity?.logoUrl) {
     home.append(el('img', { className: 'blog-logo', src: identity.logoUrl, alt: identity.orgName }))
   }
   home.append(el('span', { textContent: identity?.orgName ?? t('app.title') }))
-  const index = el('a', { className: 'blog-index-link', href: '/blog', textContent: t('blog.public.indexLink') })
+  const index = appLink(el('a', { className: 'blog-index-link', textContent: t('blog.public.indexLink') }), '/blog')
   header.append(home, index)
   const main = el('main', { className: 'blog-main' })
   main.append(content)
@@ -125,7 +241,7 @@ function renderList(posts: PublicPostCard[]): HTMLElement {
     return wrap
   }
   for (const post of posts) {
-    const card = el('a', { className: 'blog-card', href: `/blog/${encodeURIComponent(post.slug)}` })
+    const card = appLink(el('a', { className: 'blog-card' }), `/blog/${encodeURIComponent(post.slug)}`)
     card.append(el('h2', { className: 'blog-card-title', textContent: post.title }))
     if (post.summary) card.append(el('p', { className: 'blog-card-summary', textContent: post.summary }))
     const meta = el('p', { className: 'blog-card-meta' })
@@ -186,6 +302,7 @@ function renderPost(post: PublicPost): HTMLElement {
   // renderMarkdown runs `marked` then sanitizeMarkdownHtml — safe to
   // set as innerHTML (XSS-tested in markdownRenderer.test.ts).
   body.innerHTML = renderMarkdown(post.bodyMd)
+  carryTelemetryInBody(body)
   wrap.append(body)
 
   if (post.event) {
@@ -206,11 +323,10 @@ function renderPost(post: PublicPost): HTMLElement {
     // resolves published catalog tours by id).
     const tourWrap = el('p', { className: 'blog-post-tour' })
     tourWrap.append(
-      el('a', {
-        className: 'blog-post-tour-btn',
-        href: `/?tour=${encodeURIComponent(post.tour.id)}`,
-        textContent: t('blog.public.playTour'),
-      }),
+      appLink(
+        el('a', { className: 'blog-post-tour-btn', textContent: t('blog.public.playTour') }),
+        `/?tour=${encodeURIComponent(post.tour.id)}`,
+      ),
     )
     wrap.append(tourWrap)
   }
@@ -223,7 +339,7 @@ function renderPost(post: PublicPost): HTMLElement {
       const li = el('li')
       // `/dataset/:id` deep links boot the globe with the dataset
       // loaded (deepLinkService handles the path on SPA start).
-      li.append(el('a', { href: `/dataset/${encodeURIComponent(d.id)}`, textContent: d.title }))
+      li.append(appLink(el('a', { textContent: d.title }), `/dataset/${encodeURIComponent(d.id)}`))
       list.append(li)
     }
     explore.append(list)
@@ -235,12 +351,15 @@ function renderPost(post: PublicPost): HTMLElement {
 function renderMissing(): HTMLElement {
   const wrap = el('div', { className: 'blog-missing' })
   wrap.append(el('h1', { textContent: t('blog.public.missing.title') }))
-  wrap.append(el('p', {}, [el('a', { href: '/blog', textContent: t('blog.public.missing.back') })]))
+  wrap.append(el('p', {}, [appLink(el('a', { textContent: t('blog.public.missing.back') }), '/blog')]))
   return wrap
 }
 
 /** Entry point — called from main.ts's `/blog` route gate. */
 export async function bootBlogPage(): Promise<void> {
+  // First, before anything renders a link: `appLink` carries what the
+  // page loaded with as well as what the address says now.
+  bootAddress = { search: location.search, hash: location.hash }
   document.body.replaceChildren(chrome(el('p', { className: 'blog-loading', textContent: t('blog.public.loading') })))
   document.body.classList.add('blog-body')
 

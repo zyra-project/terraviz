@@ -8,7 +8,8 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { bootBlogPage } from './index'
+import { readPageOptOut } from '../../analytics/pageOptOut'
+import { bootBlogPage, carryTelemetry } from './index'
 
 const LIST = {
   posts: [
@@ -221,5 +222,178 @@ describe('bootBlogPage', () => {
     await bootBlogPage()
     expect(document.querySelector('.blog-logo')).toBeNull()
     expect(document.querySelector('.blog-home-link')?.textContent).toContain('Evil')
+  })
+})
+
+/** Every link on the page that loads a page of this app, by role. */
+function appLinks(): Record<string, string | null> {
+  const href = (selector: string): string | null =>
+    document.querySelector<HTMLAnchorElement>(selector)?.getAttribute('href') ?? null
+  return {
+    home: href('.blog-home-link'),
+    index: href('.blog-index-link'),
+    tour: href('.blog-post-tour-btn'),
+    dataset: href('.blog-post-explore-list a'),
+  }
+}
+
+const TOUR_POST = { post: { ...POST.post, tour: { id: 'TR000AAAAAAAAAAAAAAAAAAAAA' } } }
+
+describe('bootBlogPage carries the telemetry switch onto its links', () => {
+  it("keeps a query telemetry value in each link's query, and no other key", async () => {
+    history.pushState(null, '', '/blog/gulf-warming?telemetry=0&utm_source=newsletter&embed=1')
+    stubFetch(200, TOUR_POST)
+    await bootBlogPage()
+    expect(appLinks()).toEqual({
+      home: '/?telemetry=0',
+      index: '/blog?telemetry=0',
+      tour: '/?tour=TR000AAAAAAAAAAAAAAAAAAAAA&telemetry=0',
+      dataset: '/dataset/DS_SST?telemetry=0',
+    })
+    // The source citation is another site's: the switch never leaves.
+    expect(document.querySelector('.blog-post-citation a')?.getAttribute('href')).toBe('https://example.gov/heatwave')
+  })
+
+  it("keeps a fragment telemetry value in each link's fragment, and no anchor", async () => {
+    history.pushState(null, '', '/blog/gulf-warming#methods&telemetry=off')
+    stubFetch(200, TOUR_POST)
+    await bootBlogPage()
+    expect(appLinks()).toEqual({
+      home: '/#telemetry=off',
+      index: '/blog#telemetry=off',
+      tour: '/?tour=TR000AAAAAAAAAAAAAAAAAAAAA#telemetry=off',
+      dataset: '/dataset/DS_SST#telemetry=off',
+    })
+  })
+
+  it('gives every link an address the next page reads as turned off', async () => {
+    for (const address of ['/blog/gulf-warming?telemetry=0', '/blog/gulf-warming#telemetry=0']) {
+      history.pushState(null, '', address)
+      stubFetch(200, TOUR_POST)
+      await bootBlogPage()
+      for (const [role, href] of Object.entries(appLinks())) {
+        const url = new URL(href ?? '', location.origin)
+        expect(readPageOptOut({ search: url.search, hash: url.hash, gpc: false }), `${address} ${role}`).toBe('address')
+      }
+    }
+  })
+
+  it('carries every value of a repeated key, so an off value still wins', async () => {
+    history.pushState(null, '', '/blog/gulf-warming?telemetry=1&telemetry=0')
+    stubFetch(200, POST)
+    await bootBlogPage()
+    expect(appLinks().dataset).toBe('/dataset/DS_SST?telemetry=1&telemetry=0')
+  })
+
+  it('carries it onto the list cards and the missing view', async () => {
+    history.pushState(null, '', '/blog?telemetry=0')
+    stubFetch(200, LIST)
+    await bootBlogPage()
+    expect(document.querySelector('.blog-card')?.getAttribute('href')).toBe('/blog/gulf-warming?telemetry=0')
+
+    history.pushState(null, '', '/blog/nope#telemetry=0')
+    stubFetch(404, { error: 'not_found' })
+    await bootBlogPage()
+    expect(document.querySelector('.blog-missing a')?.getAttribute('href')).toBe('/blog#telemetry=0')
+  })
+
+  it('leaves the links bare when the address has no telemetry key', async () => {
+    history.pushState(null, '', '/blog/gulf-warming?utm_source=newsletter#methods')
+    stubFetch(200, TOUR_POST)
+    await bootBlogPage()
+    expect(appLinks()).toEqual({
+      home: '/',
+      index: '/blog',
+      tour: '/?tour=TR000AAAAAAAAAAAAAAAAAAAAA',
+      dataset: '/dataset/DS_SST',
+    })
+  })
+
+  it('rebuilds a link as the visitor reaches for it, so a later #telemetry=0 is carried', async () => {
+    history.pushState(null, '', '/blog/gulf-warming')
+    stubFetch(200, POST)
+    await bootBlogPage()
+    const link = document.querySelector('.blog-post-explore-list a') as HTMLAnchorElement
+    expect(link.getAttribute('href')).toBe('/dataset/DS_SST')
+
+    // A host writing the switch after the page loaded.
+    history.replaceState(null, '', '/blog/gulf-warming#telemetry=0')
+    for (const type of ['pointerdown', 'focus', 'contextmenu', 'click']) {
+      link.setAttribute('href', '/stale')
+      link.dispatchEvent(new Event(type))
+      expect(link.getAttribute('href'), type).toBe('/dataset/DS_SST#telemetry=0')
+    }
+  })
+
+  it('still carries what the page loaded with after an anchor replaces the fragment', async () => {
+    history.pushState(null, '', '/blog/gulf-warming#telemetry=0')
+    stubFetch(200, POST)
+    await bootBlogPage()
+    // An in-page link (`[Methods](#methods)`) replaces the part after
+    // `#`, while the page keeps the switch it read at load.
+    history.replaceState(null, '', '/blog/gulf-warming#methods')
+    const link = document.querySelector('.blog-post-explore-list a') as HTMLAnchorElement
+    link.dispatchEvent(new Event('pointerdown'))
+    expect(link.getAttribute('href')).toBe('/dataset/DS_SST#telemetry=0')
+  })
+
+  it("carries it onto the post body's links into this site, and nowhere else", async () => {
+    const origin = location.origin
+    history.pushState(null, '', '/blog/gulf-warming?telemetry=0')
+    stubFetch(200, {
+      post: {
+        ...POST.post,
+        bodyMd: [
+          '[the smoke](/dataset/smoke-ds)',
+          '[the tour](/?tour=TR1)',
+          `[absolute](${origin}/dataset/abs-ds#view)`,
+          '[methods](#methods)',
+          '[NOAA](https://www.noaa.gov/smoke)',
+          '[relative](//evil.example/x)',
+          '[mail](mailto:team@example.org)',
+        ].join('\n\n'),
+      },
+    })
+    await bootBlogPage()
+    const hrefs = [...document.querySelectorAll('.blog-post-body a')].map((a) => a.getAttribute('href'))
+    expect(hrefs).toEqual([
+      '/dataset/smoke-ds?telemetry=0',
+      '/?tour=TR1&telemetry=0',
+      '/dataset/abs-ds?telemetry=0#view',
+      '#methods',
+      'https://www.noaa.gov/smoke',
+      '//evil.example/x',
+      'mailto:team@example.org',
+    ])
+  })
+})
+
+describe('carryTelemetry', () => {
+  const none = { search: '', hash: '' }
+
+  it('returns the destination unchanged when neither address has the key', () => {
+    expect(carryTelemetry('/dataset/x?a=1#b', { search: '?lang=es', hash: '#top' }, none)).toBe('/dataset/x?a=1#b')
+  })
+
+  it("joins onto the destination's own query and fragment", () => {
+    const now = { search: '?telemetry=0', hash: '#telemetry=no' }
+    expect(carryTelemetry('/dataset/x?a=1#view', now, none)).toBe('/dataset/x?a=1&telemetry=0#view&telemetry=no')
+    expect(carryTelemetry('/dataset/x?#', now, none)).toBe('/dataset/x?telemetry=0#telemetry=no')
+  })
+
+  it('takes the load-time and current values once each, and none the destination has', () => {
+    const boot = { search: '?telemetry=0', hash: '#telemetry=0' }
+    const now = { search: '?telemetry=0', hash: '#telemetry=false' }
+    expect(carryTelemetry('/', now, boot)).toBe('/?telemetry=0#telemetry=0&telemetry=false')
+    expect(carryTelemetry('/?telemetry=0', now, boot)).toBe('/?telemetry=0#telemetry=0&telemetry=false')
+  })
+
+  it('carries an empty or bare value, which turns reporting off', () => {
+    expect(carryTelemetry('/', { search: '?telemetry', hash: '#telemetry=' }, none)).toBe('/?telemetry=#telemetry=')
+  })
+
+  it('encodes a value so it reads back the same', () => {
+    const out = carryTelemetry('/', { search: '?telemetry=a%26b', hash: '' }, none)
+    expect(new URL(out, 'https://node.example').searchParams.getAll('telemetry')).toEqual(['a&b'])
   })
 })
