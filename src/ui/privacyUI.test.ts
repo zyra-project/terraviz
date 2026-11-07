@@ -302,7 +302,7 @@ describe('privacyUI — page opt-out note', () => {
     openPrivacyUI()
     const note = document.getElementById('privacy-ui-pageoptout')
     expect(note?.hidden).toBe(false)
-    expect(note?.textContent ?? '').toMatch(/nothing is sent/i)
+    expect(note?.textContent ?? '').toMatch(/no telemetry is sent/i)
     expect(document.querySelector('.privacy-ui-tiers')?.getAttribute('aria-describedby')).toBe(
       'privacy-ui-pageoptout',
     )

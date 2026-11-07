@@ -145,8 +145,8 @@ function syncRadios(): void {
 }
 
 /**
- * Show, or hide, the note that this visit sends nothing because its
- * address turned telemetry off (`pageOptOut.ts`). Without it the panel
+ * Show, or hide, the note that this visit sends no telemetry because
+ * its address turned it off (`pageOptOut.ts`). Without it the panel
  * would show the stored tier, Essential by default, over a page that
  * reports nothing. The radios still show and set the stored tier, which
  * is what the next visit without the key will use, and the note says

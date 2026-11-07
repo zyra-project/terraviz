@@ -2,6 +2,8 @@
 // Copyright 2026 The Zyra Project
 
 import { afterEach, describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { pageOptOutFromBrowser, readPageOptOut } from './pageOptOut'
 
 const plain = { embed: false, gpc: false }
@@ -38,6 +40,19 @@ describe('readPageOptOut — telemetry= in the address', () => {
     expect(readPageOptOut({ search: '?telemetry=1&telemetry=0', ...plain })).toBe('address')
     expect(readPageOptOut({ search: '?telemetry=0&telemetry=1', ...plain })).toBe('address')
     expect(readPageOptOut({ search: '?telemetry=1&telemetry=true', ...plain })).toBeNull()
+  })
+
+  it('reads the part after # too, so #telemetry=0 cannot leave an embed reporting', () => {
+    expect(readPageOptOut({ search: '?embed=1', hash: '#telemetry=0', ...plain })).toBe('address')
+    expect(readPageOptOut({ search: '?embed=1', hash: 'telemetry=0', ...plain })).toBe('address')
+    expect(readPageOptOut({ search: '?telemetry=1', hash: '#telemetry=0', ...plain })).toBe('address')
+    expect(readPageOptOut({ search: '?telemetry=0', hash: '#telemetry=1', ...plain })).toBe('address')
+    expect(readPageOptOut({ search: '', hash: '#telemetry=1', ...plain })).toBeNull()
+  })
+
+  it('ignores a fragment that is an ordinary anchor', () => {
+    expect(readPageOptOut({ search: '', hash: '#section-2', ...plain })).toBeNull()
+    expect(readPageOptOut({ search: '', hash: '#', ...plain })).toBeNull()
   })
 
   it('applies outside the embed view too', () => {
@@ -84,8 +99,10 @@ describe('pageOptOutFromBrowser', () => {
     window.history.replaceState(null, '', originalUrl)
   })
 
-  it('reads the page’s own address', () => {
+  it('reads the page’s own address, query and fragment', () => {
     window.history.replaceState(null, '', '/?telemetry=0')
+    expect(pageOptOutFromBrowser()).toBe('address')
+    window.history.replaceState(null, '', '/?embed=1#telemetry=0')
     expect(pageOptOutFromBrowser()).toBe('address')
     window.history.replaceState(null, '', '/?dataset=x')
     expect(pageOptOutFromBrowser()).toBeNull()
@@ -106,5 +123,30 @@ describe('pageOptOutFromBrowser', () => {
     restoreGpc()
     restoreGpc = setGpc(1)
     expect(pageOptOutFromBrowser()).toBeNull()
+  })
+})
+
+// main.ts exports nothing and boots on import, so its wiring cannot be
+// driven from a test. These pin the two things a refactor could move
+// silently: the latch must come before any transport is installed, and
+// the first-run notice must stay behind it.
+describe('main.ts wiring', () => {
+  const main = readFileSync(resolve(process.cwd(), 'src/main.ts'), 'utf-8')
+
+  it('latches the opt-out at module evaluation, before the transport is installed', () => {
+    const latch = main.indexOf('if (pageOptOut) optOutForPage(pageOptOut)')
+    const domReady = main.indexOf("document.addEventListener('DOMContentLoaded'")
+    const transport = main.indexOf('setTransport(createFetchTransport())')
+    expect(latch).toBeGreaterThan(-1)
+    expect(transport).toBeGreaterThan(-1)
+    expect(latch).toBeLessThan(transport)
+    // A top-level statement: before the class and boot handler that
+    // install anything, not inside them.
+    expect(latch).toBeLessThan(main.indexOf('class InteractiveSphere'))
+    expect(latch).toBeLessThan(domReady)
+  })
+
+  it('keeps the first-run notice off a page whose address opted out', () => {
+    expect(main).toContain('if (!embedModeActive && !getPageOptOut()) showDisclosureBannerIfNeeded()')
   })
 })

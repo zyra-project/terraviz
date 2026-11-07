@@ -306,6 +306,11 @@ async function dispatch(events: TelemetryEvent[]): Promise<void> {
 
 /** Prepend retried events so ordering is preserved on replay. */
 function requeue(events: TelemetryEvent[]): void {
+  // A batch in flight when the page opted out is dropped rather than
+  // put back, so a retryable failure cannot keep it, or save it for
+  // the next launch. Unreachable from `main.ts`, which opts out before
+  // any transport exists, but `optOutForPage` is exported.
+  if (state.pageOptOut !== null) return
   state.queue = events.concat(state.queue)
 }
 
@@ -325,6 +330,8 @@ function currentBackoffMs(): number {
 function persistIfTauri(): void {
   // `transport.ts` only persists when running inside Tauri, so on
   // web this is effectively a no-op. Safe to call unconditionally.
+  // A page that reports nothing saves nothing for the next launch.
+  if (state.pageOptOut !== null) return
   persistQueue(state.queue)
 }
 

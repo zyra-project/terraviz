@@ -1042,9 +1042,10 @@ top-level site, so `loadConfig()` falls back to `essential`.
 of the page, never raise it, and write nothing:
 
 - **`telemetry=` in the address**, the WordPress plan's host switch
-  (its Integration J). Read as the output page reads the key: only `1`
-  or `true` leaves reporting alone, any other value turns it off, and a
-  repeated key's off value wins. A host's embed code carries it for
+  (its Integration J). A single value reads as the output page reads
+  the key: only `1` or `true` leaves reporting alone, and any other
+  value turns it off. It is read from the query and the part after
+  `#`, and a repeated key's off value wins, since it can only lower. A host's embed code carries it for
   everyone who sees the embed; it works on any page of the app.
 - **Global Privacy Control in the embed view**, where no notice is
   shown to answer. Outside it, the notice and the Privacy panel remain
@@ -1054,14 +1055,18 @@ of the page, never raise it, and write nothing:
 `main.ts` latches the result into the emitter at module evaluation, so
 nothing is queued before it and no URL writer can drop the key first.
 The emitter then accepts no event, sends nothing on flush or unload,
-and leaves any queue an earlier session persisted for the next one.
+neither requeues nor saves a batch that was in flight, and leaves any
+queue an earlier session persisted for the next one.
 The first-run notice is skipped on a page whose address turned
 reporting off, since it would describe collection that is not
 happening; the Privacy panel says the visit sends nothing.
 
 What these do not change: an embed whose host sets nothing, seen by a
 visitor whose browser sends no GPC, reports as before, so the routes
-above still apply to it.
+above still apply to it. And one thing they do change for the
+dashboards: an embed that opts out sends no `session_start`, so
+`window_context` counts leave it out, and the framed share is a floor,
+not a total.
 
 **Decisions** (the maintainer's, 6 November 2026, after the privacy
 review):

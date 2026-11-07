@@ -741,6 +741,20 @@ describe('emitter — page opt-out (optOutForPage)', () => {
     }
   })
 
+  it('drops a batch in flight that fails after the opt-out, and saves nothing', async () => {
+    __setPersistOverrideForTests(true)
+    const t = makeTransport()
+    t.sendResults.push({ status: 503, ok: false, retryable: true, permanent: false })
+    setTransport(t)
+    emit(layerLoaded('A'))
+    flush()
+    optOutForPage('address')
+    await __awaitInflight()
+    expect(t.sendMock).toHaveBeenCalledTimes(1)
+    expect(size()).toBe(0)
+    expect(localStorage.getItem(PERSISTED_QUEUE_KEY)).toBeNull()
+  })
+
   it('is reported as null until set, and cleared by a test reset', () => {
     expect(getPageOptOut()).toBeNull()
     optOutForPage('address')

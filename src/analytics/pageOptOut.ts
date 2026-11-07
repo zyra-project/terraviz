@@ -14,15 +14,18 @@
  * 6 November 2026 to give it two controls, and these are they:
  *
  * - **`telemetry=` in the address**, the switch a site embedding the
- *   app can set in its embed code. Read the way the output page reads
- *   the same key (`src/output/webMode.ts`): only `1` or `true`, in any
- *   case, leaves reporting alone, and every other value, an empty one
- *   included, turns it off. So the one string means the same on both
- *   pages, and a misread fails toward off. Here it can only lower:
- *   `telemetry=1` never raises a stored Off, and when the key appears
- *   more than once any value that turns it off wins. It applies to any
- *   page of the app, not only an embed, since a kiosk or a demo may
- *   want it too.
+ *   app can set in its embed code. A single value reads the way the
+ *   output page reads the same key (`src/output/webMode.ts`): only `1`
+ *   or `true`, in any case, leaves reporting alone, and every other
+ *   value, an empty one included, turns it off, so a misread fails
+ *   toward off. Here it can only lower, which is why it is read more
+ *   generously than the output page reads it: from the query **and**
+ *   the part after `#` (where the grammar tells controllers to put
+ *   session settings, so a host writing `#telemetry=0` must not get an
+ *   embed that keeps reporting), and when the key appears more than
+ *   once, in either, any value that turns it off wins. `telemetry=1`
+ *   never raises a stored Off. It applies to any page of the app, not
+ *   only an embed, since a kiosk or a demo may want it too.
  * - **Global Privacy Control, where no notice is shown.** In the embed
  *   view the browser's GPC signal is the only preference the app can
  *   hear, so it turns reporting off there. Elsewhere the notice and the
@@ -43,6 +46,8 @@ export type PageOptOut = 'address' | 'gpc'
 export interface PageOptOutInput {
   /** The page's query string, `location.search`. */
   search: string
+  /** The part after `#`, `location.hash`; `''` when there is none. */
+  hash?: string
   /** Whether the embed view is on (`getEmbedMode()`), the one view
    *  that shows no notice. */
   embed: boolean
@@ -61,7 +66,10 @@ function leavesOn(value: string): boolean {
  * is checked first, so a page with both reports `'address'`.
  */
 export function readPageOptOut(input: PageOptOutInput): PageOptOut | null {
-  const values = new URLSearchParams(input.search).getAll('telemetry')
+  const values = [
+    ...new URLSearchParams(input.search).getAll('telemetry'),
+    ...new URLSearchParams((input.hash ?? '').replace(/^#/, '')).getAll('telemetry'),
+  ]
   if (values.some((value) => !leavesOn(value))) return 'address'
   if (input.embed && input.gpc) return 'gpc'
   return null
@@ -73,5 +81,10 @@ export function pageOptOutFromBrowser(): PageOptOut | null {
   const gpc =
     typeof navigator !== 'undefined' &&
     (navigator as Navigator & { globalPrivacyControl?: boolean }).globalPrivacyControl === true
-  return readPageOptOut({ search: window.location.search, embed: getEmbedMode(), gpc })
+  return readPageOptOut({
+    search: window.location.search,
+    hash: window.location.hash,
+    embed: getEmbedMode(),
+    gpc,
+  })
 }
