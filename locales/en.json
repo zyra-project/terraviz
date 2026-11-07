@@ -738,7 +738,7 @@
   "privacy.close.aria": "Close privacy settings",
   "privacy.desc": "Choose how much the app reports back. You can change this at any time; the change takes effect immediately.",
   "privacy.localNote.visitMemory": "Visit memory (the datasets you've opened, used for “Continue exploring” and the “new since your last visit” badge) is stored only on this device — never sent to servers. Clearing site data removes it.",
-  "privacy.pageOptOut.address": "No telemetry is sent from this visit: the address it was opened with turns it off. What you choose here applies to visits opened without that setting.",
+  "privacy.pageOptOut.address": "No telemetry is sent during this visit, because the web address this page was opened with turns it off. Your choice here is saved and used on visits whose web address doesn't turn telemetry off.",
   "privacy.policyLink": "Read the full privacy policy →",
   "privacy.radiogroup.aria": "Telemetry tier",
   "privacy.session.hint": "In-memory only · resets on relaunch",

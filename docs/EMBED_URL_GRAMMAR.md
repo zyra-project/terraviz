@@ -97,6 +97,12 @@ to cover it, or the embed code turns it off:
 https://terraviz.zyra-project.org/?dataset=INTERNAL_SOS_123&embed=1&telemetry=0
 ```
 
+Put it in the **query**, as above. `#telemetry=0` turns reporting off
+for that page load too, but when the visitor changes dataset the app
+rewrites the address keeping the query and not the part after `#`, so a
+reload after that would report again. A query key survives every
+address the app writes.
+
 Two things hold whatever the host writes:
 
 - **Global Privacy Control turns it off in the embed view.** A visitor
