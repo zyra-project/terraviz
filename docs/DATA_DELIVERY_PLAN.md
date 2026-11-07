@@ -20,9 +20,14 @@ metrics added the same day. On 2026-11-07 the three follow-ups this
 plan spun off were merged and are marked done: the ArcGIS wildcard
 guard, #521 (§4.5); the Second Life corrections, #522 (§2.3); and the
 embed field, #524 (§9.14). The same day each channel was put behind a
-switch in the portal (§8).)
+switch in the portal (§8), and four specialist agents reviewed their
+sections against client source code: the Web GIS Developer §5, the
+Video Streaming Engineer §6, the Scientific Visualization Reviewer §7
+and the Privacy Engineer §9.14. Their findings are applied. They are
+AI review, not hands-on testing, and no person outside the drafting
+loop has reviewed the plan.)
 
-**Decisions recorded:** twenty-six, all by the maintainer and logged
+**Decisions recorded:** twenty-nine, all by the maintainer and logged
 in §9.2. Twenty-five were made on 2026-11-06: rasters for analysis carry the producer's own values on
 the producer's own grid, before any regridding (§9.11); use is measured
 per platform and per method (§9.14); five choices about how that
@@ -35,8 +40,12 @@ whose original terms cannot be traced go out under the SOS catalog's
 published terms (q22). Four more came from the privacy review of the
 embed field (§9.14). On 2026-11-07, each delivery channel was put
 behind its own switch in the portal's Features card, on by default
-(§8). Open: q2, q3, q10's date parsing and q11, tested in D1; and q23,
-now only for datasets whose known licence is No-Derivatives.
+(§8), and the specialist reviews of §5, §6, §7 and §9.14 led to three
+more: WMS gets its own switch, off by default (q26); an unrecognised
+site is counted as `other-origin`, unhashed (q21b); and a request
+sending Global Privacy Control is counted with no country, version or
+domain (q25). Open: q2, q3, q10's date parsing and q11, tested in D1;
+and q23, now only for datasets whose known licence is No-Derivatives.
 
 **Revisit when any of the following becomes true:**
 
@@ -998,8 +1007,11 @@ fail-open setup loses its API and a fail-closed one its whole site.
 One OpenSpace show, which refetches every tile on screen at every step,
 can spend tens of thousands of those in an evening. And a WMS `GetMap`
 cannot fit the free plan's 10 ms of CPU, against 30 s by default on a
-paid plan. What the `tiles` switch should default to on a free-plan
-node is open (q26), and D4's gate names the plan it was measured on.
+paid plan. So WMS has its own switch, `wms`, off by default (decided,
+q26): `SELF_HOSTING.md` says to turn it on only on a plan tier where
+D4's CPU gate passed, and states the daily request budget the `tiles`
+switch's WMTS layers draw on. D4's gate names the plan it was measured
+on.
 
 ### 5.9 WMS with time
 
@@ -1662,21 +1674,25 @@ deeper than the source would only spend storage.
   | Switch | Covers | Off |
   |---|---|---|
   | `files` | The files route: video variants and bundles (§6) | The files route answers `403 feature_disabled`; manifests, STAC items, OpenSpace assets, KMZs and SOS directories drop their file links; the publish dispatch builds no new variants or bundles |
-  | `tiles` | WMTS, WMS with time, TileJSON, GDAL XML, colour maps (§5) | Every tile-service route answers `403 feature_disabled`, as an OGC exception report on the WMTS and WMS routes; STAC items drop their web-map links; no new pyramids are cut |
+  | `tiles` | WMTS, TileJSON, GDAL XML, OpenSpace assets, colour maps (§5) | Every tile-service route answers `403 feature_disabled`, as an OGC exception report on the WMTS route; STAC items drop their web-map links; no new pyramids are cut. WMS stops too, since it is served from the pyramids |
+  | `wms` | WMS with time (§5.9). **Off by default** (q26) | The WMS route answers `403 feature_disabled` as an OGC exception report, and STAC items drop their `wms` links. Pyramids are still cut and served as tiles |
   | `rasters` | Analysis COGs (§4.2, §9.11) | The raster route answers `403 feature_disabled`; STAC items drop the COG assets; the runner writes no new COGs |
 
   They work as every other switch in that card does
   (`docs/FEATURE_TOGGLES_PLAN.md`):
 
-  - **On by default, failing open.** A node that never saved them, or
-    whose settings cannot be read, has every channel its release
-    ships. So a node that upgrades starts building a channel on the
+  - **On by default, failing open, except `wms`.** A node that never
+    saved them, or whose settings cannot be read, has every channel its
+    release ships. `wms` is the one delivery switch that starts off and
+    fails to off (q26), because one `GetMap` can exceed the free plan's
+    CPU limit; `src/types/node-features.ts` treats every key as on when
+    missing today, so D4 adds a per-key default. So a node that upgrades starts building a channel on the
     next publish of each eligible dataset — for tiles, every dataset
     with frames (§5.8) — and backfills nothing until someone asks for
     it (the delivery dispatch, §9.4). Cost grows with publishing, not
     all at once on the day of the upgrade. `SELF_HOSTING.md`'s upgrade
-    notes say so. Whether `tiles` should start on for a node on
-    Cloudflare's free plan is open (§5.8, q26).
+    notes say so, with the daily request budget a node on Cloudflare's
+    free plan has for them (§5.8).
   - **Checked in the Function, before any cache**, with the Orbit
     gate's last-known-good memo (`functions/api/_lib/orbit-gate.ts`).
     A cached tile or capabilities document is never served while its
@@ -1750,8 +1766,8 @@ this repository has already done.
     a phase's gate, and removed from the code in the release that
     ships the channel, once its last phase has passed its gate.
   - **A switch in the node's Features card**, for the operator, from
-    then on: `files`, `tiles` and `rasters`, on by default (§8,
-    decided 2026-11-07). Turning one off withdraws the channel within
+    then on: `files`, `tiles` and `rasters`, on by default, and `wms`,
+    off by default (§8, decided 2026-11-07, q26). Turning one off withdraws the channel within
     minutes, with no deploy.
 - **Rules with wrong answers land first, as pure modules with tests.**
   Grid arithmetic, URL parsing, time snapping and the reduction
@@ -1782,7 +1798,7 @@ this repository has already done.
 | **D3a** Pyramids | Tile cutting in the runner, with the §7 methods | D1 | `TILES_ENABLED`; switch `tiles` | Parity and reduction tests pass on D1's datasets | M |
 | **D3b** WMTS | Tile route, capabilities, TileJSON, GDAL XML, colour maps | D3a | `TILES_ENABLED`; switch `tiles` | OGC validator passes; four clients load it | M |
 | **D3c** Discovery and contract | STAC links, `.well-known` field, `docs/protocol` entry | D3b | as D3b | Federation review: additive-safe | S |
-| **D4** WMS with time | `GetMap` served from the pyramids | D3b, CPU gate | `WMS_ENABLED`; switch `tiles` | CPU within budget; ArcGIS time slider animates | M |
+| **D4** WMS with time | `GetMap` served from the pyramids | D3b, CPU gate | `WMS_ENABLED`; switch `wms` (off by default), and `tiles` | CPU within budget; ArcGIS time slider animates | M |
 | **D5a** Analysis rasters | A COG per time step from the Zyra runner, as STAC assets | D1 | as STAC; switch `rasters` | QGIS opens one from STAC; values match the source | M |
 | **D5b** Operator scripts | ArcGIS Image adapter; Hub registration | D4, D5a | — (scripts) | A test organisation shows both | S |
 | **D6** Legacy video catalog | Frame extraction, licence record, opt-in | D2a, D3a | per dataset | A licence decision recorded for each dataset made public | L |
@@ -1841,6 +1857,9 @@ and a Second Life sphere. The maintainer can line up all four.
 | 2026-11-06 | The maintainer | Embed host controls come next, as their own change: a main-app `telemetry=0`, Global Privacy Control where no notice is shown, and a note for embedders | §9.14 |
 | 2026-11-06 | The maintainer | SOS datasets with no traceable licence are delivered under the SOS catalog's published terms (non-commercial educational use, attribution, no implied endorsement); a known licence wins; owners can have a dataset withdrawn | §6.5, q22, q24 |
 | 2026-11-07 | The maintainer | Each delivery channel sits behind its own switch in the portal's Features card — `files`, `tiles` (WMTS and WMS), `rasters` — on by default and failing open like every other feature; the environment flags only keep a channel dark until it ships | §8, §9 |
+| 2026-11-07 | The maintainer | WMS gets its own switch, `wms`, off by default and failing to off, since a `GetMap` cannot fit the free plan's CPU limit and the free plan's daily request budget is account-wide; `SELF_HOSTING.md` says to turn it on only on a plan tier where D4's CPU gate passed; WMTS stays under `tiles`, on by default | §5.8, §8, q26 |
+| 2026-11-07 | The maintainer | An unrecognised `Origin` domain is stored as `other-origin` with no hash; new sites are found through partner tags and the curated list | §9.14, q21b |
+| 2026-11-07 | The maintainer | A delivery request sending Global Privacy Control is counted with no country, version or domain | §9.14, q25 |
 
 ### 9.3 D1 — Prove it by hand
 
@@ -2150,7 +2169,11 @@ dimension per layer, in versions 1.3.0 and 1.1.1 with negotiation, and
 `GetMap` in `CRS:84`, `EPSG:4326` and `EPSG:3857` (with its two
 aliases), stitched from the pyramids and scaled, at most 2048 a side,
 nearest neighbour for data layers, a transparent PNG for a gap (§5.9).
-Capabilities are counted; maps are not (§9.14).
+Capabilities are counted; maps are not (§9.14). The `wms` switch: its
+key, off by default and failing to off, which `src/types/node-features.ts`
+does not yet support per key, its row in the Features card saying what
+it costs on a free plan, and its check in the route beside `tiles`'s
+(§8, q26).
 
 **The CPU gate comes first.** Before any route lands, the worst-case
 `GetMap` — 2048×2048, in each CRS, a data layer and a picture layer —
@@ -2439,10 +2462,12 @@ each open in a different way.
      clients" report ranks those hashes and matches them against a list
      of likely names — HTTP clients, GIS and visualisation tools — so
      anything on that list shows by name and only the truly unknown
-     stay hashes. An unknown `Origin` domain is **open** (q21b, below):
-     the privacy review found that hashing one protects nothing, since
-     registered domains are a public, listable space and every hash is
-     one lookup from its name for anyone holding the rows.
+     stay hashes. An unknown `Origin` domain is stored as
+     `other-origin`, with no hash (decided, q21b): the privacy review
+     found that hashing one protects nothing, since registered domains
+     are a public, listable space and every hash is one lookup from its
+     name for anyone holding the rows. New sites are found through
+     partner tags and the curated list instead.
 
    Once identified, a platform is promoted: onto the curated list (a
    code change, and append-only under invariant 8) or as a partner tag
@@ -2510,8 +2535,13 @@ the counter reads only `via`, never storing the address or its query.
   data response unchanged. Unlike the ingest function, which fails open
   when the switch cannot be read, a failed read here skips the write,
   since these people never agreed to anything.
-- **Global Privacy Control** is open (q25): either a request sending it
-  is not counted, or it is counted with no country, version or domain.
+- **Global Privacy Control** (decided, q25): a request sending
+  `Sec-GPC: 1` is counted with no country, version or domain, a tally
+  of a request the node serves anyway. Under GPC the app sends no
+  telemetry on any page (#526); a delivery count is a different
+  thing, since it records no visit and nothing about the person, and
+  dropping it would leave every total a floor whose distance from the
+  truth depends on GPC uptake.
 
 **Counting uses, not bytes.** A file counts once per download: a
 request with no `Range` header, or one starting at byte 0, not the
@@ -2612,7 +2642,8 @@ The maintainer decided four things on 2026-11-06 (§9.2):
 - framed-session timing is kept and disclosed;
 - the host controls come next, as their own change:
   - a main-app `telemetry=0` an embed code can carry;
-  - Global Privacy Control honoured where no notice is shown;
+  - Global Privacy Control honoured where no notice is shown, widened
+    on 2026-11-07 to every page and built in #526;
   - a note for embedders in `EMBED_URL_GRAMMAR.md`.
 
 **One constraint binds this plan's own work.** The Delivery panel
@@ -2644,11 +2675,13 @@ people never see the app:
   closed list or a partner tag, a software version for curated
   platforms, a country (by month in long-term storage) and an arrival
   time in the three-month store, and for a browser request the
-  requesting site's domain, never the page;
+  requesting site's domain if it is on the curated list, and otherwise
+  only that it came from another site, never the page;
 - what is never recorded: an IP address, a raw User-Agent, `Referer`,
   or any identifier;
-- that the person cannot switch it off, and how Global Privacy Control
-  is treated (q25);
+- that the person cannot switch it off, and that a request sending
+  Global Privacy Control is counted with no country, version or domain
+  (q25);
 - the same-owner paragraph the globe and embed sections carry, since
   whoever runs both the site and the node can match records by time
   and country;
@@ -2790,19 +2823,18 @@ stays a draft for review.
     resolves them against a list of likely names (§9.14). The privacy
     review of 2026-11-07 found the premise holds for User-Agent tokens
     but not for domains, and reopened that half as q21b.
-21b. **How is an unrecognised `Origin` domain stored?** Hashing one is
-    a storage choice, not privacy: registered domains are a public,
+21b. *Decided 2026-11-07 by the maintainer:* as `other-origin`, with no
+    hash; new sites are found through partner tags and the curated list
+    (§9.14). The reasoning, kept as the record: hashing one is a storage
+    choice, not privacy: registered domains are a public,
     listable space, a few hundred million names a GPU hashes in under
     a second, so every hash is one lookup from its name for anyone
     holding the rows, which on a self-hosted node is the operator, the
     adversary `PRIVACY_ANALYSIS.md` §9k names. The same document's §4b
-    and §9a already say this of search queries. Options:
-    - store it as `other-origin` with no hash, and find new sites
-      through partner tags and the curated list;
-    - a keyed hash (HMAC with a Pages secret rotated monthly and
-      discarded), shown only above a threshold of uses and days, which
-      protects leaked rows and other readers but not the operator
-      within the month.
+    and §9a already say this of search queries. Not chosen: a keyed
+    hash (HMAC with a Pages secret rotated monthly and discarded),
+    which protects leaked rows and other readers but not the operator
+    within the month.
 22. **Where do the per-dataset licences come from?** The SOS snapshot
     TerraViz imported carries no licence field at all. What the public
     record says (checked 2026-11-06):
@@ -2843,25 +2875,24 @@ stays a draft for review.
     themselves non-commercial, so Non-Commercial datasets are delivered
     everywhere with their terms visible; whoever uses one, a planetarium
     charging for a show included, is bound by them.
-25. **What does Global Privacy Control do to a delivery count?** A
-    browser with it on sends `Sec-GPC: 1` with every request, a TileJSON
-    or capabilities fetch from someone else's page included, and since
-    2026-11-07 the app honours it on every page. A visitor to a StoryMap
-    who sends it will reasonably expect it to cover the node counting
-    their browser. Options:
-    - don't count the request;
-    - count it with no country, version or domain, which keeps totals
-      whole at the cost of one header read.
-26. **What should the `tiles` switch default to on a free-plan node?**
-    Every Functions request counts against an account-wide 100,000 a
-    day, one OpenSpace show can spend tens of thousands of them, and a
-    WMS `GetMap` cannot fit the free plan's 10 ms of CPU (§5.8). The
-    2026-11-07 decision put every delivery switch on by default, which
-    a free-plan node may not survive. Options:
-    - a separate `wms` switch, so WMS can be off while WMTS stays on;
-    - `tiles` off by default on a free plan, on on a paid one, with
-      `SELF_HOSTING.md` saying why;
-    - leave it on everywhere and say what it costs.
+25. *Decided 2026-11-07 by the maintainer:* counted, with no country,
+    version or domain (§9.14). The question, kept as the record: a
+    browser with Global Privacy Control on sends `Sec-GPC: 1` with
+    every request, a TileJSON or capabilities fetch from someone else's
+    page included, and since 2026-11-07 the app honours it on every
+    page (#526). A visitor to a StoryMap who sends it will reasonably
+    expect it to cover the node counting their browser. Not chosen: not
+    counting it, which would make every delivery total a floor.
+26. *Decided 2026-11-07 by the maintainer:* WMS has its own switch,
+    `wms`, off by default and failing to off; `SELF_HOSTING.md` says to
+    turn it on only on a plan tier where D4's CPU gate passed, and
+    states the daily request budget WMTS draws on. `tiles` stays on by
+    default. The reasons: every Functions request counts against an
+    account-wide 100,000 a day on the free plan, one OpenSpace show can
+    spend tens of thousands, and a `GetMap` cannot fit the free plan's
+    10 ms of CPU (§5.8, §8). Not chosen: `tiles` off on free plans,
+    which would need setup to record the plan tier, since a Function
+    cannot see it.
 
 ---
 
