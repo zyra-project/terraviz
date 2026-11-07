@@ -160,7 +160,7 @@ or both:
   `delete … --remote` and needs no redeploy; the exact commands and a
   check that reads the switch from the edge are in the comment above
   the binding in `wrangler.toml` and in `docs/SELF_HOSTING.md`
-  ("After a successful launch").
+  ("Kill switches").
 - **Where a batch goes.** Relative `/api/ingest` on the web — the
   Pages Function answering it belongs to the deploy that served
   the page, so a fork reports to its own node with no

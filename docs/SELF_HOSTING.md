@@ -1374,7 +1374,7 @@ Everything referenced below now exists. Pages → your project →
 | `FEEDBACK_DB` | D1 | `sphere-feedback` (`W4`) | ✅ | In-app feedback form 500s |
 | `CATALOG_DB` | D1 | `sphere-feedback` (`W4`) | | Everything in Tier 2 |
 | `ANALYTICS` | Analytics Engine | dataset `W9` | ✅ | `/api/ingest` returns 204 and drops the write |
-| `TELEMETRY_KILL_SWITCH` | KV | `W5` | ✅ | Fails **open** — ingest keeps working, you just lose the kill lever |
+| `TELEMETRY_KILL_SWITCH` | KV | `W5` | ✅ | Fails **open** — ingest keeps working, you just lose the kill lever ([Kill switches](#kill-switches)) |
 | `CATALOG_KV` | KV | `W6` | | `/api/v1/catalog` burns ~5 D1 reads per browse-page load |
 | `CATALOG_R2` | R2 | `terraviz-assets` (`W7`) | | Asset uploads and feedback screenshots |
 | `AI` | Workers AI | *(no value)* | ✅ | `/api/v1/search` returns **200** with `{ degraded: 'unconfigured' }` and a `Warning` header — the route never 5xxs for a missing binding. Orbit's `[RELEVANT DATASETS]` block stays empty and chips fall back to the local engine |
@@ -2529,7 +2529,7 @@ is [`scripts/lib/expected-bindings.ts`](../scripts/lib/expected-bindings.ts).
 | `FEEDBACK_DB` | D1 | 8 | Feedback form |
 | `CATALOG_DB` | D1 | 8 | All of Tier 2 |
 | `ANALYTICS` | AE | 8 | Telemetry storage |
-| `TELEMETRY_KILL_SWITCH` | KV | 8 | Telemetry kill switch: key `telemetry_enabled` (fails open; see [After a successful launch](#after-a-successful-launch)) |
+| `TELEMETRY_KILL_SWITCH` | KV | 8 | Telemetry kill switch: key `telemetry_enabled` (fails open; see [Kill switches](#kill-switches)) |
 | `CATALOG_KV` | KV | 8 | Catalog read cache |
 | `CATALOG_R2` | R2 | 8 | Assets, screenshots |
 | `AI` | Workers AI | 8 | Orbit, embeddings, voice |
@@ -3022,45 +3022,10 @@ Tools → Privacy.
 
 ## After a successful launch
 
-- **Kill switches.** You have two, and they work differently.
-  Document who can flip each.
-
-  **Telemetry** is the key `telemetry_enabled` in the
-  `TELEMETRY_KILL_SWITCH` KV namespace (`W5`). It takes effect
-  without a redeploy, though KV can take up to about a minute to
-  reach every location.
-
-  ```bash
-  # On: /api/ingest answers 410 (+ Retry-After: 300) and each client
-  # stops sending for the rest of its session.
-  wrangler kv key put telemetry_enabled disabled --namespace-id=<W5> --remote
-
-  # Off: new sessions report again. A session that already got a 410
-  # stays quiet until the page is reloaded.
-  wrangler kv key delete telemetry_enabled --namespace-id=<W5> --remote
-  ```
-
-  `--remote` is required. Without it Wrangler 4 writes to a local
-  copy, prints `Resource location: local` and exits successfully,
-  while production keeps ingesting. The switch also fails **open**:
-  a `TELEMETRY_KILL_SWITCH` binding missing from Settings → Bindings,
-  a failed KV read, or any value other than `disabled`, `false`,
-  `off` or `0` leaves ingestion running. So check it from outside:
-
-  ```bash
-  curl -s -o /dev/null -w '%{http_code}\n' -X POST https://<W2>/api/ingest \
-    -H 'Origin: https://<W2>' -H 'Content-Type: application/json' --data '{}'
-  ```
-
-  `410` means the switch is on. `400` means ingestion is still open;
-  the empty body is rejected, so the check itself stores nothing.
-  There is no `KILL_TELEMETRY` environment variable: earlier
-  versions of this guide named one, and nothing reads it. If you
-  set one, delete it.
-
-  **Cloud voice** is `KILL_VOICE=1`, a plaintext variable (see
-  **Turning voice off** in §14.5). Unlike the KV key, a variable
-  takes effect on the next deployment, not when you save it.
+- **Kill switches.** You have two, one for telemetry and one for
+  Cloud voice, and they work differently. Decide now who may flip
+  each and check they can; see [Kill switches](#kill-switches)
+  below.
 - **Token expiry.** If `W11` or `ANALYTICS_SQL_TOKEN` has an expiry (a TTL),
   put the date in a calendar. A silently expired token is a
   silently broken dashboard.
@@ -3071,6 +3036,81 @@ Tools → Privacy.
 - **Test your own feedback loop.** File a report through the in-app
   form and confirm it appears in `/publish/feedback`.
 - **Add a CSP** — Phase 13, if you have not already.
+
+### Kill switches
+
+Whoever may flip these needs the access before the day they need
+it: the telemetry switch takes `wrangler login`, or an API token
+with **Account → Workers KV Storage → Edit**, on this account; the
+voice switch takes access to the Pages project's settings.
+
+**Telemetry** is the key `telemetry_enabled` in the
+`TELEMETRY_KILL_SWITCH` KV namespace (`W5`). Changing the key needs
+no redeploy.
+
+```bash
+# Stop ingestion: /api/ingest answers 410 and each client stops
+# sending for the rest of its session.
+wrangler kv key put telemetry_enabled disabled --namespace-id=<W5> --remote
+
+# Resume ingestion: new sessions report again. A session that already
+# got a 410 stays quiet until the page is reloaded or the desktop app
+# restarted.
+wrangler kv key delete telemetry_enabled --namespace-id=<W5> --remote
+```
+
+`--remote` is required. Without it Wrangler writes to a local copy
+under `.wrangler/state`, prints `Resource location: local` and
+`Use --remote if you want to access the remote instance.`, and
+exits 0 while production keeps ingesting. The values run the
+opposite way from `KILL_VOICE`: the key is named for what it
+allows, so `disabled`, `false`, `off` or `0` (any case) stops
+ingestion, and any other value, `1` included, leaves it running.
+
+The switch also fails **open**: if the `TELEMETRY_KILL_SWITCH`
+binding on Production is missing or bound to a namespace other than
+`W5`, or the KV read fails, ingestion carries on. So check from
+outside, **a minute or more after the command**. Each Cloudflare
+location caches the old value for about 60 seconds, so an earlier
+answer only describes the location nearest you.
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -X POST https://<W2>/api/ingest \
+  -H 'Origin: https://<W2>' -H 'Content-Type: application/json' --data '{}'
+```
+
+- `410`: ingestion has stopped.
+- `400`: ingestion is still open. If a minute has passed, open
+  **Settings → Bindings** on Production and confirm
+  `TELEMETRY_KILL_SWITCH` is there and uses namespace `W5`. Fix it
+  and redeploy (§8.8): the key needs no deployment, but a binding
+  does.
+- Anything else (`403`, `429`, a redirect, a `5xx`, `000`): the
+  request never reached the switch, so the check says nothing either
+  way. A `403` usually means the two `<W2>`s are not the address the
+  app is served from; see
+  [`/api/ingest` returns 403](#apiingest-returns-403).
+
+The empty body is rejected whatever the answer, so the check stores
+nothing.
+
+The switch stops new rows only. If you enabled the long-term export
+(§14.2), disable the **Analytics Export** workflow under Actions
+before 00:25 UTC, or it copies the day already collected into the R2
+archive and D1 rollups, which outlive Analytics Engine's 30–90 days.
+
+Earlier versions of this guide named a `KILL_TELEMETRY` environment
+variable. Nothing reads it, so setting it never stopped anything;
+delete it so nobody relies on it.
+
+**Cloud voice** is `KILL_VOICE=1` (see **Turning voice off** in
+§14.5). Set it under **Settings → Variables and secrets** on
+Production, and Preview if you use it, then **Deployments → ⋯ →
+Retry deployment**: a variable takes effect on the next deployment,
+not when you save it. An open realtime stream can outlast it by up
+to 60 seconds. If you cannot wait for a deployment, turning Orbit
+off on the **Features** card stops voice within a few minutes, along
+with the rest of Orbit.
 
 If something here is wrong or under-documented, please open an
 issue — most of this document exists because someone hit a snag
