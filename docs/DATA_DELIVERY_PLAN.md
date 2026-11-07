@@ -14,11 +14,14 @@ desk research (vendor documentation, source code and release notes,
 cited in the sources section), not hands-on testing, except where a
 sibling document already records a test.
 
-**Last reviewed:** 2026-11-06 (first draft, from desk research on each
-consumer; §9's phased implementation and §9.14's usage metrics added
-the same day.)
+**Last reviewed:** 2026-11-07 (first draft 2026-11-06, from desk
+research on each consumer; §9's phased implementation and §9.14's usage
+metrics added the same day. On 2026-11-07 the three follow-ups this
+plan spun off were merged and are marked done: the ArcGIS wildcard
+guard, #521 (§4.5); the Second Life corrections, #522 (§2.3); and the
+embed field, #524 (§9.14).)
 
-**Decisions recorded:** twenty-one, all 2026-11-06 by the maintainer,
+**Decisions recorded:** twenty-five, all 2026-11-06 by the maintainer,
 logged in §9.2: rasters for analysis carry the producer's own values on
 the producer's own grid, before any regridding (§9.11); use is measured
 per platform and per method (§9.14); five choices about how that
@@ -28,7 +31,8 @@ q8, q9, q10, q12, q15, and counting embedded views). **D0 is
 complete**; D1 is next. q8 was corrected the same day: SOS datasets
 carry varying Creative Commons licences, not public domain. SOS datasets
 whose original terms cannot be traced go out under the SOS catalog's
-published terms (q22). Open: q2, q3, q10's date parsing and q11, tested
+published terms (q22). Four more came from the privacy review of the
+embed field (§9.14). Open: q2, q3, q10's date parsing and q11, tested
 in D1; and q23, now only for datasets whose known licence is
 No-Derivatives.
 
@@ -362,8 +366,11 @@ Firestorm's repositories):
   `allow_downsample`, and the web-page plugin never does
   ([`llpluginclassmedia.cpp`](https://github.com/secondlife/viewer/blob/develop/indra/llplugin/llpluginclassmedia.cpp),
   [`media_plugin_cef.cpp`](https://github.com/secondlife/viewer/blob/develop/indra/media_plugins/cef/media_plugin_cef.cpp)).
-  The page's `width` is the only lever on what a visitor's GPU and
-  connection pay for.
+  Two settings bound what a visitor's GPU and connection pay for:
+  the face's media size, which is the browser surface the viewer
+  renders and uploads, and the address's `width`, which sets the
+  page's own drawing buffer and caps the video it streams. Lowering
+  `width` alone does not shrink the surface.
 - **An MP4 address plays without a browser.** An address served as
   `video/mp4` goes to the viewer's LibVLC video plugin, not the web
   page plugin
@@ -383,10 +390,13 @@ Firestorm's repositories):
   Firestorm's main branch pins CEF 152, not yet in a release checked
   ([Firestorm `autobuild.xml`](https://github.com/FirestormViewer/phoenix-firestorm/blob/master/autobuild.xml)).
 
-The last four correct or extend `SECOND_LIFE_COMPAT.md` (its §10
-question 13 assumes low-priority media are scaled down). They belong
-in that document, in a follow-up, not here; the maintainer asked for
-that follow-up on 2026-11-06.
+The first, third and fourth corrected or extended
+`SECOND_LIFE_COMPAT.md`, whose §10 question 13 assumed low-priority
+media are scaled down. **Done:** they are in that document now (#522,
+merged 2026-11-07), with the media-size and `width` distinction above,
+which that PR's review added. The MP4 point stays an option for this
+plan (§6.1), not a correction there, and the browser change is a reason
+to re-run that document's probe kit when CEF 152 ships.
 
 **Other virtual worlds**, briefly: VRChat shows video, not web pages,
 from allowlisted hosts, at most one new URL per five seconds
@@ -397,7 +407,9 @@ Microsoft Mesh was retired in December 2025. None changes §4; VRChat
 is one more reason for a plain MP4.
 
 **Size, pace, precision.** Because the page always renders at full
-size, the face width is the whole budget. A 2:1 texture W pixels wide
+size, the face's media size is the whole budget for the browser
+surface, and the address's `width` for what the page draws and
+streams. A 2:1 texture W pixels wide
 is the limiting factor only when the sphere spans more than about W/π
 pixels on screen: about 650 at 2048, about 330 at 1024. A 4 m sphere
 seen from 15 m on a 1080p screen spans about 270 pixels, so 1024 is
@@ -586,13 +598,20 @@ groups that asked first.
 
 ### 4.5 Pages
 
-The embed and the output page exist. Two small follow-ups: a StoryMaps
-embed under a node's `list` embedding policy needs
-`https://storymaps.arcgis.com` in the list, which admits every StoryMap
-author, so the portal's help should say so; and the embedding
-validator's list of shared hosts (`src/types/node-embedding.ts:123`)
-should refuse `*.hub.arcgis.com`, which would admit every Hub site.
-The maintainer asked for the second as its own change on 2026-11-06.
+The embed and the output page exist. Two small follow-ups came out of
+this research:
+
+- **Done:** the embedding validator's list of shared hosts
+  (`SHARED_HOST_SUFFIXES`, `src/types/node-embedding.ts:125`) refuses
+  wildcards over `arcgis.com`, `maps.arcgis.com`, `hub.arcgis.com` and
+  `opendata.arcgis.com`, each of which would admit every tenant's site
+  (#521, merged 2026-11-06). One tenant's own host and a wildcard under
+  it still pass.
+- **Still open:** a StoryMaps embed under a node's `list` embedding
+  policy needs `https://storymaps.arcgis.com` in the list, which admits
+  every StoryMap author, and `experience.arcgis.com` is the same. The
+  validator accepts both, since nothing narrower can be said, so the
+  portal's Embedding card should say what listing one admits.
 
 ---
 
@@ -1183,7 +1202,7 @@ deeper than the source would only spend storage.
 | OpenSpace | 4096×2048 for 4K domes, 8192×4096 for 8K; stretches | Steps of whole years; months 1–4 or 6; days 1–28; hours 1–4, 6 or 12; minutes 15 or 30. Finer data reaches it through server-side snapping (§5.3) or Folder mode | 8-bit; PNG for data frames with a palette image; H.264, constant rate, keyframe ≤ 1 s |
 | Science On a Sphere | 2048×1024 for series, 4096×2048 for stills | 30 fps, 10–15 for coarse data | MPEG-4 Part 2 ≥ 25 Mbit/s; JPEG or PNG frames |
 | Spherical displays, Digistar | 2048 or 4096 wide | 30 fps | H.264 (assumed; confirm per vendor) |
-| Second Life | The face width: 1024 by default, 2048 for close viewing | Shared clock in the output page; a plain MP4 loops on its own | H.264; the 1024 rendition at 1.5–2 Mbit/s |
+| Second Life | The face's media width, with the address's `width` to match: 1024 by default, 2048 for close viewing | Shared clock in the output page; a plain MP4 loops on its own | H.264; the 1024 rendition at 1.5–2 Mbit/s |
 | ArcGIS Online | `GetMap` ≤ 2048; Web Mercator native at level 4 for 4096 sources; zooming past the deepest level unknown | WMS time, as an interval or a list | PNG with a palette, or JPEG; CRF with LERC for analysis |
 | QGIS | Stretches | Rounds down to the period | Any |
 | CesiumJS | Stretches | The interval containing its clock, no blending, prefetches the next | Any |
@@ -1323,7 +1342,11 @@ and a Second Life sphere. The maintainer can line up all four.
 | 2026-11-06 | The maintainer | OpenSpace users download TerraViz assets from TerraViz | §6.4, q10 |
 | 2026-11-06 | The maintainer | Every tile goes through the Function; none straight from the bucket | §5.6, q12 |
 | 2026-11-06 | The maintainer | A WebAssembly image codec may be added for WMS if the CPU test passes | §9.10, q15 |
-| 2026-11-06 | The maintainer | Count embedded views, as a separate change to the app's analytics | §9.14 |
+| 2026-11-06 | The maintainer | Count embedded views, as a separate change to the app's analytics. *Done in #524 as `session_start.window_context`.* | §9.14 |
+| 2026-11-06 | The maintainer | `window_context` stays Tier A | §9.14, `PRIVACY_ANALYSIS.md` §9l |
+| 2026-11-06 | The maintainer | The privacy policy's "anything about other sites you visit" narrows to their addresses, with what can be inferred about an embedding page disclosed | §9.14, `PRIVACY.md` §2–3 |
+| 2026-11-06 | The maintainer | A framed session's length is kept and disclosed, not bucketed or dropped | §9.14, `PRIVACY_ANALYSIS.md` §9l |
+| 2026-11-06 | The maintainer | Embed host controls come next, as their own change: a main-app `telemetry=0`, Global Privacy Control where no notice is shown, and a note for embedders | §9.14 |
 | 2026-11-06 | The maintainer | SOS datasets with no traceable licence are delivered under the SOS catalog's published terms (non-commercial educational use, attribution, no implied endorsement); a known licence wins; owners can have a dataset withdrawn | §6.5, q22, q24 |
 
 ### 9.3 D1 — Prove it by hand
@@ -1849,14 +1872,43 @@ per-platform and per-method numbers appear in `/publish/analytics` and
 outlive Analytics Engine's 30–90 days. A Delivery panel there shows
 uses by platform, by method, by dataset and by month.
 
-**The embed is the one method this does not reach.** An embedded
-TerraViz is the app itself, counted by its own telemetry where the
-visitor allows it — but `session_start` does not say whether it is
-running embedded (`src/analytics/session.ts` has no such field), so
-"how many people saw a TerraViz globe inside a StoryMap" needs one
-append-only Tier A field there (invariant 8). That is a small change
-of its own, through the `add-analytics-event` checklist; the
-maintainer asked for it on 2026-11-06.
+**The embed is the one method this does not reach**, because an
+embedded TerraViz is the app itself, counted by its own telemetry
+where the visitor allows it. **Done:** `session_start` now carries
+`window_context` (#524, merged 2026-11-07), one of `top`, `top-embed`,
+`framed` or `framed-embed`: whether the app had its own window or sat
+in another page's frame, and whether the address carried `?embed=1`.
+It never reads the framing page's address. The nightly rollup writes
+it as a dimension mix, and a Product Health panel shows it.
+
+Its privacy review found more than the field itself, and
+`PRIVACY_ANALYSIS.md` §9l records it:
+
+- **No notice or switch in an embed.** An embedded view shows no
+  first-run notice and no Tools menu. A mode chosen on the node's own
+  site doesn't reach a frame on another site, because browsers
+  partition its storage.
+- **The page can often be inferred.** An embed usually pins a dataset,
+  and the session's `layer_loaded` names it; a one-site embedding
+  policy names the site outright.
+- **A framed session's timing describes the host page.** Its
+  `session_end` times say how long the host's page was open.
+
+The maintainer decided four things on 2026-11-06 (§9.2):
+
+- the field stays Tier A;
+- the privacy policy's promise narrows from "anything about other
+  sites" to their addresses, with the inference routes disclosed;
+- framed-session timing is kept and disclosed;
+- the host controls come next, as their own change:
+  - a main-app `telemetry=0` an embed code can carry;
+  - Global Privacy Control honoured where no notice is shown;
+  - a note for embedders in `EMBED_URL_GRAMMAR.md`.
+
+**One constraint binds this plan's own work.** The Delivery panel
+must keep `window_context` out of per-dataset counts
+(`analytics_dataset_daily`), since per-dataset counts of embedded
+loads would be counts of one page's audience.
 
 **Which phase adds what.** D2a builds the classifier and the writer as
 a pure module, counts the files route, and adds the rollup and the
@@ -1902,7 +1954,7 @@ stays a draft for review.
   one request to another (§9.14).
 - **Changing `WireDataset`, the native catalog or the federation feed.**
 - **Editing `SECOND_LIFE_COMPAT.md` here.** The corrections in §2.3
-  belong in their own change.
+  were made in their own change (#522).
 
 ---
 
