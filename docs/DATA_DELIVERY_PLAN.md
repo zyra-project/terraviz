@@ -16,10 +16,11 @@ sibling document already records a test.
 
 **Last reviewed:** 2026-11-07 (first draft 2026-11-06, from desk
 research on each consumer; §9's phased implementation and §9.14's usage
-metrics added the same day. On 2026-11-07 the three follow-ups this
+metrics added the same day. On 2026-11-07 the four follow-ups this
 plan spun off were merged and are marked done: the ArcGIS wildcard
-guard, #521 (§4.5); the Second Life corrections, #522 (§2.3); and the
-embed field, #524 (§9.14). The same day each channel was put behind a
+guard, #521 (§4.5); the Second Life corrections, #522 (§2.3); the
+embed field, #524 (§9.14); and the embed host controls, #526
+(§9.14). The same day each channel was put behind a
 switch in the portal (§8), and four specialist agents reviewed their
 sections against client source code: the Web GIS Developer §5, the
 Video Streaming Engineer §6, the Scientific Visualization Reviewer §7
