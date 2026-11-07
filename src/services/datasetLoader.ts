@@ -17,6 +17,7 @@ import { formatDate, isSubDailyPeriod, inferDisplayInterval } from '../utils/tim
 import { logger } from '../utils/logger'
 import { waitForDecodableFrame, playableStart } from '../utils/mediaReadiness'
 import { escapeHtml, escapeAttr } from '../ui/domUtils'
+import { buildDatasetPath, type DatasetUrlRef } from '../utils/datasetUrl'
 import { closeChat } from '../ui/chatUI'
 import type { PlaybackState } from '../ui/playbackController'
 import { updatePlayButton, loadCaptions } from '../ui/playbackController'
@@ -512,24 +513,39 @@ function renderRelatedDatasetsHtml(
   html += `<ul class="info-related">`
   for (const entry of manualLinks) {
     if (entry.match) {
-      html += `<li><a href="?dataset=${encodeURIComponent(entry.match.id)}" data-dataset-id="${escapeAttr(entry.match.id)}">${escapeHtml(entry.label)}</a></li>`
+      html += `<li><a href="${escapeAttr(relatedHref(entry.match))}" data-dataset-id="${escapeAttr(entry.match.id)}">${escapeHtml(entry.label)}</a></li>`
     } else {
       html += `<li><span class="info-related-offcatalog">${escapeHtml(entry.label)}</span></li>`
     }
   }
   for (const candidate of algorithmic) {
-    html += `<li><a href="?dataset=${encodeURIComponent(candidate.id)}" data-dataset-id="${escapeAttr(candidate.id)}">${escapeHtml(candidate.title)}</a></li>`
+    html += `<li><a href="${escapeAttr(relatedHref(candidate))}" data-dataset-id="${escapeAttr(candidate.id)}">${escapeHtml(candidate.title)}</a></li>`
   }
   html += `</ul></div>`
   return html
 }
 
 /**
+ * Where a related-dataset link goes: the dataset's own address, with
+ * the rest of this page's query and the part after `#` kept. It is the
+ * link's real `href`, not only what a click pushes, because a middle
+ * click or "Open link in new tab" never reaches the click handler, and
+ * a bare `?dataset=` would drop a host's `telemetry=0` there
+ * (`src/analytics/pageOptOut.ts`). A draft-preview token is dropped, as
+ * on every other dataset change (`buildDatasetPath`).
+ */
+function relatedHref(dataset: DatasetUrlRef): string {
+  return buildDatasetPath(dataset, window.location.search, window.location.hash)
+}
+
+/**
  * Wire related-dataset links within `scope` to load in-place. The URL
- * update preserves any existing `?catalog=true` flag (Phase 1 §3.2) so
- * a related-link click while in catalog mode keeps the catalog↔sphere
- * tab control visible — same contract as `selectDatasetFromBrowse` in
- * main.ts. Extracted so the async semantic enhancement can re-wire its
+ * the click pushes is the link's own `href` (`relatedHref`), so it
+ * preserves any existing `?catalog=true` flag (Phase 1 §3.2) — a
+ * related-link click while in catalog mode keeps the catalog↔sphere
+ * tab control visible, the same contract as `selectDatasetFromBrowse`
+ * in main.ts — and a click and a new tab land on the same address.
+ * Extracted so the async semantic enhancement can re-wire its
  * freshly-rendered links.
  */
 function wireRelatedLinks(scope: ParentNode, onLoadDataset: (id: string) => void): void {
@@ -537,12 +553,9 @@ function wireRelatedLinks(scope: ParentNode, onLoadDataset: (id: string) => void
     link.addEventListener('click', (ev) => {
       ev.preventDefault()
       const id = (link as HTMLElement).dataset.datasetId
-      if (id) {
-        const params = new URLSearchParams(window.location.search)
-        params.set('dataset', id)
-        // Keep the part after `#`: a host's `#telemetry=0` must outlive
-        // a click to a related dataset (`src/analytics/pageOptOut.ts`).
-        window.history.pushState({}, '', `?${params.toString()}${window.location.hash}`)
+      const href = link.getAttribute('href')
+      if (id && href) {
+        window.history.pushState({}, '', href)
         onLoadDataset(id)
       }
     })

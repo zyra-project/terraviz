@@ -375,9 +375,9 @@ describe('displayDatasetInfo', () => {
     link.click()
 
     expect(onLoad).toHaveBeenCalledWith('related-1')
+    expect(window.location.pathname).toBe('/dataset/related-1')
     const params = new URLSearchParams(window.location.search)
     expect(params.get('catalog')).toBe('true')
-    expect(params.get('dataset')).toBe('related-1')
   })
 
   // A host's #telemetry=0 must outlive a click to a related dataset,
@@ -397,10 +397,47 @@ describe('displayDatasetInfo', () => {
     link.click()
 
     expect(onLoad).toHaveBeenCalledWith('related-1')
+    expect(window.location.pathname).toBe('/dataset/related-1')
     const params = new URLSearchParams(window.location.search)
     expect(params.get('telemetry')).toBe('0')
-    expect(params.get('dataset')).toBe('related-1')
+    expect(params.get('embed')).toBe('1')
     expect(window.location.hash).toBe('#telemetry=0')
+  })
+
+  // A middle click or "Open link in new tab" goes to the href and never
+  // reaches the click handler, so the href itself must carry the opt-out.
+  it("puts telemetry= and the part after # in every related link's href, manual and algorithmic", () => {
+    const target = makeDataset({
+      id: 'target',
+      title: 'Sea Surface Temperature',
+      enriched: {
+        categories: { Ocean: ['Temperature'] },
+        keywords: ['sst', 'climate'],
+        relatedDatasets: [{ title: 'Manually Curated', url: '' }],
+      },
+    })
+    const manualMatch = makeDataset({
+      id: 'manual',
+      slug: 'manually-curated',
+      title: 'Manually Curated',
+      enriched: { categories: { Ocean: ['Temperature'] } },
+    })
+    const algorithmicMatch = makeDataset({
+      id: 'algorithmic',
+      title: 'Ocean Currents',
+      enriched: { categories: { Ocean: ['Temperature'] }, keywords: ['climate'] },
+    })
+
+    window.history.replaceState({}, '', '/?embed=1&telemetry=0&preview=tok&dataset=target#telemetry=0')
+    displayDatasetInfo(target, [target, manualMatch, algorithmicMatch], vi.fn())
+
+    const hrefs = Array.from(document.querySelectorAll('.info-related a[data-dataset-id]')).map((l) =>
+      l.getAttribute('href'),
+    )
+    expect(hrefs).toEqual([
+      '/dataset/manually-curated?embed=1&telemetry=0#telemetry=0',
+      '/dataset/algorithmic?embed=1&telemetry=0#telemetry=0',
+    ])
   })
 
   it('toggles expand/collapse when header is clicked', () => {
