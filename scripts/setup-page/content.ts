@@ -713,7 +713,7 @@ export const TROUBLESHOOTING = [
 export const WEEK_ONE = [
   {
     title: 'Document who can flip the kill switches',
-    body: 'You have two. Telemetry is the KV key telemetry_enabled: no redeploy, but the wrangler command needs --remote or it writes a local copy and production keeps ingesting. Cloud voice is the KILL_VOICE variable, which waits for the next deployment. Write down who may flip each.',
+    body: 'Telemetry: the KV key telemetry_enabled, no redeploy, but wrangler needs --remote or it edits a local copy. Cloud voice: KILL_VOICE, live from the next deploy. Write down who may flip each.',
   },
   {
     title: 'Put token expiry in a calendar',

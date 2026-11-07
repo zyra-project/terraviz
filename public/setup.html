@@ -2127,7 +2127,7 @@ npm run terraviz -- import-snapshot \
   <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px">
     <div style="background:var(--tv-surface-2);border:1px solid var(--tv-border);border-radius:8px;padding:16px 18px">
       <div style="font:500 14px/1.3 var(--tv-font-sans);color:var(--tv-text);margin:0 0 6px">Document who can flip the kill switches</div>
-      <p style="margin:0;font-size:13.5px;line-height:1.55;color:var(--tv-text-muted);text-wrap:pretty">You have two. Telemetry is the KV key telemetry_enabled: no redeploy, but the wrangler command needs --remote or it writes a local copy and production keeps ingesting. Cloud voice is the KILL_VOICE variable, which waits for the next deployment. Write down who may flip each.</p>
+      <p style="margin:0;font-size:13.5px;line-height:1.55;color:var(--tv-text-muted);text-wrap:pretty">Telemetry: the KV key telemetry_enabled, no redeploy, but wrangler needs --remote or it edits a local copy. Cloud voice: KILL_VOICE, live from the next deploy. Write down who may flip each.</p>
     </div>
     <div style="background:var(--tv-surface-2);border:1px solid var(--tv-border);border-radius:8px;padding:16px 18px">
       <div style="font:500 14px/1.3 var(--tv-font-sans);color:var(--tv-text);margin:0 0 6px">Put token expiry in a calendar</div>
