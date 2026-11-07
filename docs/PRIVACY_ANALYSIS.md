@@ -1035,9 +1035,33 @@ first-run banner (`src/main.ts`, "the host page owns consent") and
 hides `#map-controls`, which holds the Privacy entry; and a stored Off
 from the node's own site does not reach a frame on another site,
 because current browsers partition a framed page's storage by the
-top-level site, so `loadConfig()` falls back to `essential`. The
-WordPress plan's host switch (its Integration J) is not built, and the
-main app does not honour Global Privacy Control.
+top-level site, so `loadConfig()` falls back to `essential`.
+
+**The controls that answer it** (added 2026-11-07,
+`src/analytics/pageOptOut.ts`). Both cap the tier at Off for the life
+of the page, never raise it, and write nothing:
+
+- **`telemetry=` in the address**, the WordPress plan's host switch
+  (its Integration J). Read as the output page reads the key: only `1`
+  or `true` leaves reporting alone, any other value turns it off, and a
+  repeated key's off value wins. A host's embed code carries it for
+  everyone who sees the embed; it works on any page of the app.
+- **Global Privacy Control in the embed view**, where no notice is
+  shown to answer. Outside it, the notice and the Privacy panel remain
+  the visitor's controls; honouring GPC there too would be a further
+  decision, not part of this one.
+
+`main.ts` latches the result into the emitter at module evaluation, so
+nothing is queued before it and no URL writer can drop the key first.
+The emitter then accepts no event, sends nothing on flush or unload,
+and leaves any queue an earlier session persisted for the next one.
+The first-run notice is skipped on a page whose address turned
+reporting off, since it would describe collection that is not
+happening; the Privacy panel says the visit sends nothing.
+
+What these do not change: an embed whose host sets nothing, seen by a
+visitor whose browser sends no GPC, reports as before, so the routes
+above still apply to it.
 
 **Decisions** (the maintainer's, 6 November 2026, after the privacy
 review):
@@ -1054,7 +1078,8 @@ review):
 - **The documents are corrected now, and the host controls come next:**
   a `telemetry=0` parameter an embed code can carry, and Global Privacy
   Control honoured where no notice is shown (the output page already
-  honours it, `src/output/webTelemetry.ts`).
+  honours it, `src/output/webTelemetry.ts`). *Both landed on
+  2026-11-07, as described above.*
 
 **Open:**
 

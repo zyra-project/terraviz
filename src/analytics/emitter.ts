@@ -30,6 +30,7 @@ import {
   generateSessionId,
   loadConfig,
 } from './config'
+import type { PageOptOut } from './pageOptOut'
 import {
   clearPersistedQueue,
   hydrateQueue,
@@ -101,6 +102,9 @@ interface EmitterState {
   /** Flight tracking — non-null while a dispatch is in progress.
    * Tests `await` it to wait for the network cycle. */
   inflight: Promise<void> | null
+  /** Set when this page load reports nothing (`optOutForPage`), and
+   * then for the rest of the page's life. Never persisted. */
+  pageOptOut: PageOptOut | null
 }
 
 function createState(): EmitterState {
@@ -118,6 +122,7 @@ function createState(): EmitterState {
     transport: null,
     pagehideAbort: null,
     inflight: null,
+    pageOptOut: null,
   }
 }
 
@@ -136,6 +141,7 @@ export function getSessionId(): string {
 export function emit(event: TelemetryEvent): void {
   if (!TELEMETRY_BUILD_ENABLED) return
   if (isSilencedPath()) return
+  if (state.pageOptOut !== null) return
   if (!tierGate(event.event_type)) return
   const stamped: TelemetryEvent = {
     ...event,
@@ -161,6 +167,30 @@ export function getSessionDurationMs(): number {
   return Math.max(0, Date.now() - state.sessionStartWall)
 }
 
+/**
+ * Make this page load report nothing, for the rest of its life
+ * (`pageOptOut.ts`): drop what is queued, and from here on accept no
+ * event, send nothing on flush or unload, and leave any queue an
+ * earlier session persisted where it is. A cap below the stored tier,
+ * not a change to it: nothing is written, so the visitor's own setting
+ * stands on their next visit. There is deliberately no way back on the
+ * same page, since the address that asked for it has not changed.
+ */
+export function optOutForPage(reason: PageOptOut): void {
+  state.pageOptOut = reason
+  state.queue = []
+  if (state.flushTimer !== null) {
+    clearTimeout(state.flushTimer)
+    state.flushTimer = null
+  }
+}
+
+/** Why this page load reports nothing, or `null` when it reports as
+ * the stored tier says. Read by the Privacy panel and the boot path. */
+export function getPageOptOut(): PageOptOut | null {
+  return state.pageOptOut
+}
+
 /** True if events of the given type are allowed under the current
  * tier. Pure function of config + event type — no side effects. */
 export function tierGate(eventType: TelemetryEvent['event_type']): boolean {
@@ -181,6 +211,7 @@ export function flush(): TelemetryEvent[] {
     clearTimeout(state.flushTimer)
     state.flushTimer = null
   }
+  if (state.pageOptOut !== null) state.queue = []
   if (state.queue.length === 0) return []
   const drained = state.queue
   state.queue = []
@@ -303,8 +334,9 @@ function persistIfTauri(): void {
  * the transport and returns the emitter to Commit-1 behaviour. */
 export function setTransport(transport: Transport | null): void {
   // Hydrate any queue persisted by a previous session before we
-  // start sending. First-launch no-ops (hydrateQueue returns []).
-  if (transport && state.queue.length === 0) {
+  // start sending. First-launch no-ops (hydrateQueue returns []). A
+  // page that reports nothing leaves it where it is for the next one.
+  if (transport && state.queue.length === 0 && state.pageOptOut === null) {
     const persisted = hydrateQueue()
     if (persisted.length > 0) {
       state.queue = persisted
@@ -338,6 +370,7 @@ export function setTransport(transport: Transport | null): void {
  * the persistent queue covers this case; web relies on the beacon. */
 export function flushOnUnload(): void {
   if (!TELEMETRY_BUILD_ENABLED) return
+  if (state.pageOptOut !== null) return
   if (state.cooledDown) return
   const transport = state.transport
   if (!transport) return

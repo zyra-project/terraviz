@@ -19,7 +19,8 @@ read `src/main.ts` to know what is safe to rely on.
 
 The parameters are read at boot by `src/main.ts` and the helpers in
 `src/utils/{catalogMode,embedMode,posterDeepLinks}.ts` /
-`src/services/deepLinkService.ts`. Behaviour is deliberately
+`src/services/deepLinkService.ts`, and `telemetry` by
+`src/analytics/pageOptOut.ts`. Behaviour is deliberately
 conservative: an unknown parameter value is a silent no-op, and the
 URL is not rewritten after boot, so a refresh preserves the linked
 state. The output page's parameters (below) are read by
@@ -74,6 +75,45 @@ wins, and `?tour=` is skipped when `?dataset=` is also set —
 `src/utils/embedMode.ts`). In catalog mode (`?catalog=true&embed=1`)
 the browse grid and the tab control are **kept**, since the catalog
 grid is the point of that embed.
+
+---
+
+## Privacy parameters — what the page reports
+
+| Parameter | Value | Effect |
+|---|---|---|
+| `telemetry` | `1` or `true` (case-insensitive, untrimmed) leaves reporting as the visitor set it; **any other value**, a bare `telemetry` and an empty value included, turns it off | Whether this page load sends the app's anonymous telemetry. It can only turn reporting **off**: `telemetry=1` never turns on telemetry a visitor switched off, and when the key appears more than once, a value that turns it off wins. Read once, from the query, when the page loads; a later change to the address does not turn it back on. Applies to any page of the app, not only `embed=1`. Nothing is stored, so the visitor's own setting stands on their next visit without it. |
+
+**What an embed reports, and what a host can do about it.** An
+embedded view (`embed=1`) sends the same anonymous Essential telemetry
+the app sends on its own site (`docs/PRIVACY.md` §2). It shows no
+first-run notice and no Tools menu, so a visitor has no Privacy panel to
+reach. And a mode they chose on the node's own site does not carry into
+a frame on another site, because current browsers keep a framed page's
+storage separate per site. So the host page's own privacy promise has
+to cover it, or the embed code turns it off:
+
+```text
+https://terraviz.zyra-project.org/?dataset=INTERNAL_SOS_123&embed=1&telemetry=0
+```
+
+Two things hold whatever the host writes:
+
+- **Global Privacy Control turns it off in the embed view.** A visitor
+  whose browser sends it is not reported there, since the notice it
+  would otherwise answer is never shown. Outside the embed view the
+  notice and the Privacy panel are the visitor's controls.
+- **The framing page is never recorded.** The app notes that it is in
+  a frame, and whether `embed=1` was set (`session_start.window_context`);
+  it never reads the host page's address. The dataset or tour an embed
+  opens is recorded, though, so where only one site embeds it, the
+  record points to that site (`docs/PRIVACY_ANALYSIS.md` §9l).
+
+`telemetry` reads the same way on the output page, where reporting is
+off unless it is `1` or `true` (below): one string means the same on
+both pages, and a misread fails toward off. The difference is the
+default. A main-app page reports unless told not to, as it does on the
+node's own site; an output page reports only when told to.
 
 ---
 
@@ -320,12 +360,14 @@ https://terraviz.zyra-project.org/?dataset=INTERNAL_SOS_123&embed=1&layout=4
 - **Truthy convention is fixed.** `catalog`, `embed`, and `chat`, and
   the output page's `debug` and `paused`, all treat presence as on and
   only `false`/`0` (case-insensitive, untrimmed) as off. New boolean
-  flags should follow the same convention. The two exceptions are the
-  output page's `telemetry`, a privacy switch, and its `sound`, which
-  everyone within earshot of a globe hears: for each, only `1`/`true`
-  (case-insensitive, untrimmed) is on, and anything else, presence
-  alone included, is off, because the usual reading would turn it on
-  for `telemetry=off` or `sound=off`.
+  flags should follow the same convention. The exceptions are
+  `telemetry`, a privacy switch, on both the main app and the output
+  page, and the output page's `sound`, which everyone within earshot of
+  a globe hears: for each, only `1`/`true` (case-insensitive,
+  untrimmed) is on, and anything else, presence alone included, is off,
+  because the usual reading would turn it on for `telemetry=off` or
+  `sound=off`. On the main app `telemetry` can only turn reporting off,
+  so there `1`/`true` means "as the visitor set it".
 - **Breaking changes bump the version.** Renaming or removing a
   parameter, or changing what an existing value does, is a v2 change
   and appears in the Changelog with a migration note.
@@ -343,6 +385,7 @@ https://terraviz.zyra-project.org/?dataset=INTERNAL_SOS_123&embed=1&layout=4
 | v1 | 2026-10-24 | Additive. The output page (`/output/output`) gains its parameters: `dataset`, `fit`, `width`, `rotation` (the longitude at the picture's centre), `debug`, and the clock `t` / `at` / `rate` / `paused`, each with its own default, read from the query and the fragment alike. No main-app parameter changes. A bare output-page address draws the live Earth it always did, now sized to the page as displayed and with clouds that refresh. Later the same day, also additive: `telemetry=1`, which turns on the page's own Essential telemetry, off by default. It fails toward off rather than following the truthy convention. |
 | v1 | 2026-10-25 | Additive, with one behavior change. The output page gains `lat`, the latitude at the picture's centre, and `zoom`, which magnifies it, through the desktop output's follow turn; a zoom past what the picture can magnify (about 5.67) reads as that most. `rotation` keeps its meaning and draws the same picture at rest as before; at a pole it names the meridian the centre sits on. The behavior change: the three keys name the view the picture comes to rest on, and a change to any of them after the `#` now sets the picture moving, coasting to a stop on the new view like a spun globe on its bearing, instead of jumping there. The first reading of an address, and every view for a viewer whose browser reports reduced motion, still jump. Kept in v1 by the maintainer's decision of 25 October 2026, recorded in #501: the section was a day old, and every known composer writes at most once a second, the Second Life limit. **Migration:** a composer that animated `rotation` by writing it faster than once a second now sees the picture trail by about 0.8 s, and its swings shrink to about 40% at 0.5 Hz; write the view the picture should come to rest on, at most once a second. No main-app parameter changes. |
 | v1 | 2026-10-26 | One behavior change. The output page's clock (`t`, `at`, `rate`, `paused`) wraps on the clip's playlist total, the `#EXTINF`s summed from the first rendition a copy loads, rather than on the video element's `duration`. That `duration` was the same number until a stream had buffered to its end and then the latest end of every track: measured in Chromium, 21 to 40 ms longer on the node's bundles with a sound track. So a copy changed its period partway through, copies on different engines looped on different periods, and the gap grew with every loop since `at`. A copy with no playlist to read a length from (a single file, or a browser playing HLS itself) still wraps on the video's own length. No key, type or range changes. Kept in v1 by the maintainer's decision of 26 October 2026, recorded in #502: the section was two days old, and the old period was never stable even on one copy. **Migration:** nothing for a composer, which writes the same keys. A copy opened before the change keeps the old period until it reloads, so on a bundle with a sound track it can show a different point of the loop from a new copy; any change before the `#` reloads every copy. No main-app parameter changes. The same day, "Paused is exact; playing is close" was reworded to state its limit, which was already so: each pass round the clip restarts the video, so how close playing copies stay depends on the clip's length and the rate, and on a short clip at a high rate they don't settle. No behavior changes with that. |
+| v1 | 2026-11-07 | Additive. The main app gains `telemetry`: any value but `1`/`true` turns off the page's telemetry for that page load, read like the output page's key and failing toward off, and able only to lower what the visitor set. In the embed view (`embed=1`) the app now also honours Global Privacy Control. Both are the controls the maintainer decided on 6 November 2026 for embedded views, which have no notice and no Privacy panel (`docs/PRIVACY_ANALYSIS.md` §9l). A page loaded before a node deploys this ignores `telemetry` and reports as before until it reloads. No output-page parameter changes. |
 | v1 | 2026-10-27 | Additive. The output page gains `sound=1`, which plays a video's sound track. It is muted by default and fails toward muted like `telemetry`, so every address without `sound=1` stays silent; a browser that refuses to play aloud without a click leaves that copy muted until it reloads. A copy loaded before a node deploys this ignores `sound` and stays muted until it reloads, which a `#` change doesn't do, so during a rollout visitors at one globe can hear different things. No main-app parameter changes. |
 
 ---
@@ -351,6 +394,7 @@ https://terraviz.zyra-project.org/?dataset=INTERNAL_SOS_123&embed=1&layout=4
 
 - [`WORDPRESS_INTEGRATION_PLAN.md`](WORDPRESS_INTEGRATION_PLAN.md) §3 — the Gutenberg blocks that consume this grammar
 - `src/utils/embedMode.ts` — the `embed` / `chat` reader + body-class application
+- `src/analytics/pageOptOut.ts` — the main app's `telemetry` reader, and Global Privacy Control in the embed view
 - `src/utils/catalogMode.ts` — the `catalog` reader
 - `src/utils/posterDeepLinks.ts` — `tour` / view-toggle / `orbit` dispatch
 - `src/services/deepLinkService.ts` — `/dataset/:id` path form and native `zyra://` links

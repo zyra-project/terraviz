@@ -25,6 +25,7 @@
 import {
   applyTierChange,
   emit,
+  getPageOptOut,
   getSessionId,
   loadConfig,
   setTier,
@@ -87,6 +88,7 @@ function buildPanel(): HTMLElement {
         >&#x2715;</button>
       </header>
       <p id="privacy-ui-desc" class="privacy-ui-desc">${tHtml('privacy.desc')}</p>
+      <p id="privacy-ui-pageoptout" class="privacy-ui-pageoptout" hidden>${tHtml('privacy.pageOptOut.address')}</p>
       <fieldset class="privacy-ui-tiers" role="radiogroup" aria-label="${tAttr('privacy.radiogroup.aria')}">
         <legend class="sr-only">${tHtml('privacy.radiogroup.aria')}</legend>
         ${renderTierOption('essential')}
@@ -140,6 +142,28 @@ function syncRadios(): void {
   radios.forEach((r) => {
     r.checked = r.value === current
   })
+}
+
+/**
+ * Show, or hide, the note that this visit sends nothing because its
+ * address turned telemetry off (`pageOptOut.ts`). Without it the panel
+ * would show the stored tier, Essential by default, over a page that
+ * reports nothing. The radios still show and set the stored tier, which
+ * is what the next visit without the key will use, and the note says
+ * so. While shown it describes the radio group, so a screen reader
+ * reads it on entering the choice. Only the address case is shown: the
+ * other reason, Global Privacy Control, applies only in the embed view,
+ * which has no Tools menu to open this panel from.
+ */
+function syncPageOptOut(): void {
+  const note = document.getElementById('privacy-ui-pageoptout')
+  const group = document.querySelector<HTMLElement>('.privacy-ui-tiers')
+  const shown = getPageOptOut() === 'address'
+  if (note) note.hidden = !shown
+  if (group) {
+    if (shown) group.setAttribute('aria-describedby', 'privacy-ui-pageoptout')
+    else group.removeAttribute('aria-describedby')
+  }
 }
 
 /** Refresh the session-ID display. Called on every open because the
@@ -302,6 +326,7 @@ function ensureMounted(): void {
 export function openPrivacyUI(triggeredBy?: HTMLElement | null): void {
   ensureMounted()
   syncRadios()
+  syncPageOptOut()
   syncSessionId()
   syncClearVisitsButton()
   const panel = document.getElementById('privacy-ui-panel')

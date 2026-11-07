@@ -12,6 +12,8 @@ import {
   getSessionId,
   tierGate,
   applyTierChange,
+  optOutForPage,
+  getPageOptOut,
   resetForTests,
   __peek,
   __awaitInflight,
@@ -663,5 +665,86 @@ describe('emitter — flushOnUnload / pagehide', () => {
 
     expect(t.beaconMock).toHaveBeenCalledTimes(1)
     expect(size()).toBe(0)
+  })
+})
+
+describe('emitter — page opt-out (optOutForPage)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    resetForTests()
+    setTier('essential')
+    __setPersistOverrideForTests(false)
+  })
+
+  afterEach(() => {
+    __setPersistOverrideForTests(null)
+    resetForTests()
+  })
+
+  it('drops what is already queued', () => {
+    emit(layerLoaded('A'))
+    expect(size()).toBe(1)
+    optOutForPage('address')
+    expect(size()).toBe(0)
+    expect(getPageOptOut()).toBe('address')
+  })
+
+  it('accepts no event afterwards, whatever tier is stored', () => {
+    setTier('research')
+    optOutForPage('gpc')
+    emit(layerLoaded('A'))
+    emit(dwell())
+    emit(feedback())
+    expect(size()).toBe(0)
+  })
+
+  it('leaves the stored tier alone, so the visitor’s own setting stands', () => {
+    setTier('research')
+    optOutForPage('address')
+    expect(tierGate('dwell')).toBe(true)
+    expect(JSON.parse(localStorage.getItem('sos-telemetry-config') ?? '{}').tier).toBe('research')
+  })
+
+  it('sends nothing on flush or unload', async () => {
+    const t = makeTransport()
+    setTransport(t)
+    optOutForPage('address')
+    emit(layerLoaded('A'))
+    expect(flush()).toEqual([])
+    flushOnUnload()
+    await __awaitInflight()
+    expect(t.sendMock).not.toHaveBeenCalled()
+    expect(t.beaconMock).not.toHaveBeenCalled()
+  })
+
+  it('leaves a queue an earlier session persisted where it is', () => {
+    __setPersistOverrideForTests(true)
+    localStorage.setItem(PERSISTED_QUEUE_KEY, JSON.stringify([layerLoaded('PERSISTED_A')]))
+    optOutForPage('address')
+    const t = makeTransport()
+    setTransport(t)
+    expect(size()).toBe(0)
+    expect(localStorage.getItem(PERSISTED_QUEUE_KEY)).not.toBeNull()
+  })
+
+  it('cancels a scheduled flush', async () => {
+    vi.useFakeTimers()
+    try {
+      const t = makeTransport()
+      setTransport(t)
+      emit(layerLoaded('A'))
+      optOutForPage('address')
+      vi.advanceTimersByTime(BATCH_INTERVAL_MS * 2)
+      expect(t.sendMock).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('is reported as null until set, and cleared by a test reset', () => {
+    expect(getPageOptOut()).toBeNull()
+    optOutForPage('address')
+    resetForTests()
+    expect(getPageOptOut()).toBeNull()
   })
 })

@@ -47,6 +47,17 @@ authoritative list of which events require Research mode; the runtime
 gate in `src/analytics/emitter.ts:tierGate()` reads it as a Set and
 short-circuits before queueing.
 
+**A page load can cap the tier at Off** (`src/analytics/pageOptOut.ts`),
+for an embedded view, which has no notice and no Privacy panel, and
+whose stored setting a browser partitions per site. `telemetry=` in
+the address with any value but `1`/`true` does it on any page (the
+switch a host's embed code carries, `docs/EMBED_URL_GRAMMAR.md`), and
+Global Privacy Control does it in the embed view. `main.ts` latches it
+into the emitter (`optOutForPage`) at module evaluation; from then the
+emitter drops every event ahead of `tierGate`, sends nothing on flush
+or unload, and does not hydrate a persisted queue. Nothing is stored,
+so the stored tier is untouched (`docs/PRIVACY_ANALYSIS.md` §9l).
+
 ## Where the data goes
 
 ```

@@ -350,7 +350,10 @@ footer.site-footer {
       notice, so there is no Privacy panel to reach. And in any frame on
       another site, a mode you chose on this site does not carry over:
       current browsers keep a framed page&#39;s storage separate for each site
-      it appears on. Section 8 says what you can do instead</p>
+      it appears on. Instead, the minimal embedded view reports nothing if
+      your browser sends Global Privacy Control, and any embed reports
+      nothing if the site embedding it turns reporting off; section 8 has
+      the details</p>
       </li>
       <li><p>When something goes wrong — a classification of the error (tile
       fetch, video stream, AI model, uncaught exception, browser-console
@@ -741,11 +744,22 @@ footer.site-footer {
       take effect immediately — no restart required</li>
       <li><strong>Inside another site&#39;s page</strong> a mode you chose on this site does
       not reach the frame, and the minimal embedded view has no Privacy
-      panel at all (section 2). A switch
-      that sites embedding the app can set, and support for your browser&#39;s
-      Global Privacy Control setting there, are planned. Until then, a
-      browser content blocker that blocks requests to this site&#39;s
-      <code>/api/ingest</code> stops an embedded view from reporting</li>
+      panel at all (section 2). Three things stop an embedded view from
+      reporting instead:<ul>
+      <li><strong>Your browser&#39;s Global Privacy Control setting.</strong> If your browser
+      sends it, the minimal embedded view reports nothing. (Outside that
+      view, the notice and the Privacy panel are your controls.)</li>
+      <li><strong>The site embedding the app.</strong> It can turn reporting off for
+      everyone who sees its embed, by adding <code>telemetry=0</code> to the
+      address it embeds.</li>
+      <li><strong>A browser content blocker</strong> that blocks requests to this site&#39;s
+      <code>/api/ingest</code>.</li>
+      </ul>
+      </li>
+      <li><strong>The same <code>telemetry=0</code> works on any address of the app</strong>, not only
+      an embed: a page opened with it reports nothing for that visit, and
+      the Privacy panel says so. Your own setting stays as you left it for
+      visits without it</li>
       <li><strong>Disable telemetry entirely</strong>: pick &quot;Off&quot; in the same panel</li>
       <li><strong>Run a telemetry-free build</strong>: the source code is public; you or
       someone you trust can build the app with the compile-time

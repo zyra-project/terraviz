@@ -193,7 +193,10 @@ Small, anonymous events about the health of the app:
   notice, so there is no Privacy panel to reach. And in any frame on
   another site, a mode you chose on this site does not carry over:
   current browsers keep a framed page's storage separate for each site
-  it appears on. Section 8 says what you can do instead
+  it appears on. Instead, the minimal embedded view reports nothing if
+  your browser sends Global Privacy Control, and any embed reports
+  nothing if the site embedding it turns reporting off; section 8 has
+  the details
 - When something goes wrong — a classification of the error (tile
   fetch, video stream, AI model, uncaught exception, browser-console
   message, native crash on desktop, or a globe's page), a short sanitized summary of
@@ -617,11 +620,20 @@ profiles, or sell to third parties.
   take effect immediately — no restart required
 - **Inside another site's page** a mode you chose on this site does
   not reach the frame, and the minimal embedded view has no Privacy
-  panel at all (section 2). A switch
-  that sites embedding the app can set, and support for your browser's
-  Global Privacy Control setting there, are planned. Until then, a
-  browser content blocker that blocks requests to this site's
-  `/api/ingest` stops an embedded view from reporting
+  panel at all (section 2). Three things stop an embedded view from
+  reporting instead:
+  - **Your browser's Global Privacy Control setting.** If your browser
+    sends it, the minimal embedded view reports nothing. (Outside that
+    view, the notice and the Privacy panel are your controls.)
+  - **The site embedding the app.** It can turn reporting off for
+    everyone who sees its embed, by adding `telemetry=0` to the
+    address it embeds.
+  - **A browser content blocker** that blocks requests to this site's
+    `/api/ingest`.
+- **The same `telemetry=0` works on any address of the app**, not only
+  an embed: a page opened with it reports nothing for that visit, and
+  the Privacy panel says so. Your own setting stays as you left it for
+  visits without it
 - **Disable telemetry entirely**: pick "Off" in the same panel
 - **Run a telemetry-free build**: the source code is public; you or
   someone you trust can build the app with the compile-time

@@ -10,7 +10,7 @@ import {
   disposePrivacyUI,
 } from './privacyUI'
 import { loadConfig, setTier } from '../analytics/config'
-import { emit, resetForTests, size, __peek } from '../analytics/emitter'
+import { emit, optOutForPage, resetForTests, size, __peek } from '../analytics/emitter'
 import type { LayerLoadedEvent, DwellEvent } from '../types'
 
 // ---- Fixtures ----
@@ -285,5 +285,43 @@ describe('privacyUI — clear visit history (§9.2)', () => {
     openPrivacyUI()
     ;(document.getElementById('privacy-ui-clear-visits') as HTMLButtonElement).click()
     expect(visitCount()).toBe(1)
+  })
+})
+
+describe('privacyUI — page opt-out note', () => {
+  it('is hidden on an ordinary page, and describes nothing', () => {
+    openPrivacyUI()
+    const note = document.getElementById('privacy-ui-pageoptout')
+    expect(note?.hidden).toBe(true)
+    expect(document.querySelector('.privacy-ui-tiers')?.hasAttribute('aria-describedby')).toBe(false)
+  })
+
+  it('shows when the address turned telemetry off, and describes the radio group', () => {
+    setTier('essential')
+    optOutForPage('address')
+    openPrivacyUI()
+    const note = document.getElementById('privacy-ui-pageoptout')
+    expect(note?.hidden).toBe(false)
+    expect(note?.textContent ?? '').toMatch(/nothing is sent/i)
+    expect(document.querySelector('.privacy-ui-tiers')?.getAttribute('aria-describedby')).toBe(
+      'privacy-ui-pageoptout',
+    )
+    // The radios still show the stored tier, which later visits use.
+    const checked = document.querySelector<HTMLInputElement>('input[name="privacy-ui-tier"]:checked')
+    expect(checked?.value).toBe('essential')
+  })
+
+  it('stays hidden for the GPC reason, which has no panel to show in', () => {
+    optOutForPage('gpc')
+    openPrivacyUI()
+    expect(document.getElementById('privacy-ui-pageoptout')?.hidden).toBe(true)
+  })
+
+  it('follows the latch across reopenings', () => {
+    openPrivacyUI()
+    closePrivacyUI()
+    optOutForPage('address')
+    openPrivacyUI()
+    expect(document.getElementById('privacy-ui-pageoptout')?.hidden).toBe(false)
   })
 })

@@ -60,7 +60,10 @@ import { showDisclosureBannerIfNeeded } from './ui/disclosureBanner'
 import {
   createFetchTransport,
   emit,
+  getPageOptOut,
   initSession,
+  optOutForPage,
+  pageOptOutFromBrowser,
   pauseForVrEntry,
   resumeForVrExit,
   setTransport,
@@ -155,6 +158,17 @@ import { maybeInitShaderTuner } from './ui/shaderTunerUI'
 // SSR-safe (the service no-ops when `document` is undefined).
 // See docs/WEB_CATALOG_FEATURES_PLAN.md §7.1.
 initUiScale()
+
+// Whether this page load reports nothing: `telemetry=` in the address
+// (the switch an embed code can carry), or Global Privacy Control in
+// the embed view, which shows no notice (src/analytics/pageOptOut.ts).
+// Latched at module evaluation, like the UI scale above, because
+// nothing has emitted yet and no URL writer has had the chance to drop
+// the key; the emitter holds it for the rest of the page's life.
+{
+  const pageOptOut = pageOptOutFromBrowser()
+  if (pageOptOut) optOutForPage(pageOptOut)
+}
 
 // Apply persisted shader settings (§7.2) — currently the specular-
 // strength preset. Contrast / saturation / bump are dev-tuned and
@@ -656,8 +670,14 @@ class InteractiveSphere {
       // after the user dismisses it. Skipped inside an embed — the
       // host page owns consent, and a privacy banner popping up in a
       // third-party iframe is both wrong and intrusive (§J of
-      // `docs/WORDPRESS_INTEGRATION_PLAN.md`).
-      if (!embedModeActive) showDisclosureBannerIfNeeded()
+      // `docs/WORDPRESS_INTEGRATION_PLAN.md`). The host's means of
+      // exercising it is `telemetry=0` in the embed code, and the
+      // visitor's is Global Privacy Control (pageOptOut.ts). Skipped too on a page
+      // whose address turned reporting off: the notice describes what
+      // is collected, and here nothing is, so it would mislead. It
+      // shows on the next visit without the key, since nothing marks it
+      // seen.
+      if (!embedModeActive && !getPageOptOut()) showDisclosureBannerIfNeeded()
       // Telemetry transport — skipped entirely when the compile-time
       // flag is off (telemetry-free builds) and when console mode
       // is on (dev convenience: events log locally, no POSTs).
