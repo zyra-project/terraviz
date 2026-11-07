@@ -1035,9 +1035,46 @@ first-run banner (`src/main.ts`, "the host page owns consent") and
 hides `#map-controls`, which holds the Privacy entry; and a stored Off
 from the node's own site does not reach a frame on another site,
 because current browsers partition a framed page's storage by the
-top-level site, so `loadConfig()` falls back to `essential`. The
-WordPress plan's host switch (its Integration J) is not built, and the
-main app does not honour Global Privacy Control.
+top-level site, so `loadConfig()` falls back to `essential`.
+
+**The controls that answer it** (added 2026-11-07,
+`src/analytics/pageOptOut.ts`). Both cap the tier at Off for the life
+of the page, never raise it, and write nothing:
+
+- **`telemetry=` in the address**, the WordPress plan's host switch
+  (its Integration J). A single value reads as the output page reads
+  the key: only `1` or `true` leaves reporting alone, and any other
+  value turns it off. It is read from the query and the part after
+  `#`, and a repeated key's off value wins, since it can only lower.
+  A host's embed code carries it for everyone who sees the embed; it
+  works on any page of the app. The app's own address rewrites keep
+  both parts, so it survives a change of dataset and a reload, and
+  related-dataset links carry them into a tab opened from the link.
+- **Global Privacy Control, on every page**, read once, as the page
+  loads, like the address. In the embed view it is the only preference
+  the app can hear. Honouring it everywhere rather
+  than there alone keeps `embed=1` purely presentational, as the embed
+  grammar promises, and matches the output page
+  (`src/output/webTelemetry.ts`).
+
+`main.ts` latches the result into the emitter at module evaluation,
+before any transport is installed: anything already queued is dropped,
+and nothing is sent. The emitter then accepts no event, sends nothing
+on flush or unload, neither requeues nor saves a batch that was in
+flight, and leaves any queue an earlier session persisted for the next
+one. The first-run notice is skipped on a page that sends nothing for
+either reason, since it would describe collection that is not
+happening, and the Privacy panel says why the page sends nothing; a
+mode chosen there is saved for a visit without that reason.
+
+What these do not change: an embed whose host sets nothing, seen by a
+visitor whose browser sends no GPC, reports as before, so the routes
+above still apply to it. And one thing they do change for the
+dashboards: a page that opts out sends no events at all, so every count
+is a floor. And since GPC applies on every page and some browsers send
+it by default, the pages left out are not a random sample, so shares
+and mixes, the framed share of `window_context` included, can be off in
+either direction.
 
 **Decisions** (the maintainer's, 6 November 2026, after the privacy
 review):
@@ -1054,7 +1091,23 @@ review):
 - **The documents are corrected now, and the host controls come next:**
   a `telemetry=0` parameter an embed code can carry, and Global Privacy
   Control honoured where no notice is shown (the output page already
-  honours it, `src/output/webTelemetry.ts`).
+  honours it, `src/output/webTelemetry.ts`). *Both landed on
+  2026-11-07, as described above, and amended by the three decisions
+  below.*
+
+**Decisions** (the maintainer's, 7 November 2026, on the federation
+and privacy reviews of those controls):
+
+- **Global Privacy Control applies on every page**, not only the embed
+  view. Honouring it only there made `embed=1` change what a page
+  reports, which the embed grammar promises it never does, and a
+  visitor's signal means the same on any page.
+- **The app's address rewrites keep the part after `#`.** They kept
+  only the query, so `#telemetry=0` was lost when the boot-time
+  rewrite canonicalized a `?dataset=` link, and a reload then
+  reported.
+- **`telemetry` applies on every page of the app**, not only an embed,
+  since a kiosk or a demo may want it too.
 
 **Open:**
 

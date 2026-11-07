@@ -58,11 +58,16 @@ Contact for privacy questions: *[TBD — populate before release]*.
 
 ## 2. What we collect, in detail
 
-The app has three telemetry modes. You can see which mode is active —
+The app has three telemetry modes. You can see which mode you chose —
 and change it — under **Tools → Privacy**, except in the app's minimal
 embedded view (an address with `embed=1`, which sites embedding the app
 normally use), which has no Tools menu (see "The app inside another
-site's page" under Mode 1).
+site's page" under Mode 1). Whatever your mode, a page sends no
+telemetry if your browser sends Global Privacy Control when the page
+opens, or if the address the page was opened with turns telemetry off
+(section 8). Where there is a Privacy panel, it says when either
+applies. An address can turn telemetry off, but `telemetry=1` never
+overrides your mode or Global Privacy Control.
 
 ### Mode 1 — Essential (on by default)
 
@@ -193,7 +198,10 @@ Small, anonymous events about the health of the app:
   notice, so there is no Privacy panel to reach. And in any frame on
   another site, a mode you chose on this site does not carry over:
   current browsers keep a framed page's storage separate for each site
-  it appears on. Section 8 says what you can do instead
+  it appears on. So an embed sends these Essential events unless your
+  browser sends Global Privacy Control when the page opens, or the site
+  embedding the app turns telemetry off. Either one stops all telemetry
+  from that page. Section 8 has the details
 - When something goes wrong — a classification of the error (tile
   fetch, video stream, AI model, uncaught exception, browser-console
   message, native crash on desktop, or a globe's page), a short sanitized summary of
@@ -614,14 +622,41 @@ profiles, or sell to third parties.
 ## 8. Your choices
 
 - **Change telemetry mode** at any time: **Tools → Privacy**. Changes
-  take effect immediately — no restart required
+  take effect immediately — no restart required — except on a page
+  that sends no telemetry because of Global Privacy Control or because
+  its address turns telemetry off (both below). There the panel says
+  so, and the mode you pick is saved for the next page you open where
+  neither applies
+- **Your browser's Global Privacy Control setting**, a setting in some
+  browsers that asks websites not to sell or share your data. If it is
+  on when a page of the app opens, that page sends no telemetry,
+  embedded or not, whatever your mode. Some browsers and privacy
+  extensions turn it on by default. The app checks it only as a page
+  opens, so turning the setting on or off takes effect the next time
+  you open or reload a page of the app; moving around inside the app,
+  such as opening another dataset, doesn't count. On such a page the
+  app doesn't show its first-run privacy notice, since nothing it
+  describes is collected; the notice appears on the first page you
+  open without the signal, and your chosen mode applies again there.
+  The desktop app runs in its own window, not in your browser, so your
+  browser's setting does not reach it; use the Privacy panel there
 - **Inside another site's page** a mode you chose on this site does
   not reach the frame, and the minimal embedded view has no Privacy
-  panel at all (section 2). A switch
-  that sites embedding the app can set, and support for your browser's
-  Global Privacy Control setting there, are planned. Until then, a
-  browser content blocker that blocks requests to this site's
-  `/api/ingest` stops an embedded view from reporting
+  panel at all (section 2). Three things stop an embedded view from
+  sending telemetry instead:
+  - **Your browser's Global Privacy Control setting**, as above.
+  - **The site embedding the app.** It can turn telemetry off for
+    everyone who sees its embed, by adding `telemetry=0` to the
+    address it embeds.
+  - **A browser content blocker** that blocks requests to this site's
+    `/api/ingest`.
+- **The same `telemetry=0` works on any address of the app**, not only
+  an embed: a page opened with it sends no telemetry, the first-run
+  notice isn't shown, and the Privacy panel says so. Your own setting
+  stays as you left it for pages opened without it. `telemetry=1` never
+  overrides your choice: your mode stays as you set it, and Global
+  Privacy Control still applies. (The desktop app has no address you
+  can change; use the Privacy panel there.)
 - **Disable telemetry entirely**: pick "Off" in the same panel
 - **Run a telemetry-free build**: the source code is public; you or
   someone you trust can build the app with the compile-time

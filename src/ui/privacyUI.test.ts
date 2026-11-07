@@ -10,7 +10,7 @@ import {
   disposePrivacyUI,
 } from './privacyUI'
 import { loadConfig, setTier } from '../analytics/config'
-import { emit, resetForTests, size, __peek } from '../analytics/emitter'
+import { emit, optOutForPage, resetForTests, size, __peek } from '../analytics/emitter'
 import type { LayerLoadedEvent, DwellEvent } from '../types'
 
 // ---- Fixtures ----
@@ -285,5 +285,116 @@ describe('privacyUI — clear visit history (§9.2)', () => {
     openPrivacyUI()
     ;(document.getElementById('privacy-ui-clear-visits') as HTMLButtonElement).click()
     expect(visitCount()).toBe(1)
+  })
+})
+
+describe('privacyUI — page opt-out note', () => {
+  it('is hidden on an ordinary page, and describes nothing', () => {
+    openPrivacyUI()
+    const note = document.getElementById('privacy-ui-pageoptout')
+    expect(note?.hidden).toBe(true)
+    expect(document.querySelector('.privacy-ui-tiers')?.hasAttribute('aria-describedby')).toBe(false)
+    expect(document.getElementById('privacy-ui-panel')?.getAttribute('aria-describedby')).toBe(
+      'privacy-ui-desc',
+    )
+  })
+
+  it('shows when the address turned telemetry off, and describes the radio group', () => {
+    setTier('essential')
+    optOutForPage('address')
+    openPrivacyUI()
+    const note = document.getElementById('privacy-ui-pageoptout')
+    expect(note?.hidden).toBe(false)
+    expect(note?.textContent ?? '').toMatch(/this page sends no telemetry/i)
+    expect(note?.textContent ?? '').toMatch(/web address/i)
+    expect(document.querySelector('.privacy-ui-tiers')?.getAttribute('aria-describedby')).toBe(
+      'privacy-ui-pageoptout',
+    )
+    // The dialog's description drops "takes effect immediately", which
+    // is untrue here, and the note is referenced once, from the group,
+    // so a screen reader entering both on open does not read it twice.
+    const desc = document.getElementById('privacy-ui-desc')?.textContent ?? ''
+    expect(desc).not.toMatch(/immediately/i)
+    expect(document.getElementById('privacy-ui-panel')?.getAttribute('aria-describedby')).toBe(
+      'privacy-ui-desc',
+    )
+    // The radios still show the stored tier, which later pages use.
+    const checked = document.querySelector<HTMLInputElement>('input[name="privacy-ui-tier"]:checked')
+    expect(checked?.value).toBe('essential')
+  })
+
+  it('names Global Privacy Control when that is the reason', () => {
+    optOutForPage('gpc')
+    openPrivacyUI()
+    const note = document.getElementById('privacy-ui-pageoptout')
+    expect(note?.hidden).toBe(false)
+    expect(note?.textContent ?? '').toMatch(/global privacy control/i)
+    expect(note?.textContent ?? '').not.toMatch(/web address/i)
+    expect(document.getElementById('privacy-ui-desc')?.textContent ?? '').not.toMatch(/immediately/i)
+    expect(document.getElementById('privacy-ui-panel')?.getAttribute('aria-describedby')).toBe(
+      'privacy-ui-desc',
+    )
+    expect(document.querySelector('.privacy-ui-tiers')?.getAttribute('aria-describedby')).toBe(
+      'privacy-ui-pageoptout',
+    )
+  })
+
+  it('announces a choice under GPC as saved, naming the signal', () => {
+    setTier('essential')
+    optOutForPage('gpc')
+    openPrivacyUI()
+    const research = document.querySelector<HTMLInputElement>(
+      'input[name="privacy-ui-tier"][value="research"]',
+    )!
+    research.checked = true
+    research.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(loadConfig().tier).toBe('research')
+    const status = document.getElementById('privacy-ui-status')?.textContent ?? ''
+    expect(status).toMatch(/^saved/i)
+    expect(status).toMatch(/global privacy control/i)
+    // The choice's settings_changed event is dropped like any other.
+    expect(size()).toBe(0)
+  })
+
+  it('announces a choice on an opted-out page as saved, not as in effect', () => {
+    setTier('essential')
+    optOutForPage('address')
+    openPrivacyUI()
+    const research = document.querySelector<HTMLInputElement>(
+      'input[name="privacy-ui-tier"][value="research"]',
+    )!
+    research.checked = true
+    research.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(loadConfig().tier).toBe('research')
+    const status = document.getElementById('privacy-ui-status')?.textContent ?? ''
+    expect(status).toMatch(/^saved/i)
+    expect(status).toMatch(/still sends no telemetry/i)
+    expect(status).toMatch(/web address/i)
+  })
+
+  it('restores the ordinary description and drops every reference once the reason is gone', () => {
+    optOutForPage('gpc')
+    openPrivacyUI()
+    closePrivacyUI()
+    // The latch only goes one way in production; resetForTests clears
+    // it, which is the one way to reach the shown-to-hidden path.
+    resetForTests()
+    openPrivacyUI()
+    const note = document.getElementById('privacy-ui-pageoptout')
+    expect(note?.hidden).toBe(true)
+    expect(note?.textContent).toBe('')
+    expect(document.querySelector('.privacy-ui-tiers')?.hasAttribute('aria-describedby')).toBe(false)
+    expect(document.getElementById('privacy-ui-panel')?.getAttribute('aria-describedby')).toBe(
+      'privacy-ui-desc',
+    )
+    expect(document.getElementById('privacy-ui-desc')?.textContent ?? '').toMatch(/immediately/i)
+  })
+
+  it('follows the latch across reopenings', () => {
+    openPrivacyUI()
+    closePrivacyUI()
+    optOutForPage('address')
+    openPrivacyUI()
+    expect(document.getElementById('privacy-ui-pageoptout')?.hidden).toBe(false)
   })
 })
