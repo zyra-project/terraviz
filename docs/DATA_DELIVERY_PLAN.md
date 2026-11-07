@@ -19,10 +19,11 @@ research on each consumer; §9's phased implementation and §9.14's usage
 metrics added the same day. On 2026-11-07 the three follow-ups this
 plan spun off were merged and are marked done: the ArcGIS wildcard
 guard, #521 (§4.5); the Second Life corrections, #522 (§2.3); and the
-embed field, #524 (§9.14).)
+embed field, #524 (§9.14). The same day each channel was put behind a
+switch in the portal (§8).)
 
-**Decisions recorded:** twenty-five, all 2026-11-06 by the maintainer,
-logged in §9.2: rasters for analysis carry the producer's own values on
+**Decisions recorded:** twenty-six, all by the maintainer and logged
+in §9.2. Twenty-five were made on 2026-11-06: rasters for analysis carry the producer's own values on
 the producer's own grid, before any regridding (§9.11); use is measured
 per platform and per method (§9.14); five choices about how that
 measuring works (§11 q17–q21); the five D0 blockers (§11 q1, q4, q7,
@@ -32,9 +33,10 @@ complete**; D1 is next. q8 was corrected the same day: SOS datasets
 carry varying Creative Commons licences, not public domain. SOS datasets
 whose original terms cannot be traced go out under the SOS catalog's
 published terms (q22). Four more came from the privacy review of the
-embed field (§9.14). Open: q2, q3, q10's date parsing and q11, tested
-in D1; and q23, now only for datasets whose known licence is
-No-Derivatives.
+embed field (§9.14). On 2026-11-07, each delivery channel was put
+behind its own switch in the portal's Features card, on by default
+(§8). Open: q2, q3, q10's date parsing and q11, tested in D1; and q23,
+now only for datasets whose known licence is No-Derivatives.
 
 **Revisit when any of the following becomes true:**
 
@@ -971,7 +973,7 @@ derived from it:
 
 | Bundle | Contents | For |
 |---|---|---|
-| OpenSpace asset | A `.asset` file whose `UrlSynchronization` fetches, from R2, either a dated frame zip (Folder mode; greyscale plus palette for data-encoded datasets) or an `h264-4096` MP4 (`VideoTileProvider`, mapped to simulation time), plus the legend as a screen-space image | OpenSpace — on the pattern of the 243 SOS assets it already ships |
+| OpenSpace asset | A `.asset` file whose `UrlSynchronization` fetches, through the files route (§6.5), either a dated frame zip (Folder mode; greyscale plus palette for data-encoded datasets) or an `h264-4096` MP4 (`VideoTileProvider`, mapped to simulation time), plus the legend as a screen-space image | OpenSpace — on the pattern of the 243 SOS assets it already ships |
 | SOS directory | `playlist.sos`, `labels.txt`, 2048×1024 frames (4096 on request), the `sos-mpeg4` movie, the legend | Science On a Sphere sites |
 | Frame zip | 2:1 JPEG (pictures) or PNG (data) frames at 2048 and 4096, plus the manifest | Spherical displays, Digistar, WorldWide Telescope, anyone |
 | KMZ | One GroundOverlay per frame, at most 2048×1024, each with a TimeSpan | Google Earth Pro; Google Earth on the web without animation |
@@ -1225,8 +1227,66 @@ deeper than the source would only spend storage.
   Directive 2 asks of every public wire format.
 - **Advertised only when it answers.** `/.well-known/terraviz.json`
   gains an additive field naming the capabilities and file roots,
-  present only when the service is on — the pattern `federation.feed`
+  present only while the service answers, its rollout flag set (§9)
+  and its switch on (next item) — the pattern `federation.feed`
   already follows (`functions/.well-known/terraviz.json.ts`).
+- **Switched per node, in the portal** (decided 2026-11-07). Each
+  channel has its own switch in the node's Features card
+  (`/publish/node-profile`, `src/types/node-features.ts`), because
+  their costs differ: a node can serve video files without paying to
+  store tile pyramids.
+
+  | Switch | Covers | Off |
+  |---|---|---|
+  | `files` | The files route: video variants and bundles (§6) | The files route answers `403 feature_disabled`; manifests, STAC items, OpenSpace assets, KMZs and SOS directories drop their file links; the publish dispatch builds no new variants or bundles |
+  | `tiles` | WMTS, WMS with time, TileJSON, GDAL XML, colour maps (§5) | Every tile-service route answers `403 feature_disabled`, as an OGC exception report on the WMTS and WMS routes; STAC items drop their web-map links; no new pyramids are cut |
+  | `rasters` | Analysis COGs (§4.2, §9.11) | The raster route answers `403 feature_disabled`; STAC items drop the COG assets; the runner writes no new COGs |
+
+  They work as every other switch in that card does
+  (`docs/FEATURE_TOGGLES_PLAN.md`):
+
+  - **On by default, failing open.** A node that never saved them, or
+    whose settings cannot be read, has every channel its release
+    ships. So a node that upgrades starts building a channel on the
+    next publish of each eligible dataset — for tiles, every dataset
+    with frames (§5.8) — and backfills nothing until someone asks for
+    it (the delivery dispatch, §9.4). Cost grows with publishing, not
+    all at once on the day of the upgrade. `SELF_HOSTING.md`'s upgrade
+    notes say so.
+  - **Checked in the Function, before any cache**, with the Orbit
+    gate's last-known-good memo (`functions/api/_lib/orbit-gate.ts`).
+    A cached tile or capabilities document is never served while its
+    channel is off, and a storage blip does not turn a channel back on
+    in an isolate that has read the switch. Refusals are `no-store`. A
+    client that already holds a tile or a file keeps it until its own
+    cache lifetime ends.
+  - **Off withdraws the bytes, not only the address.** That holds only
+    if nothing can be fetched past the Function. So files and rasters
+    follow the tiles rule (§5.6, q12): a redirect goes to a link that
+    expires within minutes, or the Function serves the bytes itself
+    (§6.5), and no delivery object sits under the bucket's public
+    domain.
+  - **Off stops building and deletes nothing.** Stored outputs stay,
+    so turning a channel back on serves them again at once. Anything
+    missing is built on each dataset's next publish or by a requested
+    backfill. Deleting them is a separate, deliberate action, never a
+    side effect of the switch.
+  - **Not a licence control.** A dataset withdrawn at its owner's
+    request, or found not to be redistributable, is withdrawn on its
+    own (retraction, or delivery turned off for that dataset in its
+    record), which fails closed. The node switches fail open by
+    design, the toggles plan's accepted risk, so they are the wrong
+    tool for a withdrawal that has to hold through an outage.
+  - **What they don't cover.** The STAC API itself (`STAC_ENABLED`),
+    the frames and manifest routes the app already reads, the embed
+    and the output page (the Embedding card governs framing), and the
+    operator scripts (§9.12), which run elsewhere and reach the node
+    only through the routes these switches gate.
+  - **Each switch lands with its channel's first phase**: `files` in
+    D2a, `tiles` in D3a, `rasters` in D5a. That is while the rollout
+    flag still keeps the channel dark, so the switch is in the Features
+    card before any release serves the channel, and an operator who
+    does not want it can turn it off ahead of time.
 - **Vendor-neutral by construction.** Every node-side channel is an
   open standard or a plain file, which keeps
   `architecture/federation-scoping.md` Goal 2 ("no required vendors")
@@ -1254,13 +1314,20 @@ The phases below take the plan from desk research to something each
 group in §4 can use. They follow five rules, each borrowed from work
 this repository has already done.
 
-- **Every phase merges dark.** Each surface sits behind its own
-  environment flag and answers 404 until an operator sets it, the way
-  `STAC_ENABLED` does (`functions/api/v1/_lib/stac-http.ts:45`).
-  Merging a phase changes nothing on any node; turning it on is a
-  per-node decision, and turning it off withdraws it without a
-  deploy. The flags proposed here are `FILES_ENABLED`,
-  `TILES_ENABLED` and `WMS_ENABLED`.
+- **Every phase merges dark, and every channel ends behind a switch in
+  the portal.** Two layers, with different owners:
+  - **A rollout flag**, an environment variable, for the maintainer
+    while a channel is being built: `FILES_ENABLED`, `TILES_ENABLED`
+    and `WMS_ENABLED`. Unset, the channel's routes answer 404 and
+    nothing is built, the way `STAC_ENABLED` does
+    (`functions/api/v1/_lib/stac-http.ts:45`), so merging a phase
+    changes nothing on any node. It is set on preview deploys to reach
+    a phase's gate, and removed from the code in the release that
+    ships the channel, once its last phase has passed its gate.
+  - **A switch in the node's Features card**, for the operator, from
+    then on: `files`, `tiles` and `rasters`, on by default (§8,
+    decided 2026-11-07). Turning one off withdraws the channel within
+    minutes, with no deploy.
 - **Rules with wrong answers land first, as pure modules with tests.**
   Grid arithmetic, URL parsing, time snapping and the reduction
   methods are each a pure function before any route or runner step
@@ -1284,14 +1351,14 @@ this repository has already done.
 |---|---|---|---|---|---|
 | **D0** Decide | Answers to §11's blocking questions | This review | — | Decisions recorded in this document | — |
 | **D1** Prove by hand | Measurements; the "?" cells in §3 answered | D0 | none — no code in the tree | `docs/delivery/D1_PROTOTYPES.md` merged | S |
-| **D2a** Video files | The §6.1 variants, manifests, the files route | D1 | `FILES_ENABLED` | A variant plays time-synced in OpenSpace | M |
-| **D2b** Bundles | OpenSpace asset, SOS directory, frame zip, KMZ | D2a | `FILES_ENABLED` | Each loads unmodified in its tool | M |
+| **D2a** Video files | The §6.1 variants, manifests, the files route | D1 | `FILES_ENABLED`; switch `files` | A variant plays time-synced in OpenSpace | M |
+| **D2b** Bundles | OpenSpace asset, SOS directory, frame zip, KMZ | D2a | `FILES_ENABLED`; switch `files` | Each loads unmodified in its tool | M |
 | **D2c** Publisher controls | Portal section for delivery settings and build status | D2a | — | A publisher turns a bundle on and sees it build | S |
-| **D3a** Pyramids | Tile cutting in the runner, with the §7 methods | D1 | `TILES_ENABLED` | Parity and reduction tests pass on D1's datasets | M |
-| **D3b** WMTS | Tile route, capabilities, TileJSON, GDAL XML, colour maps | D3a | `TILES_ENABLED` | OGC validator passes; four clients load it | M |
+| **D3a** Pyramids | Tile cutting in the runner, with the §7 methods | D1 | `TILES_ENABLED`; switch `tiles` | Parity and reduction tests pass on D1's datasets | M |
+| **D3b** WMTS | Tile route, capabilities, TileJSON, GDAL XML, colour maps | D3a | `TILES_ENABLED`; switch `tiles` | OGC validator passes; four clients load it | M |
 | **D3c** Discovery and contract | STAC links, `.well-known` field, `docs/protocol` entry | D3b | as D3b | Federation review: additive-safe | S |
-| **D4** WMS with time | `GetMap` served from the pyramids | D3b, CPU gate | `WMS_ENABLED` | CPU within budget; ArcGIS time slider animates | M |
-| **D5a** Analysis rasters | A COG per time step from the Zyra runner, as STAC assets | D1 | as STAC | QGIS opens one from STAC; values match the source | M |
+| **D4** WMS with time | `GetMap` served from the pyramids | D3b, CPU gate | `WMS_ENABLED`; switch `tiles` | CPU within budget; ArcGIS time slider animates | M |
+| **D5a** Analysis rasters | A COG per time step from the Zyra runner, as STAC assets | D1 | as STAC; switch `rasters` | QGIS opens one from STAC; values match the source | M |
 | **D5b** Operator scripts | ArcGIS Image adapter; Hub registration | D4, D5a | — (scripts) | A test organisation shows both | S |
 | **D6** Legacy video catalog | Frame extraction, licence record, opt-in | D2a, D3a | per dataset | A licence decision recorded for each dataset made public | L |
 
@@ -1348,6 +1415,7 @@ and a Second Life sphere. The maintainer can line up all four.
 | 2026-11-06 | The maintainer | A framed session's length is kept and disclosed, not bucketed or dropped | §9.14, `PRIVACY_ANALYSIS.md` §9l |
 | 2026-11-06 | The maintainer | Embed host controls come next, as their own change: a main-app `telemetry=0`, Global Privacy Control where no notice is shown, and a note for embedders | §9.14 |
 | 2026-11-06 | The maintainer | SOS datasets with no traceable licence are delivered under the SOS catalog's published terms (non-commercial educational use, attribution, no implied endorsement); a known licence wins; owners can have a dataset withdrawn | §6.5, q22, q24 |
+| 2026-11-07 | The maintainer | Each delivery channel sits behind its own switch in the portal's Features card — `files`, `tiles` (WMTS and WMS), `rasters` — on by default and failing open like every other feature; the environment flags only keep a channel dark until it ships | §8, §9 |
 
 ### 9.3 D1 — Prove it by hand
 
@@ -1366,7 +1434,7 @@ outputs to other organisations (§6.5).
 | What does a `GetMap` cost? | Stitch-and-scale in the Worker; read Cloudflare's CPU time, not elapsed time | D4's go / no-go |
 | What does a time step cost OpenSpace? | `h264-4096` at keyframe intervals of 1 s and 6 s (today's encode, `cli/lib/ffmpeg-hls.ts:352-357`), time-mapped, on the collaborators' dome | §6.1's keyframe rule |
 | Does OpenSpace's Folder mode read the dates right? | Dated frame names across a month boundary | §6.3, §11 q10 |
-| Do redirects survive? | Point OpenSpace's `UrlSynchronization` and Second Life's video plugin at a 302 | §6.5 |
+| Do redirects survive? | Point OpenSpace's `UrlSynchronization` and Second Life's video plugin at a 302 to a link that expires in minutes, as §8's switches need | §6.5, §8 |
 | Does an SOS site accept the directory? | Hand one to an SOS site or the SOS team | §6.4, §11 q9 |
 | Does a plain MP4 play on a Second Life sphere? | `h264-1024` through the video plugin, in Firestorm and Linden Lab's viewer | §2.3, §4 |
 | What does a pyramid cost? | Bytes, object count and cut time per frame on a GitHub runner | §5.8, D3a sizing |
@@ -1412,7 +1480,11 @@ contradict.
 - **The files route**, `functions/api/v1/datasets/[id]/files/[name].ts`:
   a redirect to the current object; for a legacy Vimeo-hosted video, a
   freshly signed link through the proxy `manifest.ts` already uses;
-  404 unless `FILES_ENABLED`.
+  404 unless `FILES_ENABLED`, and `403 feature_disabled` while the
+  `files` switch is off.
+- **The `files` switch** (§8): its key in `src/types/node-features.ts`,
+  its row in the Features card, its check in the files route and in
+  the publish dispatch, and its tests, in the same change as the route.
 - **Counting** (§9.14): the three-layer platform classifier and the
   Analytics Engine writer as a pure module, the delivery dataset's
   binding in `wrangler.toml`, the files route's counts, the nightly
@@ -1440,7 +1512,8 @@ first, with the PR saying whether a person outside the loop has
 reviewed it. The counting adds the `analytics-reviewer`, run before
 any other, and the Privacy Engineer (§9.14).
 
-**Rollback.** Unset `FILES_ENABLED`. The table is additive and the R2
+**Rollback.** Turn `files` off in the Features card, or before the
+channel ships, unset `FILES_ENABLED`. The table is additive and the R2
 objects inert.
 
 ### 9.5 D2b — Bundles
@@ -1470,7 +1543,10 @@ the `sos-mpeg4` packaging.
 (`src/ui/publisher/components/dataset-form.ts`): the reduction method,
 defaulted by the dataset's kind and explained in one sentence each
 from §7.1's table; which outputs to build; the last build's status
-with links. Beside it, for admins, a list of registered partner tags
+with links. A channel the node has switched off (§8) shows its
+options disabled, with one line saying so and linking to the Features
+card, rather than letting a publisher turn on a build that will not
+run. Beside it, for admins, a list of registered partner tags
 (§9.14), managed the way the Embedding card manages allowed sites.
 Until D2c lands, D2a and D2b are turned on per dataset through the
 publish API and the CLI, and partner tags are registered through the
@@ -1511,6 +1587,9 @@ need more than the usual `t()` keys.
   (`.github/workflows/transcode-hls.yml:146`).
 - **A per-dataset index** in R2 from frame time to frame digest, which
   the serving route reads to snap a time.
+- **The `tiles` switch** (§8): its key, its row in the Features card,
+  and its check in the publish dispatch, so it is in place before any
+  route serves a tile. D3b and D4 add the check to each route.
 
 **Tests.** The cutter is tested against the probe the hover readout
 uses: for random points, a native-level tile pixel equals the source
@@ -1565,9 +1644,10 @@ Reviewer.
 **Builds.** STAC items gain web-map-links to their WMTS layers
 (`functions/api/v1/_lib/stac-builders.ts`); `/.well-known/terraviz.json`
 gains an additive field naming the tile root, present only when
-`TILES_ENABLED` is set; `docs/protocol/` gains the delivery contract
-and a changelog entry; `docs/SELF_HOSTING.md` says how an operator
-turns each flag on; `docs/BACKEND_MODULES.md` gains its rows; STAC
+`TILES_ENABLED` is set and the `tiles` switch is on; `docs/protocol/` gains the delivery contract
+and a changelog entry; `docs/SELF_HOSTING.md` says that each
+delivery switch is on by default, what it costs, and how to turn it
+off; `docs/BACKEND_MODULES.md` gains its rows; STAC
 reads are counted (§9.14).
 
 **Gate.** The TerraViz Federation Reviewer classes the `.well-known`
@@ -1611,7 +1691,10 @@ preview deploy, and QGIS's Temporal Controller does the same.
 **Builds.** A Cloud-Optimised GeoTIFF per time step, made by the Zyra
 runner from the field before it is rendered, floating point, stored in
 R2 by digest and listed as a STAC asset with the projection and raster
-extension fields.
+extension fields. It is served through a Function, as the files are
+(§8), and the `rasters` switch lands with it: its key, its row in the
+Features card, and its check in that route, the STAC builder and the
+runner's COG step.
 
 **What is already on the runner's disk** (checked against
 `.github/workflows/zyra-run.yml` and Zyra v0.1.52, the release its
