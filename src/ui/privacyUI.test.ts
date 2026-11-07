@@ -315,6 +315,22 @@ describe('privacyUI — page opt-out note', () => {
     optOutForPage('gpc')
     openPrivacyUI()
     expect(document.getElementById('privacy-ui-pageoptout')?.hidden).toBe(true)
+    expect(document.querySelector('.privacy-ui-tiers')?.hasAttribute('aria-describedby')).toBe(false)
+  })
+
+  it('announces a choice on an opted-out page as saved, not as in effect', () => {
+    setTier('essential')
+    optOutForPage('address')
+    openPrivacyUI()
+    const research = document.querySelector<HTMLInputElement>(
+      'input[name="privacy-ui-tier"][value="research"]',
+    )!
+    research.checked = true
+    research.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(loadConfig().tier).toBe('research')
+    const status = document.getElementById('privacy-ui-status')?.textContent ?? ''
+    expect(status).toMatch(/saved for later visits/i)
+    expect(status).toMatch(/no telemetry is sent during this visit/i)
   })
 
   it('follows the latch across reopenings', () => {

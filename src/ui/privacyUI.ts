@@ -284,10 +284,18 @@ function handleTierChange(tier: TelemetryTier): void {
     key: 'telemetry_tier',
     value_class: tier,
   })
+  // On a page whose address turned telemetry off, "Telemetry set to
+  // Research" would be untrue for this visit, and the status region is
+  // the one thing every screen reader announces, VoiceOver and TalkBack
+  // included, which may not have read the note on entering the group.
+  // So say what happened: the choice is saved, and this visit still
+  // sends nothing.
   announce(
     tier === 'off'
       ? t('privacy.announce.off')
-      : t('privacy.announce.set', { tier: tierLabel(tier) }),
+      : getPageOptOut() === 'address'
+        ? t('privacy.announce.setSaved', { tier: tierLabel(tier) })
+        : t('privacy.announce.set', { tier: tierLabel(tier) }),
   )
 }
 

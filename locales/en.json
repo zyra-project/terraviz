@@ -731,6 +731,7 @@
   "playlist.unknownDataset": "Unknown dataset",
   "privacy.announce.off": "Telemetry off. Pending events discarded.",
   "privacy.announce.set": "Telemetry set to {tier}.",
+  "privacy.announce.setSaved": "Saved for later visits: {tier}. No telemetry is sent during this visit.",
   "privacy.clearVisits.announce": "Visit history cleared.",
   "privacy.clearVisits.confirm": "Clear your local visit history? This removes the “Continue exploring” row and the recently-viewed history on this device. It can't be undone.",
   "privacy.clearVisits.label": "Clear visit history",
