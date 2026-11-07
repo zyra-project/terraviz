@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { pageOptOutFromBrowser, readPageOptOut } from './pageOptOut'
 
-const plain = { embed: false, gpc: false }
+const plain = { gpc: false }
 
 describe('readPageOptOut — telemetry= in the address', () => {
   it('leaves reporting alone when the key is absent', () => {
@@ -56,26 +56,28 @@ describe('readPageOptOut — telemetry= in the address', () => {
   })
 
   it('applies outside the embed view too', () => {
-    expect(readPageOptOut({ search: '?telemetry=0', embed: false, gpc: false })).toBe('address')
-    expect(readPageOptOut({ search: '?embed=1&telemetry=0', embed: true, gpc: false })).toBe('address')
+    expect(readPageOptOut({ search: '?telemetry=0', gpc: false })).toBe('address')
+    expect(readPageOptOut({ search: '?embed=1&telemetry=0', gpc: false })).toBe('address')
   })
 })
 
 describe('readPageOptOut — Global Privacy Control', () => {
-  it('turns reporting off in the embed view, which shows no notice', () => {
-    expect(readPageOptOut({ search: '?embed=1', embed: true, gpc: true })).toBe('gpc')
+  it('turns reporting off on every page, so embed=1 stays presentational', () => {
+    expect(readPageOptOut({ search: '?embed=1', gpc: true })).toBe('gpc')
+    expect(readPageOptOut({ search: '', gpc: true })).toBe('gpc')
+    expect(readPageOptOut({ search: '?dataset=x&catalog=true', gpc: true })).toBe('gpc')
   })
 
-  it('leaves the notice and the Privacy panel in charge outside the embed view', () => {
-    expect(readPageOptOut({ search: '', embed: false, gpc: true })).toBeNull()
+  it('is not raised by telemetry=1', () => {
+    expect(readPageOptOut({ search: '?telemetry=1', gpc: true })).toBe('gpc')
   })
 
   it('needs the signal: an embed alone reports as before', () => {
-    expect(readPageOptOut({ search: '?embed=1', embed: true, gpc: false })).toBeNull()
+    expect(readPageOptOut({ search: '?embed=1', gpc: false })).toBeNull()
   })
 
   it('names the address when both apply', () => {
-    expect(readPageOptOut({ search: '?embed=1&telemetry=0', embed: true, gpc: true })).toBe('address')
+    expect(readPageOptOut({ search: '?embed=1&telemetry=0', gpc: true })).toBe('address')
   })
 })
 
@@ -108,16 +110,21 @@ describe('pageOptOutFromBrowser', () => {
     expect(pageOptOutFromBrowser()).toBeNull()
   })
 
-  it('reads the embed flag the way embed mode does', () => {
+  it('reads the browser’s GPC signal on any address', () => {
     restoreGpc = setGpc(true)
     window.history.replaceState(null, '', '/?embed=1')
     expect(pageOptOutFromBrowser()).toBe('gpc')
     window.history.replaceState(null, '', '/?embed=0')
-    expect(pageOptOutFromBrowser()).toBeNull()
+    expect(pageOptOutFromBrowser()).toBe('gpc')
+    window.history.replaceState(null, '', '/')
+    expect(pageOptOutFromBrowser()).toBe('gpc')
   })
 
   it('takes only a true GPC signal', () => {
-    window.history.replaceState(null, '', '/?embed=1')
+    window.history.replaceState(null, '', '/')
+    restoreGpc = setGpc(false)
+    expect(pageOptOutFromBrowser()).toBeNull()
+    restoreGpc()
     restoreGpc = setGpc('true')
     expect(pageOptOutFromBrowser()).toBeNull()
     restoreGpc()
@@ -146,7 +153,16 @@ describe('main.ts wiring', () => {
     expect(latch).toBeLessThan(domReady)
   })
 
-  it('keeps the first-run notice off a page whose address opted out', () => {
+  it('keeps the first-run notice off a page that reports nothing', () => {
     expect(main).toContain('if (!embedModeActive && !getPageOptOut()) showDisclosureBannerIfNeeded()')
+  })
+
+  // The builders are tested in datasetUrl.test.ts; this pins that the
+  // app hands them the fragment, so #telemetry=0 outlives a rewrite.
+  it('hands the part after # to both dataset address writers', () => {
+    expect(main).toContain('buildDatasetPath(dataService.getDatasetById(id) ?? { id }, search, hash)')
+    expect(main).toContain(
+      'buildNoDatasetPath(window.location.pathname, window.location.search, window.location.hash)',
+    )
   })
 })

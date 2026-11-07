@@ -29,6 +29,7 @@ import {
   getSessionId,
   loadConfig,
   setTier,
+  type PageOptOut,
 } from '../analytics'
 import type { TelemetryTier } from '../types'
 import { t, tAttr, tHtml, type MessageKey } from '../i18n'
@@ -88,7 +89,7 @@ function buildPanel(): HTMLElement {
         >&#x2715;</button>
       </header>
       <p id="privacy-ui-desc" class="privacy-ui-desc">${tHtml('privacy.desc')}</p>
-      <p id="privacy-ui-pageoptout" class="privacy-ui-pageoptout" hidden>${tHtml('privacy.pageOptOut.address')}</p>
+      <p id="privacy-ui-pageoptout" class="privacy-ui-pageoptout" hidden></p>
       <fieldset class="privacy-ui-tiers" role="radiogroup" aria-label="${tAttr('privacy.radiogroup.aria')}">
         <legend class="sr-only">${tHtml('privacy.radiogroup.aria')}</legend>
         ${renderTierOption('essential')}
@@ -144,26 +145,50 @@ function syncRadios(): void {
   })
 }
 
+/** The note for each reason this page sends nothing. */
+const PAGE_OPT_OUT_NOTE = {
+  address: 'privacy.pageOptOut.address',
+  gpc: 'privacy.pageOptOut.gpc',
+} as const satisfies Record<PageOptOut, MessageKey>
+
+/** What a choice made on such a page is announced as. */
+const PAGE_OPT_OUT_ANNOUNCE = {
+  address: 'privacy.announce.setSaved',
+  gpc: 'privacy.announce.setSavedGpc',
+} as const satisfies Record<PageOptOut, MessageKey>
+
 /**
- * Show, or hide, the note that this visit sends no telemetry because
- * its address turned it off (`pageOptOut.ts`). Without it the panel
- * would show the stored tier, Essential by default, over a page that
- * reports nothing. The radios still show and set the stored tier, which
- * is what the next visit without the key will use, and the note says
- * so. While shown it describes the radio group, so a screen reader
- * reads it on entering the choice. Only the address case is shown: the
- * other reason, Global Privacy Control, applies only in the embed view,
- * which has no Tools menu to open this panel from.
+ * Show, or hide, the note that this page sends no telemetry because its
+ * address turned it off or the browser sent Global Privacy Control
+ * (`pageOptOut.ts`). Without it the panel would show the stored tier,
+ * Essential by default, over a page that reports nothing. The radios
+ * still show and set the stored tier, which a later visit without that
+ * reason uses, and the note says so.
+ *
+ * While shown, the note describes the dialog as well as the radio
+ * group: the dialog's own description says a change "takes effect
+ * immediately", which is untrue here, and a screen reader reads a
+ * dialog's description on opening it but the group's only on entering
+ * the choice. Hidden, it is referenced by neither, because a hidden
+ * element that is referenced directly is still read.
  */
 function syncPageOptOut(): void {
   const note = document.getElementById('privacy-ui-pageoptout')
   const group = document.querySelector<HTMLElement>('.privacy-ui-tiers')
-  const shown = getPageOptOut() === 'address'
-  if (note) note.hidden = !shown
+  const dialog = document.getElementById('privacy-ui-panel')
+  const reason = getPageOptOut()
+  if (note) {
+    note.hidden = reason === null
+    note.textContent = reason === null ? '' : t(PAGE_OPT_OUT_NOTE[reason])
+  }
   if (group) {
-    if (shown) group.setAttribute('aria-describedby', 'privacy-ui-pageoptout')
+    if (reason !== null) group.setAttribute('aria-describedby', 'privacy-ui-pageoptout')
     else group.removeAttribute('aria-describedby')
   }
+  dialog?.setAttribute(
+    'aria-describedby',
+    reason === null ? 'privacy-ui-desc' : 'privacy-ui-desc privacy-ui-pageoptout',
+  )
 }
 
 /** Refresh the session-ID display. Called on every open because the
@@ -284,17 +309,17 @@ function handleTierChange(tier: TelemetryTier): void {
     key: 'telemetry_tier',
     value_class: tier,
   })
-  // On a page whose address turned telemetry off, "Telemetry set to
-  // Research" would be untrue for this visit, and the status region is
-  // the one thing every screen reader announces, VoiceOver and TalkBack
-  // included, which may not have read the note on entering the group.
-  // So say what happened: the choice is saved, and this visit still
-  // sends nothing.
+  // On a page that sends nothing, "Telemetry set to Research" would be
+  // untrue, and the status region is the one thing every screen reader
+  // announces, VoiceOver and TalkBack included, which may not have read
+  // the note on entering the group. So say what happened: the choice is
+  // saved, and this page still sends nothing.
+  const reason = getPageOptOut()
   announce(
     tier === 'off'
       ? t('privacy.announce.off')
-      : getPageOptOut() === 'address'
-        ? t('privacy.announce.setSaved', { tier: tierLabel(tier) })
+      : reason !== null
+        ? t(PAGE_OPT_OUT_ANNOUNCE[reason], { tier: tierLabel(tier) })
         : t('privacy.announce.set', { tier: tierLabel(tier) }),
   )
 }

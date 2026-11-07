@@ -294,6 +294,9 @@ describe('privacyUI — page opt-out note', () => {
     const note = document.getElementById('privacy-ui-pageoptout')
     expect(note?.hidden).toBe(true)
     expect(document.querySelector('.privacy-ui-tiers')?.hasAttribute('aria-describedby')).toBe(false)
+    expect(document.getElementById('privacy-ui-panel')?.getAttribute('aria-describedby')).toBe(
+      'privacy-ui-desc',
+    )
   })
 
   it('shows when the address turned telemetry off, and describes the radio group', () => {
@@ -306,16 +309,41 @@ describe('privacyUI — page opt-out note', () => {
     expect(document.querySelector('.privacy-ui-tiers')?.getAttribute('aria-describedby')).toBe(
       'privacy-ui-pageoptout',
     )
+    // The dialog's own description says a change takes effect at once,
+    // so the note joins it rather than waiting for the group.
+    expect(document.getElementById('privacy-ui-panel')?.getAttribute('aria-describedby')).toBe(
+      'privacy-ui-desc privacy-ui-pageoptout',
+    )
     // The radios still show the stored tier, which later visits use.
     const checked = document.querySelector<HTMLInputElement>('input[name="privacy-ui-tier"]:checked')
     expect(checked?.value).toBe('essential')
   })
 
-  it('stays hidden for the GPC reason, which has no panel to show in', () => {
+  it('names Global Privacy Control when that is the reason', () => {
     optOutForPage('gpc')
     openPrivacyUI()
-    expect(document.getElementById('privacy-ui-pageoptout')?.hidden).toBe(true)
-    expect(document.querySelector('.privacy-ui-tiers')?.hasAttribute('aria-describedby')).toBe(false)
+    const note = document.getElementById('privacy-ui-pageoptout')
+    expect(note?.hidden).toBe(false)
+    expect(note?.textContent ?? '').toMatch(/global privacy control/i)
+    expect(note?.textContent ?? '').not.toMatch(/web address/i)
+    expect(document.querySelector('.privacy-ui-tiers')?.getAttribute('aria-describedby')).toBe(
+      'privacy-ui-pageoptout',
+    )
+  })
+
+  it('announces a choice under GPC as saved, naming the signal', () => {
+    setTier('essential')
+    optOutForPage('gpc')
+    openPrivacyUI()
+    const research = document.querySelector<HTMLInputElement>(
+      'input[name="privacy-ui-tier"][value="research"]',
+    )!
+    research.checked = true
+    research.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(loadConfig().tier).toBe('research')
+    const status = document.getElementById('privacy-ui-status')?.textContent ?? ''
+    expect(status).toMatch(/^saved/i)
+    expect(status).toMatch(/global privacy control/i)
   })
 
   it('announces a choice on an opted-out page as saved, not as in effect', () => {

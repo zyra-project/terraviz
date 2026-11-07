@@ -123,15 +123,27 @@ export function datasetUrlRef(dataset: DatasetUrlRef): string {
  * carries it, and `preview` is dropped because a draft-preview token
  * is scoped to one specific draft — pointing it at a different
  * dataset would be meaningless. Everything else (`catalog`, `embed`,
- * `layout`, …) survives, so switching datasets never silently drops
- * the mode the visitor arrived in.
+ * `layout`, `telemetry`, …) survives, so switching datasets never
+ * silently drops the mode the visitor arrived in.
+ *
+ * `hash` is the part after `#`, kept as it was, because the embed
+ * grammar lets a host put settings there and `#telemetry=0` must not
+ * be lost when the page rewrites its own address
+ * (`src/analytics/pageOptOut.ts`).
  */
-export function buildDatasetPath(dataset: DatasetUrlRef, search = ''): string {
+export function buildDatasetPath(dataset: DatasetUrlRef, search = '', hash = ''): string {
   const params = new URLSearchParams(search)
   params.delete('dataset')
   params.delete('preview')
   const query = params.toString()
-  return `${DATASET_PATH_PREFIX}${encodeURIComponent(datasetUrlRef(dataset))}${query ? `?${query}` : ''}`
+  return `${DATASET_PATH_PREFIX}${encodeURIComponent(datasetUrlRef(dataset))}${query ? `?${query}` : ''}${fragment(hash)}`
+}
+
+/** `location.hash` as it goes back on an address: `''` for none or a
+ *  bare `#`, which a browser reports as `''` anyway. */
+function fragment(hash: string): string {
+  const body = hash.replace(/^#/, '')
+  return body ? `#${body}` : ''
 }
 
 /**
@@ -159,13 +171,14 @@ export function previewDatasetRef(search: string): string | null {
  * viewport promotion that lands on an empty panel. Strips the
  * `/dataset/<ref>` path segment and the `dataset` / `preview` query
  * params, keeping the rest of the query so unloading doesn't drop the
- * visitor's `?catalog=true` or `?embed=1` mode along with the data.
+ * visitor's `?catalog=true` or `?embed=1` mode along with the data,
+ * and the part after `#` for `buildDatasetPath`'s reason.
  */
-export function buildNoDatasetPath(pathname: string, search = ''): string {
+export function buildNoDatasetPath(pathname: string, search = '', hash = ''): string {
   const path = parseDatasetPathname(pathname) ? '/' : pathname
   const params = new URLSearchParams(search)
   params.delete('dataset')
   params.delete('preview')
   const query = params.toString()
-  return `${path}${query ? `?${query}` : ''}`
+  return `${path}${query ? `?${query}` : ''}${fragment(hash)}`
 }

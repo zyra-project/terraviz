@@ -160,11 +160,12 @@ import { maybeInitShaderTuner } from './ui/shaderTunerUI'
 initUiScale()
 
 // Whether this page load reports nothing: `telemetry=` in the address
-// (the switch an embed code can carry), or Global Privacy Control in
-// the embed view, which shows no notice (src/analytics/pageOptOut.ts).
-// Latched at module evaluation, like the UI scale above, because
-// nothing has emitted yet and no URL writer has had the chance to drop
-// the key; the emitter holds it for the rest of the page's life.
+// (the switch an embed code can carry), or the browser's Global Privacy
+// Control signal (src/analytics/pageOptOut.ts). Latched at module
+// evaluation, like the UI scale above, because nothing has emitted yet;
+// the emitter holds it for the rest of the page's life. The address
+// writers below keep `telemetry=` in both parts of the address anyway,
+// so the key a host set is still there after a reload.
 {
   const pageOptOut = pageOptOutFromBrowser()
   if (pageOptOut) optOutForPage(pageOptOut)
@@ -672,11 +673,11 @@ class InteractiveSphere {
       // third-party iframe is both wrong and intrusive (§J of
       // `docs/WORDPRESS_INTEGRATION_PLAN.md`). The host's means of
       // exercising it is `telemetry=0` in the embed code, and the
-      // visitor's is Global Privacy Control (pageOptOut.ts). Skipped too on a page
-      // whose address turned reporting off: the notice describes what
-      // is collected, and here nothing is, so it would mislead. It
-      // shows on the next visit without the key, since nothing marks it
-      // seen.
+      // visitor's is Global Privacy Control (pageOptOut.ts). Skipped
+      // too on any page that reports nothing for either reason: the
+      // notice describes what is collected, and here nothing is, so it
+      // would mislead. It shows on the next visit without that reason,
+      // since nothing marks it seen.
       if (!embedModeActive && !getPageOptOut()) showDisclosureBannerIfNeeded()
       // Telemetry transport — skipped entirely when the compile-time
       // flag is off (telemetry-free builds) and when console mode
@@ -1044,8 +1045,9 @@ class InteractiveSphere {
       const previewId = dataService.getDatasetById(previewRef)?.id ?? previewRef
       if (previewId === id) return
     }
-    const next = buildDatasetPath(dataService.getDatasetById(id) ?? { id }, search)
-    if (next === `${window.location.pathname}${search}`) return
+    const hash = window.location.hash
+    const next = buildDatasetPath(dataService.getDatasetById(id) ?? { id }, search, hash)
+    if (next === `${window.location.pathname}${search}${hash}`) return
     if (mode === 'push') {
       window.history.pushState({}, '', next)
     } else {
@@ -1054,9 +1056,10 @@ class InteractiveSphere {
   }
 
   /** Reset the address bar to the no-dataset form, keeping whatever
-   *  mode the visitor arrived in (`?catalog=true`, `?embed=1`). */
+   *  mode the visitor arrived in (`?catalog=true`, `?embed=1`) and the
+   *  part after `#`. */
   private clearDatasetUrl(mode: 'push' | 'replace'): void {
-    const next = buildNoDatasetPath(window.location.pathname, window.location.search)
+    const next = buildNoDatasetPath(window.location.pathname, window.location.search, window.location.hash)
     if (mode === 'push') {
       window.history.pushState({}, '', next)
     } else {

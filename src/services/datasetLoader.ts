@@ -540,7 +540,9 @@ function wireRelatedLinks(scope: ParentNode, onLoadDataset: (id: string) => void
       if (id) {
         const params = new URLSearchParams(window.location.search)
         params.set('dataset', id)
-        window.history.pushState({}, '', `?${params.toString()}`)
+        // Keep the part after `#`: a host's `#telemetry=0` must outlive
+        // a click to a related dataset (`src/analytics/pageOptOut.ts`).
+        window.history.pushState({}, '', `?${params.toString()}${window.location.hash}`)
         onLoadDataset(id)
       }
     })

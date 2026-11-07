@@ -11,7 +11,8 @@
  * mode chosen on the node's own site does not reach a frame on another
  * site, because browsers partition its storage
  * (`docs/PRIVACY_ANALYSIS.md` §9l). The maintainer decided on
- * 6 November 2026 to give it two controls, and these are they:
+ * 6 November 2026 to give it two controls, and on 7 November 2026 that
+ * both apply to every page of the app rather than to the embed alone:
  *
  * - **`telemetry=` in the address**, the switch a site embedding the
  *   app can set in its embed code. A single value reads the way the
@@ -20,27 +21,27 @@
  *   value, an empty one included, turns it off, so a misread fails
  *   toward off. Here it can only lower, which is why it is read more
  *   generously than the output page reads it: from the query **and**
- *   the part after `#` (where the grammar tells controllers to put
- *   session settings, so a host writing `#telemetry=0` must not get an
- *   embed that keeps reporting), and when the key appears more than
- *   once, in either, any value that turns it off wins. `telemetry=1`
- *   never raises a stored Off. It applies to any page of the app, not
- *   only an embed, since a kiosk or a demo may want it too.
- * - **Global Privacy Control, where no notice is shown.** In the embed
- *   view the browser's GPC signal is the only preference the app can
- *   hear, so it turns reporting off there. Elsewhere the notice and the
- *   Privacy panel are the visitor's controls, unchanged. The output
- *   page already honours GPC for itself (`src/output/webTelemetry.ts`).
+ *   the part after `#` (where the grammar puts session settings, so a
+ *   host writing `#telemetry=0` must not get an embed that keeps
+ *   reporting), and when the key appears more than once, in either,
+ *   any value that turns it off wins. `telemetry=1` never raises a
+ *   stored Off. The app's own address writers keep both parts, so the
+ *   key survives a dataset change (`src/utils/datasetUrl.ts`).
+ * - **Global Privacy Control**, on every page. In an embed it is the
+ *   only preference the app can hear. Honouring it everywhere rather
+ *   than only there keeps `embed=1` purely presentational, as the embed
+ *   grammar promises (`docs/EMBED_URL_GRAMMAR.md`), and matches the
+ *   output page, which already honours it for itself
+ *   (`src/output/webTelemetry.ts`). The Privacy panel says so when it
+ *   applies, and still saves a choice for a visit without the signal.
  *
  * Pure reader plus a thin browser read. The emitter holds the latched
  * result (`optOutForPage`), and `main.ts` latches it at module
- * evaluation, before anything can emit or a URL writer can drop the key.
+ * evaluation, before anything can emit.
  */
 
-import { getEmbedMode } from '../utils/embedMode'
-
 /** Why this page reports nothing: its address said so, or the browser
- *  sent Global Privacy Control to an embed. */
+ *  sent Global Privacy Control. */
 export type PageOptOut = 'address' | 'gpc'
 
 export interface PageOptOutInput {
@@ -48,9 +49,6 @@ export interface PageOptOutInput {
   search: string
   /** The part after `#`, `location.hash`; `''` when there is none. */
   hash?: string
-  /** Whether the embed view is on (`getEmbedMode()`), the one view
-   *  that shows no notice. */
-  embed: boolean
   /** `navigator.globalPrivacyControl === true`. */
   gpc: boolean
 }
@@ -71,7 +69,7 @@ export function readPageOptOut(input: PageOptOutInput): PageOptOut | null {
     ...new URLSearchParams((input.hash ?? '').replace(/^#/, '')).getAll('telemetry'),
   ]
   if (values.some((value) => !leavesOn(value))) return 'address'
-  if (input.embed && input.gpc) return 'gpc'
+  if (input.gpc) return 'gpc'
   return null
 }
 
@@ -84,7 +82,6 @@ export function pageOptOutFromBrowser(): PageOptOut | null {
   return readPageOptOut({
     search: window.location.search,
     hash: window.location.hash,
-    embed: getEmbedMode(),
     gpc,
   })
 }
