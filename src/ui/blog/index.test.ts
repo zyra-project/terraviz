@@ -325,6 +325,18 @@ describe('bootBlogPage carries the telemetry switch onto its links', () => {
     }
   })
 
+  it('writes nothing when the address has not moved since render', async () => {
+    history.pushState(null, '', '/blog/gulf-warming?telemetry=0')
+    stubFetch(200, POST)
+    await bootBlogPage()
+    const link = document.querySelector('.blog-post-explore-list a') as HTMLAnchorElement
+    const write = vi.spyOn(link, 'setAttribute')
+    link.dispatchEvent(new Event('focus'))
+    link.dispatchEvent(new Event('click'))
+    expect(write).not.toHaveBeenCalled()
+    expect(link.getAttribute('href')).toBe('/dataset/DS_SST?telemetry=0')
+  })
+
   it('still carries what the page loaded with after an anchor replaces the fragment', async () => {
     history.pushState(null, '', '/blog/gulf-warming#telemetry=0')
     stubFetch(200, POST)

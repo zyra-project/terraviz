@@ -142,11 +142,11 @@ export function carryTelemetry(dest: string, now: AddressParts, boot: AddressPar
  * from the keyboard, whose `focus` may have come before the change.
  */
 function appLink(link: HTMLAnchorElement, dest: string): HTMLAnchorElement {
+  // Written only when it changes, so the usual case, an address that
+  // has not moved since render, touches nothing assistive tech watches.
   const refresh = (): void => {
-    link.setAttribute(
-      'href',
-      carryTelemetry(dest, { search: location.search, hash: location.hash }, bootAddress),
-    )
+    const next = carryTelemetry(dest, { search: location.search, hash: location.hash }, bootAddress)
+    if (link.getAttribute('href') !== next) link.setAttribute('href', next)
   }
   refresh()
   for (const type of ['pointerdown', 'focus', 'contextmenu', 'click'] as const) {
