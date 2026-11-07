@@ -90,7 +90,8 @@ dataset = "terraviz_events"
 # endpoint reads the key `telemetry_enabled` on every request; when
 # set to `disabled` / `false` / `off` / `0`, clients receive 410 Gone
 # and cool down for the rest of the session. Absent or any other
-# value = allow.
+# value = allow. A missing binding or a failed read also allows
+# (fails open), so check the switch from outside after flipping it.
 #
 # Like the other bindings in this file, **Pages reads its bindings
 # from the dashboard, not this block** — `Settings → Bindings → KV →
@@ -100,13 +101,21 @@ dataset = "terraviz_events"
 # any future Workers deploy where wrangler.toml is authoritative
 # picks it up automatically.
 #
-# Operations:
+# Operations. `--remote` is required: Wrangler 4's `kv key` commands
+# default to a local copy under `.wrangler/state`, so without it the
+# command succeeds and production keeps ingesting. No redeploy is
+# needed; KV can take up to about a minute to reach every location.
 #   - Activate (clients receive 410):
 #       wrangler kv key put telemetry_enabled disabled \
-#         --namespace-id=9c022b1295314939b76a28769fef6195
+#         --namespace-id=9c022b1295314939b76a28769fef6195 --remote
 #   - Deactivate (back to normal):
 #       wrangler kv key delete telemetry_enabled \
-#         --namespace-id=9c022b1295314939b76a28769fef6195
+#         --namespace-id=9c022b1295314939b76a28769fef6195 --remote
+#   - Check what the edge sees (410 = on, 400 = still ingesting; the
+#     empty body is rejected either way, so nothing is stored):
+#       curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+#         https://<host>/api/ingest -H 'Origin: https://<host>' \
+#         -H 'Content-Type: application/json' --data '{}'
 [[kv_namespaces]]
 binding = "TELEMETRY_KILL_SWITCH"
 id = "9c022b1295314939b76a28769fef6195"
