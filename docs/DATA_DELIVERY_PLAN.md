@@ -1824,10 +1824,24 @@ first phase builds it.
 **What is counted.** Requests to the delivery surfaces, counted on the
 server by the Functions that answer them: the files route, the tile
 and WMS services' capabilities documents, TileJSON and GDAL XML, and
-STAC — but not each tile or map (decided, q17). Not the TerraViz app, which already has its own consent-gated
+STAC — but not each tile or map (decided, q17), and not a `HEAD`
+request. Not the TerraViz app, which already has its own consent-gated
 telemetry, and not the output page, whose reporting is opt-in per
 globe by design (`src/output/webTelemetry.ts`) and must not gain a
-second, ungated path.
+second, ungated path. The counter runs on the server and cannot see a
+visitor's tier, Global Privacy Control or `telemetry=0`, so that
+exclusion has to be a mechanism rather than an intention:
+
+- A request carrying `Sec-Fetch-Site: same-origin` is not counted. A
+  page cannot forge that header, and a non-browser that sends it only
+  removes itself from the counts. It covers the app, its embeds and
+  the output page, which are all served from the node's origin.
+- The desktop app, whose requests come from Rust with no such header,
+  sends a do-not-count header (`TerraViz-No-Count`).
+- A test holds that nothing under `src/` builds a counted address.
+- If the app ever links to a delivery file ("Download for OpenSpace",
+  "Open in QGIS"), that use is measured by the app's own consent-gated
+  event, never by the route.
 
 **Each count carries:**
 
@@ -1840,13 +1854,21 @@ second, ungated path.
 - **The dataset** (its catalog id, as the app's `layer_loaded` already
   reports), the variant or format, and **the country**, from
   Cloudflare's edge as the ingest function stamps it (invariant 1),
-  summarised by month in the rollup (decided, q19).
+  summarised by month in the rollup (decided, q19). That month is a
+  fact about storage, not about display: Analytics Engine keeps each
+  row, with its arrival time, for about three months, and when a month
+  closes its rollup rows are recomputed from Analytics Engine, which
+  still holds the whole month. No daily row carrying a country is kept
+  in D1.
 - **The platform's version, as `major.minor`**, for platforms on the
   curated list only, and only on a layer load or a download — never on
   anything finer. It answers support questions such as whether to rely
   on WMTS time (QGIS 3.28 and later) or video layers (OpenSpace 0.19
   and later). It sits in its own field, so it can be dropped without
-  disturbing the rest (decided, q20).
+  disturbing the rest (decided, q20). Browsers and browser engines,
+  the Chromium engine inside a virtual-world viewer included, are kept
+  off the versioned list, so `PRIVACY.md`'s promise never to collect a
+  browser version stays true.
 
 **How the platform vocabulary grows.** A fixed list undercounts
 exactly the platforms nobody predicted. An open one lets any client
@@ -1872,28 +1894,58 @@ each open in a different way.
    for a tag and uses it. Registering one is a row, not a release. A
    `via` value nobody registered is counted as `unregistered`, so no
    one can mint a category by sending it, and a retired tag is never
-   reused, so old counts keep their meaning.
+   reused, so old counts keep their meaning. The form says what a tag
+   is for: a product or integration used at many sites, not one site,
+   classroom or person, with no personal name or contact detail in its
+   sentence, and its counts held to the rollup's small-count rule
+   (below).
 3. **Discovery: for the platforms nobody told us about.** A request
    with no recognised tag is classified from what every client already
-   sends: the User-Agent's first product token (`QGIS`, `GDAL`, `VLC`,
-   `curl` — RFC 9110's `name/version` form, version dropped) and, for a
-   browser request, the registrable domain of its `Origin` header
-   (`arcgis.com`, `cesium.com`, a museum's site). Names on a curated
-   list are stored as themselves. Anything else is stored as `other`
-   plus a 12-hex hash of the normalised token or domain — invariant 3's
-   treatment of free text — kept only in Analytics Engine's 30–90-day
-   window and never rolled up. Hashing uses the app's own helper
-   (`src/analytics/hash.ts`), so the repository has one rule for it
-   (decided, q21). An "unknown clients" report ranks those hashes by
-   frequency and matches them automatically against a list of likely
-   names — HTTP clients, GIS and visualisation tools, well-known science
-   and museum sites — so anything on that list shows by name and only
-   the truly unknown stay hashes. This works for software and sites as
-   it would not for search terms, because their names are public and
-   easy to list: the dictionary lookup `docs/ANALYTICS_CONTRIBUTING.md`
-   describes, done ahead of time. Once identified, a platform is
-   promoted: onto the curated list (a code change, and append-only
-   under invariant 8) or as a partner tag (a row).
+   sends.
+   - **The User-Agent.** Known product tokens (`QGIS`, `GDAL`, `VLC`,
+     `curl`, RFC 9110's `name/version` form, version dropped) are
+     matched anywhere in the string, not only first, since every
+     browser's User-Agent starts `Mozilla/5.0` and QGIS's own token
+     comes later. Only the curated name is stored. An unknown first
+     token is accepted only if it is an RFC 9110 `token` with no `@`,
+     at most 32 characters, and no run of six or more digits or eight
+     or more hex characters (the `sanitizeMessage` rule); anything else
+     is `other` with no hash, since a script told to put a contact
+     address in its User-Agent, as the NWS API asks callers to, would
+     otherwise have it hashed.
+   - **The `Origin`, for a browser request.** Fixed buckets, never
+     hashed, for what is not a site:
+     - `ip`, for an address literal, whose hash would be reversed in
+       seconds;
+     - `local`, for a single-label host or one under `.local`, `.lan`,
+       `.home.arpa` or `.internal`, by the rule
+       `src/types/node-embedding.ts` already applies;
+     - `extension`, for a browser extension's per-install origin, whose
+       hash would be a stable per-browser id;
+     - `null-origin`, `app-scheme:<scheme>`, and `browser-no-origin`
+       for a browser that sends none.
+
+     A site's registrable domain is cut at the shared hosts in
+     `SHARED_HOST_SUFFIXES` (`src/types/node-embedding.ts`) before the
+     Public Suffix List, so `alice.github.io` counts as `github.io`,
+     not as a username, and `<org>.maps.arcgis.com` as ArcGIS. Only the
+     domain is read, never the page.
+   - **Names on a curated list are stored as themselves.** An unknown
+     User-Agent token is stored as `other` plus a 12-hex hash of the
+     normalised token, invariant 3's treatment of free text, kept only
+     in Analytics Engine's window and never rolled up, using the app's
+     own helper (`src/analytics/hash.ts`; decided, q21). An "unknown
+     clients" report ranks those hashes and matches them against a list
+     of likely names — HTTP clients, GIS and visualisation tools — so
+     anything on that list shows by name and only the truly unknown
+     stay hashes. An unknown `Origin` domain is **open** (q21b, below):
+     the privacy review found that hashing one protects nothing, since
+     registered domains are a public, listable space and every hash is
+     one lookup from its name for anyone holding the rows.
+
+   Once identified, a platform is promoted: onto the curated list (a
+   code change, and append-only under invariant 8) or as a partner tag
+   (a row).
 
 **Carriers: a query parameter first, a header where a client can send
 one.** The `via` parameter is the universal carrier because it survives
@@ -1909,29 +1961,66 @@ product token naming the asset
 ([GDAL WMS](https://gdal.org/en/stable/drivers/raster/wms.html)), a
 second signal that survives if a tool rewrites the address.
 
-**What is never recorded:** an IP address, a raw User-Agent, or any
-identifier that would link one request to another — no session id at
-all. That is stricter than the app's telemetry needs to be, and
-deliberately: the people using these tools never saw TerraViz's
-disclosure banner, so nothing about them is kept beyond a count.
-Generated bundles never report anything themselves; only the requests
-they make are counted.
+**What is never recorded:** an IP address, a raw User-Agent, the
+`Referer` header, the page an `Origin` belongs to, or any identifier —
+no session id at all. That is deliberate: the people using these tools
+never saw TerraViz's disclosure banner, so nothing about them is kept
+beyond a count. It does not make the rows unlinkable. On a quiet node,
+the arrival time, dataset, variant, platform, version and country of
+two rows can say they came from one tool, the qualification
+`PRIVACY_ANALYSIS.md` §9e makes of the app's own sessions. Generated
+bundles never report anything themselves; only the requests they make
+are counted, and their generators are tested for it: a KMZ carries no
+`NetworkLink`, no `viewRefreshMode` but `never`, and no `viewFormat`
+or `httpQuery`, since Google Earth would otherwise append the viewer's
+view to every request; the OpenSpace asset follows the same rule; and
+the counter reads only `via`, never storing the address or its query.
 
-**Two exceptions.**
+**Two exceptions, and a third still open.**
 
-- **Virtual-world viewers are counted without a country.** The output
-  page's reporting was designed around a venue that logs avatar
-  arrivals learning a visitor's real-world attributes, and accepts a
-  country only inside its first minute (`PRIVACY_ANALYSIS.md` §9k). A
-  plain MP4 on a Second Life sphere would otherwise hand that venue a
-  country and a time for every arrival, so a request classified as a
-  virtual-world viewer or its video player keeps no country.
-- **`KILL_TELEMETRY` stops these writes too**, as it stops the
-  ingest function's.
+- **Virtual-world viewers are counted without a country or a
+  version.** The output page's reporting was designed around a venue
+  that logs avatar arrivals learning a visitor's real-world
+  attributes, and accepts a country only inside its first minute
+  (`PRIVACY_ANALYSIS.md` §9k). A plain MP4 on a Second Life sphere would
+  otherwise hand that venue a country and a time for every arrival, and
+  in VRChat pressing play makes every player in the instance fetch the
+  file at once. So:
+  - The classification happens when the row is written, and the
+    Analytics Engine row itself holds no country, not only the rollup.
+  - Viewers are recognised by their tokens anywhere in the User-Agent
+    (Second Life and Firestorm, OpenSimulator viewers, VRChat's video
+    players), since their Chromium page plugin starts `Mozilla/5.0`
+    like any browser.
+  - It fails toward no country: any VLC- or LibVLC-class request, which
+    a viewer's video plugin may send indistinguishably from desktop
+    VLC, and any request for a variant made for virtual-world faces
+    (`h264-1024`) also keeps none.
+  - D1 records the real User-Agent of each path, the Chromium page, the
+    LibVLC MP4 and VRChat, beside its redirect check.
+
+  Once this writer exists, §9k's reason for keeping the output page's
+  country, that removing it would change the ingest path, is weaker,
+  and that residual can be revisited.
+- **The telemetry kill switch stops these writes too**: the
+  `TELEMETRY_KILL_SWITCH` namespace's `telemetry_enabled` key
+  (`functions/api/ingest.ts`), not the `KILL_TELEMETRY` variable some
+  docs name, which nothing reads. It skips the write and leaves the
+  data response unchanged. Unlike the ingest function, which fails open
+  when the switch cannot be read, a failed read here skips the write,
+  since these people never agreed to anything.
+- **Global Privacy Control** is open (q25): either a request sending it
+  is not counted, or it is counted with no country, version or domain.
 
 **Counting uses, not bytes.** A file counts once per download: a
 request with no `Range` header, or one starting at byte 0, not the
-dozens of range requests a player makes after it. A capabilities
+dozens of range requests a player makes after it. That rule has a
+gap D1 has to measure: a player that loops by reopening the stream,
+LibVLC with looping on or a `<video loop>` whose cache was evicted,
+requests from byte 0 on every pass, and the series of rows would bound
+how long one player had the file open, the signal §9k removed from the
+output page. D1 records what VLC, the Second Life plugin and Chrome
+send on loop and on seek, and the counter is designed from that. A capabilities
 document, layer configuration or asset counts once per fetch, which is
 the nearest thing to "someone added this layer". **Individual tiles and
 WMS maps are not counted at first** (decided, q17). One person panning a
@@ -1946,14 +2035,51 @@ planning costs.
 **Where the numbers go.** Into a Workers Analytics Engine dataset of
 their own, not the app's `terraviz_events` (decided, q18): that
 dataset's positional layout is read by the dashboards and the nightly
-rollup, and these counts have no session id to sample on. The cost is
-one more binding in `wrangler.toml` and one more step for an operator
-setting up a node. From there they go through
-the nightly rollup into D1 that the publisher portal's analytics tab
-already reads (`docs/ANALYTICS_STORAGE_AND_ADMIN_PLAN.md` Phase A), so
-per-platform and per-method numbers appear in `/publish/analytics` and
-outlive Analytics Engine's 30–90 days. A Delivery panel there shows
-uses by platform, by method, by dataset and by month.
+rollup, and these counts have no session id to sample on. They are
+indexed by dataset id, never by anything per client, and stamped
+`internal` the way ingest stamps it (`functions/api/ingest.ts`), so
+D1's own hand tests stay out of the numbers. The cost is one more
+binding in `wrangler.toml` and one more step for an operator setting
+up a node. Analytics Engine holds a row per counted request, with its
+arrival time, for about three months; on a stock node, which
+configures no Workers Logs, that is the most detailed per-request
+record the operator has, so who holds the Analytics Engine SQL token
+matters and `SELF_HOSTING.md` says so.
+
+From there a monthly rollup writes to D1, which the publisher portal's
+analytics tab already reads (`docs/ANALYTICS_STORAGE_AND_ADMIN_PLAN.md`
+Phase A), as **separate tables, never one cross-table**, since a
+single cell like (one dataset, frame zip, QGIS 3.34, one small country,
+one month) = 1 singles out a person:
+
+| Table | Grain |
+|---|---|
+| Uses by dataset | month, dataset, method, variant |
+| Uses by platform | month, platform, method |
+| Versions | month, platform, version — no country, no dataset |
+| Countries | month, country, method — no dataset |
+
+Any cell carrying a country, a version, a domain or a partner tag
+below a minimum count *k*, set in D2a's privacy review, is merged into
+`other` within the same table, so a total cannot reveal a hidden cell
+by subtraction. No table crosses a dataset with a domain or a partner
+tag below *k*, and no domain cell carries a country: a small site
+crossed with a dataset is that page's audience, the reason
+`window_context` stays out of per-dataset counts (below).
+
+**Retention.** No raw delivery row is archived to R2, unlike the app's
+own export (`ANALYTICS_STORAGE_AND_ADMIN_PLAN.md`), so anything kept
+beyond Analytics Engine's window is one of the tables above. Each table
+gets a stated retention in D2a; the versions table, for one, answers
+questions about current releases and can go after two years. The
+partner-tag registry keeps the tag, its sentence and when it was
+registered and retired, nothing else. These counts never enter the
+federation feed.
+
+A Delivery panel in `/publish/analytics` shows the tables. That tab is
+open to every active publisher (`functions/api/v1/publish/analytics.ts`),
+so the "unknown clients" report and any split by country, version or
+partner tag are admin-only.
 
 **The embed is the one method this does not reach**, because an
 embedded TerraViz is the app itself, counted by its own telemetry
@@ -1993,18 +2119,73 @@ must keep `window_context` out of per-dataset counts
 (`analytics_dataset_daily`), since per-dataset counts of embedded
 loads would be counts of one page's audience.
 
+**Before D2a: a join analysis.** `PRIVACY_ANALYSIS.md` gains a §9m for
+these counts, as §9k and §9l did for the globe page and embedded views,
+because the common self-hosted case is one owner running the node, the
+site and the venue. It covers what an operator learns by joining them
+with:
+- the node's own app telemetry, where arrival time, country and
+  dataset can tie an app session to a delivery request seconds later
+  (the mechanism above removes the direct path; the indirect one, a
+  visitor opening the same dataset in QGIS, is disclosed);
+- a venue's arrival log, which is why the virtual-world exception
+  exists;
+- a site's own access logs, which already hold addresses;
+- a partner's logs, if per-tag counts are shared, which they are only
+  as the tables above.
+
+**What `docs/PRIVACY.md` gains**, in a section of its own, since these
+people never see the app:
+- whom it reaches: people using QGIS, ArcGIS, OpenSpace, Google Earth,
+  VLC or a virtual-world viewer, or visiting a site that shows
+  TerraViz layers;
+- what is recorded: the route, dataset and variant, a platform from a
+  closed list or a partner tag, a software version for curated
+  platforms, a country (by month in long-term storage) and an arrival
+  time in the three-month store, and for a browser request the
+  requesting site's domain, never the page;
+- what is never recorded: an IP address, a raw User-Agent, `Referer`,
+  or any identifier;
+- that the person cannot switch it off, and how Global Privacy Control
+  is treated (q25);
+- the same-owner paragraph the globe and embed sections carry, since
+  whoever runs both the site and the node can match records by time
+  and country;
+- section 6's additions: the Analytics Engine dataset, its retention,
+  the D1 tables, and that nothing goes to R2;
+- Vimeo, whose CDN sees the requester's address when the files route
+  redirects a legacy video there, and which the policy does not
+  mention today for the app either.
+
+Three of its existing promises are reconciled in the same change: no
+browser version or user-agent string (kept true by keeping browsers off
+the versioned list), nothing about the addresses of other sites (the
+counter reads a domain, not a page, and says so), and "anonymous and
+carries no identifier" (a domain can name a person, so such rows are
+pseudonymous, by `PRIVACY_ANALYSIS.md` §10c's own reasoning).
+
+**Notice where these users look.** Beside the node's contact in every
+manifest and capabilities document (§6.5), a link to the privacy
+policy, in the WMTS and WMS `AccessConstraints` field and as a
+manifest field: the only place a GIS analyst or a dome producer will
+see anything.
+
 **Which phase adds what.** D2a builds the classifier and the writer as
 a pure module, counts the files route, and adds the rollup and the
 Delivery panel; D2b writes the tag into every bundle; D3b counts
 capabilities documents and layer configurations and carries the tag
 into advertised tile addresses; D3c counts STAC reads; D4 counts WMS
-capabilities; D5b's registration script tags the items it creates. Every one of them runs the `analytics-reviewer`
-first and the Privacy Engineer, updates `docs/ANALYTICS.md`,
-`docs/ANALYTICS_QUERIES.md`, a Grafana panel and `docs/PRIVACY.md`
-(rebuilding `public/privacy.html`), and — the analytics ingest path
-being one of `GOVERNANCE.md`'s high-scrutiny areas — the Code Reviewer
-as well, with the PR saying whether a person outside the loop has
-reviewed it.
+capabilities; D5b's registration script tags the items it creates.
+Every one of them runs the `analytics-reviewer` first and the Privacy
+Engineer, updates `docs/ANALYTICS.md`, `docs/ANALYTICS_QUERIES.md`, a
+Grafana panel and `docs/PRIVACY.md` (rebuilding `public/privacy.html`),
+and — the analytics ingest path being one of `GOVERNANCE.md`'s
+high-scrutiny areas — the Code Reviewer as well, with the PR saying
+whether a person outside the loop has reviewed it. A new server-side
+writer and a new use of the kill switch are both things
+`docs/ANALYTICS_CONTRIBUTING.md` sends to the project lead before a PR;
+§9.2's q17–q21 decisions are the start of that sign-off, and D2a's PR
+records it.
 
 ### 9.15 When the plan is done
 
@@ -2103,7 +2284,22 @@ stays a draft for review.
     in their own field (§9.14).
 21. *Decided 2026-11-06 by the maintainer:* unrecognised names and
     domains are hashed with `src/analytics/hash.ts`, and the report
-    resolves them against a list of likely names (§9.14).
+    resolves them against a list of likely names (§9.14). The privacy
+    review of 2026-11-07 found the premise holds for User-Agent tokens
+    but not for domains, and reopened that half as q21b.
+21b. **How is an unrecognised `Origin` domain stored?** Hashing one is
+    a storage choice, not privacy: registered domains are a public,
+    listable space, a few hundred million names a GPU hashes in under
+    a second, so every hash is one lookup from its name for anyone
+    holding the rows, which on a self-hosted node is the operator, the
+    adversary `PRIVACY_ANALYSIS.md` §9k names. The same document's §4b
+    and §9a already say this of search queries. Options:
+    - store it as `other-origin` with no hash, and find new sites
+      through partner tags and the curated list;
+    - a keyed hash (HMAC with a Pages secret rotated monthly and
+      discarded), shown only above a threshold of uses and days, which
+      protects leaked rows and other readers but not the operator
+      within the month.
 22. **Where do the per-dataset licences come from?** The SOS snapshot
     TerraViz imported carries no licence field at all. What the public
     record says (checked 2026-11-06):
@@ -2144,6 +2340,15 @@ stays a draft for review.
     themselves non-commercial, so Non-Commercial datasets are delivered
     everywhere with their terms visible; whoever uses one, a planetarium
     charging for a show included, is bound by them.
+25. **What does Global Privacy Control do to a delivery count?** A
+    browser with it on sends `Sec-GPC: 1` with every request, a TileJSON
+    or capabilities fetch from someone else's page included, and since
+    2026-11-07 the app honours it on every page. A visitor to a StoryMap
+    who sends it will reasonably expect it to cover the node counting
+    their browser. Options:
+    - don't count the request;
+    - count it with no country, version or domain, which keeps totals
+      whole at the cost of one header read.
 
 ---
 
