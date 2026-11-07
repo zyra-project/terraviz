@@ -37,7 +37,8 @@
  *
  * Pure reader plus a thin browser read. The emitter holds the latched
  * result (`optOutForPage`), and `main.ts` latches it at module
- * evaluation, before anything can emit.
+ * evaluation, before any transport exists: nothing can be sent, and
+ * anything already queued is dropped.
  */
 
 /** Why this page reports nothing: its address said so, or the browser

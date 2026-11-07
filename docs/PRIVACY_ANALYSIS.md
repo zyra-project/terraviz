@@ -1049,8 +1049,9 @@ of the page, never raise it, and write nothing:
   A host's embed code carries it for everyone who sees the embed; it
   works on any page of the app. The app's own address rewrites keep
   both parts, so it survives a change of dataset and a reload.
-- **Global Privacy Control, on every page.** In the embed view it is
-  the only preference the app can hear. Honouring it everywhere rather
+- **Global Privacy Control, on every page**, read once, as the page
+  loads, like the address. In the embed view it is the only preference
+  the app can hear. Honouring it everywhere rather
   than there alone keeps `embed=1` purely presentational, as the embed
   grammar promises, and matches the output page
   (`src/output/webTelemetry.ts`).
@@ -1090,7 +1091,8 @@ review):
   a `telemetry=0` parameter an embed code can carry, and Global Privacy
   Control honoured where no notice is shown (the output page already
   honours it, `src/output/webTelemetry.ts`). *Both landed on
-  2026-11-07, as described above, widened by the next three.*
+  2026-11-07, as described above, and amended by the three decisions
+  below.*
 
 **Decisions** (the maintainer's, 7 November 2026, on the federation
 and privacy reviews of those controls):

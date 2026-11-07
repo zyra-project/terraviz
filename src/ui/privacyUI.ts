@@ -162,21 +162,24 @@ const PAGE_OPT_OUT_ANNOUNCE = {
  * address turned it off or the browser sent Global Privacy Control
  * (`pageOptOut.ts`). Without it the panel would show the stored tier,
  * Essential by default, over a page that reports nothing. The radios
- * still show and set the stored tier, which a later visit without that
+ * still show and set the stored tier, which a page opened without that
  * reason uses, and the note says so.
  *
- * While shown, the note describes the dialog as well as the radio
- * group: the dialog's own description says a change "takes effect
- * immediately", which is untrue here, and a screen reader reads a
- * dialog's description on opening it but the group's only on entering
- * the choice. Hidden, it is referenced by neither, because a hidden
- * element that is referenced directly is still read.
+ * The dialog's description changes with it, to a version without "the
+ * change takes effect immediately", which is untrue here for everyone,
+ * sighted readers included. The note then describes the radio group
+ * only. Focus lands on the checked radio when the panel opens, so a
+ * screen reader that reads container descriptions enters the dialog
+ * and the group at once; describing both read the note twice before
+ * the focused control. Hidden, the note is referenced by nothing,
+ * because a hidden element that is referenced directly is still read.
  */
 function syncPageOptOut(): void {
   const note = document.getElementById('privacy-ui-pageoptout')
   const group = document.querySelector<HTMLElement>('.privacy-ui-tiers')
-  const dialog = document.getElementById('privacy-ui-panel')
+  const desc = document.getElementById('privacy-ui-desc')
   const reason = getPageOptOut()
+  if (desc) desc.textContent = t(reason === null ? 'privacy.desc' : 'privacy.pageOptOut.desc')
   if (note) {
     note.hidden = reason === null
     note.textContent = reason === null ? '' : t(PAGE_OPT_OUT_NOTE[reason])
@@ -185,10 +188,6 @@ function syncPageOptOut(): void {
     if (reason !== null) group.setAttribute('aria-describedby', 'privacy-ui-pageoptout')
     else group.removeAttribute('aria-describedby')
   }
-  dialog?.setAttribute(
-    'aria-describedby',
-    reason === null ? 'privacy-ui-desc' : 'privacy-ui-desc privacy-ui-pageoptout',
-  )
 }
 
 /** Refresh the session-ID display. Called on every open because the

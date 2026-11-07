@@ -82,7 +82,8 @@
     font-size: calc(0.8rem * var(--ui-scale));
 }
 
-/* This visit sends no telemetry, because its address said so.
+/* This page sends no telemetry, because its address or the browser's
+ * Global Privacy Control said so.
  * Body-colour text rather than a warning colour: it is a fact about
  * the page, and nothing is wrong. The accent bar on the start edge is
  * what keeps it from reading as a fourth option card above the three

@@ -162,8 +162,9 @@ initUiScale()
 // Whether this page load reports nothing: `telemetry=` in the address
 // (the switch an embed code can carry), or the browser's Global Privacy
 // Control signal (src/analytics/pageOptOut.ts). Latched at module
-// evaluation, like the UI scale above, because nothing has emitted yet;
-// the emitter holds it for the rest of the page's life. The address
+// evaluation, like the UI scale above, before any transport exists, so
+// nothing can be sent and anything already queued is dropped; the
+// emitter holds it for the rest of the page's life. The address
 // writers below keep `telemetry=` in both parts of the address anyway,
 // so the key a host set is still there after a reload.
 {
