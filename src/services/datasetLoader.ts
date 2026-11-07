@@ -479,11 +479,17 @@ function renderRelatedDatasetsHtml(
   algorithmicOverride: Dataset[] | null = null,
 ): string {
   const manual = target.enriched?.relatedDatasets ?? []
-  const manualLinks: Array<{ label: string; match: Dataset | null }> = manual.map((rd) => {
-    const wanted = normalizeRelatedTitle(rd.title)
-    const match = datasets.find((d) => normalizeRelatedTitle(d.title) === wanted) ?? null
-    return { label: rd.title, match }
-  })
+  const manualLinks: Array<{ label: string; match: Dataset | null }> = manual
+    .map((rd) => {
+      const wanted = normalizeRelatedTitle(rd.title)
+      const match = datasets.find((d) => normalizeRelatedTitle(d.title) === wanted) ?? null
+      return { label: rd.title, match }
+    })
+    // A curated entry naming the dataset itself is dropped, as the
+    // algorithmic and semantic lists already exclude it: a link to the
+    // page you are on adds nothing, and during a draft preview its click
+    // would push the address without the token while the draft stays.
+    .filter((entry) => entry.match?.id !== target.id)
 
   const manualIds = new Set<string>()
   const manualTitles = new Set<string>()
@@ -529,9 +535,12 @@ function renderRelatedDatasetsHtml(
  * Query keys a related link leaves out of its `href`, the address a new
  * tab or a copied link opens. `tourEdit` names the draft this tab's
  * authoring dock owns, and a second tab on it would autosave over the
- * first. A click keeps it, since it stays in this tab.
+ * first. `tour` is a one-shot boot selector, and a tab opened on
+ * `/dataset/<slug>?tour=…` would play that tour over the dataset, since
+ * the poster deep-link guard reads only `?dataset=`. A click keeps both,
+ * since it stays in this tab and boots nothing.
  */
-const NEW_TAB_DROPPED_KEYS = ['tourEdit'] as const
+const NEW_TAB_DROPPED_KEYS = ['tourEdit', 'tour'] as const
 
 /**
  * The address a click on a related link pushes: the dataset's own, with
@@ -565,7 +574,9 @@ function relatedHref(ref: DatasetUrlRef): string {
  *  escapes `&`, so a query key such as `not-x` cannot be read back as
  *  the `&not` entity. */
 function relatedLinkHtml(dataset: DatasetUrlRef, label: string): string {
-  const slug = dataset.slug ? ` data-dataset-slug="${escapeAttr(dataset.slug)}"` : ''
+  // escapeHtml, not escapeAttr: an `&` left unescaped could decode into
+  // a different slug than the one the href was built from.
+  const slug = dataset.slug ? ` data-dataset-slug="${escapeHtml(dataset.slug)}"` : ''
   return `<a href="${escapeHtml(relatedHref(dataset))}" data-dataset-id="${escapeAttr(dataset.id)}"${slug}>${escapeHtml(label)}</a>`
 }
 

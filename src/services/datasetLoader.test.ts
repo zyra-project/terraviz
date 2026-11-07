@@ -468,9 +468,10 @@ describe('displayDatasetInfo', () => {
     window.history.replaceState({}, '', '/?catalog=true&tourEdit=new&dataset=target')
     const link = renderRelated()
     expect(link.getAttribute('href')).toBe('/dataset/related-1?catalog=true')
-    window.history.replaceState({}, '', '/?telemetry=0&tourEdit=01ABC&dataset=target#telemetry=0')
+    window.history.replaceState({}, '', '/?telemetry=0&tourEdit=01ABC&tour=poster-1&dataset=target#telemetry=0')
     link.dispatchEvent(new Event('pointerdown'))
-    // A new tab must not open a second authoring dock on this tab's draft.
+    // A new tab must not open a second authoring dock on this tab's
+    // draft, nor replay a poster tour over the dataset.
     expect(link.getAttribute('href')).toBe('/dataset/related-1?telemetry=0#telemetry=0')
   })
 
@@ -498,6 +499,20 @@ describe('displayDatasetInfo', () => {
     expect(prevented).toBe(false)
     expect(onLoad).not.toHaveBeenCalled()
     expect(link.getAttribute('href')).toBe('/dataset/related-1?telemetry=0')
+  })
+
+  it('drops a curated related entry that names the dataset itself', () => {
+    const target = makeDataset({
+      id: 'target',
+      title: 'Wind',
+      enriched: { relatedDatasets: [{ title: 'Wind', url: '' }, { title: 'Ocean', url: '' }] },
+    })
+    displayDatasetInfo(target, [target, makeDataset({ id: 'ocean', title: 'Ocean' })], vi.fn())
+    const ids = Array.from(document.querySelectorAll('.info-related a[data-dataset-id]')).map((l) =>
+      l.getAttribute('data-dataset-id'),
+    )
+    expect(ids).toEqual(['ocean'])
+    expect(document.querySelector('.info-related-offcatalog')).toBeNull()
   })
 
   it('pushes no history entry when the address would not change', () => {
