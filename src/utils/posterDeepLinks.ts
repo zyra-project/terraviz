@@ -25,6 +25,7 @@
  */
 
 import { logger } from './logger'
+import { parseDatasetPathname } from './datasetUrl'
 import type { Dataset } from '../types'
 import type { ViewLayout } from '../services/viewportManager'
 
@@ -150,15 +151,40 @@ export function resolveOrbitPrompt(raw: string | null): string | undefined {
 }
 
 /**
+ * Whether an address names a dataset, which wins over `?tour=`
+ * (`docs/EMBED_URL_GRAMMAR.md` §Selector parameters).
+ *
+ * Both forms count, and the path form is not an alternative spelling
+ * this can afford to miss: by the time {@link applyPosterDeepLinks}
+ * runs, the boot path has already rewritten `?dataset=X&tour=Y` to
+ * `/dataset/x?tour=Y` (`buildDatasetPath` drops `dataset` from the
+ * query because the path now carries it). A guard reading only the
+ * query therefore never saw the dataset it was written for, and loaded
+ * the tour over it.
+ *
+ * Read in the boot path's order (`getDatasetIdFromUrl` in `main.ts`):
+ * the query, then the path, and a path segment only when it parses as
+ * a reference. One difference is kept from before this read the path:
+ * a non-empty query value counts whatever its shape, where the boot
+ * path ignores a malformed one, so `?dataset=<junk>&tour=Y` still
+ * loads neither.
+ */
+export function urlNamesDataset(pathname: string, search: string): boolean {
+  const ref = new URLSearchParams(search).get('dataset') ?? parseDatasetPathname(pathname)
+  return Boolean(ref)
+}
+
+/**
  * Apply poster deep-link query parameters to the live app. Called
  * once from main.ts after the catalog has loaded and the Tools menu
  * has wired its buttons.
  *
  * Order:
- *   1. `?tour=` — load the requested tour. Skipped if `?dataset=`
- *      is also set, since the existing initial-load path will have
- *      handled that and a second load would clobber it. The load
- *      is awaited so subsequent dispatches don't race with the
+ *   1. `?tour=` — load the requested tour. Skipped if the address
+ *      also names a dataset, in either form (see
+ *      {@link urlNamesDataset}), since the existing initial-load path
+ *      will have handled that and a second load would clobber it. The
+ *      load is awaited so subsequent dispatches don't race with the
  *      tour engine's startup choreography (which can close any
  *      panel that's already open).
  *   2. View toggles (`?terrain=`, `?labels=`, `?borders=`,
@@ -174,11 +200,10 @@ export async function applyPosterDeepLinks(
 ): Promise<void> {
   const params = new URLSearchParams(window.location.search)
 
-  // 1. Tour. `?dataset=` takes precedence — the existing initial-load
+  // 1. Tour. A dataset takes precedence — the existing initial-load
   // path already handled it, so we don't double-load.
   const tour = params.get('tour')
-  const datasetParam = params.get('dataset')
-  if (tour && !datasetParam) {
+  if (tour && !urlNamesDataset(window.location.pathname, window.location.search)) {
     const id = resolveTourId(tour, ctx.catalog)
     if (id) {
       logger.debug(`[PosterDeepLinks] loadTour: ${id} (from "${tour}")`)

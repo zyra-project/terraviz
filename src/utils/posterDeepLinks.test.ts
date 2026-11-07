@@ -21,7 +21,9 @@ import {
   resolveLayout,
   resolveOrbitPrompt,
   resolveTourId,
+  urlNamesDataset,
 } from './posterDeepLinks'
+import { buildDatasetPath } from './datasetUrl'
 import type { Dataset } from '../types'
 
 function fakeDataset(
@@ -170,6 +172,30 @@ describe('resolveOrbitPrompt', () => {
   })
 })
 
+describe('urlNamesDataset', () => {
+  it('reads the query form', () => {
+    expect(urlNamesDataset('/', '?dataset=INTERNAL_SOS_42')).toBe(true)
+  })
+
+  it('reads the canonical path form', () => {
+    expect(urlNamesDataset('/dataset/north-america-smoke', '')).toBe(true)
+    expect(urlNamesDataset('/dataset/INTERNAL_SOS_42/', '?tour=climate-futures')).toBe(true)
+  })
+
+  it('is false when neither form names a dataset', () => {
+    expect(urlNamesDataset('/', '?tour=climate-futures')).toBe(false)
+    expect(urlNamesDataset('/dataset/', '')).toBe(false)
+    expect(urlNamesDataset('/dataset/has.dot', '')).toBe(false)
+    expect(urlNamesDataset('/blog/some-post', '')).toBe(false)
+  })
+
+  it('reads the query first, as the boot path does', () => {
+    // An empty `?dataset=` stops the boot path reading the path
+    // (`??`, not `||`), so it loads nothing; agree with it.
+    expect(urlNamesDataset('/dataset/north-america-smoke', '?dataset=')).toBe(false)
+  })
+})
+
 describe('applyPosterDeepLinks', () => {
   // jsdom shares a single document across tests; reset the fixture
   // and the URL before each case.
@@ -315,6 +341,63 @@ describe('applyPosterDeepLinks', () => {
     await applyPosterDeepLinks(ctx)
 
     expect(ctx.loadDataset).not.toHaveBeenCalled()
+  })
+
+  it('skips ?tour= after the boot rewrite has moved ?dataset= into the path', async () => {
+    // The order boot actually runs in: the initial-load path rewrites
+    // the address to the canonical form *before* this orchestrator
+    // reads it, which drops `dataset` from the query. Reading the
+    // query alone, this loaded the tour over the dataset.
+    const buttons = setupToolsButtons()
+    history.replaceState(
+      {},
+      '',
+      '/?dataset=INTERNAL_SOS_42&tour=climate-futures&terrain=on&orbit=open',
+    )
+    // Same call `writeDatasetUrl` makes for a reference the catalog
+    // holds without a slug.
+    history.replaceState(
+      {},
+      '',
+      buildDatasetPath({ id: 'INTERNAL_SOS_42' }, location.search, location.hash),
+    )
+    // The premise, not the fix: if the rewrite ever kept `dataset` in
+    // the query, the assertion below would pass for the old guard too.
+    expect(location.pathname).toBe('/dataset/INTERNAL_SOS_42')
+    expect(new URLSearchParams(location.search).has('dataset')).toBe(false)
+    expect(new URLSearchParams(location.search).get('tour')).toBe('climate-futures')
+    const ctx = makeContext()
+
+    await applyPosterDeepLinks(ctx)
+
+    // The rest of the poster params still ran, so the dispatch
+    // reached its end rather than stopping early.
+    expect(buttons['tools-menu-terrain'].click).toHaveBeenCalledOnce()
+    expect(ctx.openChatWithQuery).toHaveBeenCalledOnce()
+    expect(ctx.loadDataset).not.toHaveBeenCalled()
+  })
+
+  it('skips ?tour= on a /dataset/<ref> address', async () => {
+    const buttons = setupToolsButtons()
+    history.replaceState({}, '', '/dataset/north-america-smoke?tour=climate-futures&terrain=on')
+    const ctx = makeContext()
+
+    await applyPosterDeepLinks(ctx)
+
+    expect(buttons['tools-menu-terrain'].click).toHaveBeenCalledOnce()
+    expect(ctx.loadDataset).not.toHaveBeenCalled()
+  })
+
+  it('loads the tour when the /dataset/ path does not parse as a reference', async () => {
+    // The boot path loads nothing from such a path, so nothing
+    // outranks the tour.
+    setupToolsButtons()
+    history.replaceState({}, '', '/dataset/has.dot?tour=climate-futures')
+    const ctx = makeContext()
+
+    await applyPosterDeepLinks(ctx)
+
+    expect(ctx.loadDataset).toHaveBeenCalledWith('SAMPLE_TOUR_CLIMATE_FUTURES')
   })
 
   it('opens the chat panel without a seed when ?orbit=open has no prompt', async () => {
