@@ -189,6 +189,14 @@ describe('urlNamesDataset', () => {
     expect(urlNamesDataset('/blog/some-post', '')).toBe(false)
   })
 
+  it('counts a ?dataset= value the boot path would ignore', () => {
+    // Kept from before the path form was read, and stated in the
+    // grammar: the boot path loads nothing for a value that isn't a
+    // reference (markup, a stray space), yet the tour stays skipped.
+    expect(urlNamesDataset('/', '?dataset=%3Cx%3E')).toBe(true)
+    expect(urlNamesDataset('/', '?dataset=north+america')).toBe(true)
+  })
+
   it('reads the query first, as the boot path does', () => {
     // An empty `?dataset=` stops the boot path reading the path
     // (`??`, not `||`), so it loads nothing; agree with it.
@@ -328,18 +336,19 @@ describe('applyPosterDeepLinks', () => {
   })
 
   it('skips ?tour= when ?dataset= is also set', async () => {
-    setupToolsButtons()
     // The existing initial-load path handles ?dataset= already; we
     // must not double-load on top of it.
+    const buttons = setupToolsButtons()
     history.replaceState(
       {},
       '',
-      '/?tour=climate-futures&dataset=INTERNAL_SOS_42',
+      '/?tour=climate-futures&dataset=INTERNAL_SOS_42&terrain=on',
     )
     const ctx = makeContext()
 
     await applyPosterDeepLinks(ctx)
 
+    expect(buttons['tools-menu-terrain'].click).toHaveBeenCalledOnce()
     expect(ctx.loadDataset).not.toHaveBeenCalled()
   })
 

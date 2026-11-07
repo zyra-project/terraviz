@@ -535,10 +535,12 @@ function renderRelatedDatasetsHtml(
  * Query keys a related link leaves out of its `href`, the address a new
  * tab or a copied link opens. `tourEdit` names the draft this tab's
  * authoring dock owns, and a second tab on it would autosave over the
- * first. `tour` is a one-shot boot selector, and a tab opened on
- * `/dataset/<slug>?tour=…` would play that tour over the dataset, since
- * the poster deep-link guard reads only `?dataset=`. A click keeps both,
- * since it stays in this tab and boots nothing.
+ * first. `tour` is a one-shot boot selector: on `/dataset/<slug>?tour=…`
+ * the dataset outranks it, so in a new tab it would do nothing but sit
+ * in the address, and play the tour the next time that tab boots with
+ * no dataset in its path (Home, then a reload). A click keeps both,
+ * since it stays in this tab and boots nothing, and leaves this tab's
+ * address carrying only what it already did.
  */
 const NEW_TAB_DROPPED_KEYS = ['tourEdit', 'tour'] as const
 

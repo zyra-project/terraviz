@@ -182,8 +182,9 @@ export function urlNamesDataset(pathname: string, search: string): boolean {
  * Order:
  *   1. `?tour=` — load the requested tour. Skipped if the address
  *      also names a dataset, in either form (see
- *      {@link urlNamesDataset}), since the existing initial-load path
- *      will have handled that and a second load would clobber it. The
+ *      {@link urlNamesDataset}): loading it is the initial-load path's
+ *      job, and a tour loaded after it would clobber it. A boot that
+ *      failed before getting there shows its error, not the tour. The
  *      load is awaited so subsequent dispatches don't race with the
  *      tour engine's startup choreography (which can close any
  *      panel that's already open).
@@ -200,8 +201,8 @@ export async function applyPosterDeepLinks(
 ): Promise<void> {
   const params = new URLSearchParams(window.location.search)
 
-  // 1. Tour. A dataset takes precedence — the existing initial-load
-  // path already handled it, so we don't double-load.
+  // 1. Tour. A dataset takes precedence — loading it is the
+  // initial-load path's job, so we don't double-load.
   const tour = params.get('tour')
   if (tour && !urlNamesDataset(window.location.pathname, window.location.search)) {
     const id = resolveTourId(tour, ctx.catalog)

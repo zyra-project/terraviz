@@ -934,9 +934,9 @@ class InteractiveSphere {
     // dispatch can route through canonical APIs and button click
     // handlers without any race risk. ?layout= and ?dataset= are
     // already handled by the existing initial-load path above, which
-    // has by now rewritten ?dataset= into the /dataset/<slug> path;
-    // the ?tour= guard reads both forms (`urlNamesDataset`), so a
-    // dataset still wins over a tour after that rewrite. The
+    // usually has by now rewritten ?dataset= into the /dataset/<slug>
+    // path, so the ?tour= guard reads both forms (`urlNamesDataset`)
+    // and a dataset wins over a tour either way. The
     // call is awaited so a ?tour= load completes before subsequent
     // ?orbit=open / view-toggle dispatches run on top of it.
     //
