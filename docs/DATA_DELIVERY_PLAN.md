@@ -1193,12 +1193,32 @@ pixel, and by Lanczos for RGB pictures. The capabilities abstract
 states the source resolution, so nobody mistakes the native level for
 finer data. Nothing is cut below the native level: OpenSpace, QGIS and
 CesiumJS all stretch the deepest level themselves (§2), and ArcGIS is
-the one client still to check (§11).
+the one client still to check (§11). For a regional frame the width
+that counts is its effective global width, W × 360 / (east − west), not
+W: a 2048-wide box covering 30° of longitude needs level 5, not level
+1 (§5.5).
 
-**Every level above native is a 2×2 decimation of the one below.**
-Because WorldCRS84Quad's blocks align with the source pixel grid and
-with the antimeridian, no block straddles the seam, and the pyramid can
-be built in one pass with no reprojection.
+**Every level above native summarises the source, not the level
+below.** WorldCRS84Quad's blocks align with the source pixel grid and
+with the antimeridian, so no block straddles the seam and no
+reprojection is needed. But building each level from the 2×2 blocks of
+the one below does not keep the rules that follow:
+- under the half-area rule a pixel k levels up can survive with (½)ᵏ of
+  its source area valid;
+- a mean of means weights each child by its area, not its valid area;
+- the mode of modes is not the mode: children whose modes are A, A, B,
+  B can hide a source with six cells of B to four of A.
+
+So every level carries a valid-area channel. `mean` and `picture`
+weight by it and threshold on the accumulated source area; `mode` is
+computed from native cells or from carried class areas; `max` is exact
+under recursion. Where the source width is not 1024 × 2ⁿ, the coarse
+levels are built from the source with fractional-overlap weights, not
+from the upsampled native level, whose duplicated columns (about one in
+seven at 3600→4096, 42% at 1440→2048) would weight some cells two to
+four times others. The §9.7 test that a mean equals `datasetStats`' over
+the same cells runs at every level against source cells, which catches
+all of this.
 
 **How a 2×2 block becomes one pixel is a property of the data.** One
 method for everything is the default in every tiling tool and is wrong
@@ -1209,44 +1229,115 @@ the capabilities abstract (decided, §11 q6):
 | Value | For | Rule | What it costs |
 |---|---|---|---|
 | `mean` | Continuous fields: temperature, aerosol optical depth, sea-surface height | Area-weighted mean of the valid cells | Smooths extremes away at coarse levels |
-| `mode` | Categorical fields: land cover, hazard classes, any palette whose colours are classes | Most common valid class; ties broken by a fixed cell order so tiles are reproducible | Small classes vanish at coarse levels |
-| `max` | Sparse extremes a mean would erase: fire detections, lightning, precipitation maxima | Largest valid value | Overstates the extent of the extreme at coarse levels — the abstract has to say so |
-| `picture` | RGB imagery with no underlying values: composites, diagrams, legacy SOS animations | Mean in linear light | None worth naming |
+| `mode` | Categorical fields: land cover, hazard classes, any palette whose colours are classes | Most common valid class by area; ties broken by a stated rule, reproducible across runs | Small classes vanish at coarse levels; a tie rule favouring one corner moves class boundaries toward it at every level, so D3a picks one that does not |
+| `max` | Sparse extremes a mean would erase: fire detections, lightning, precipitation maxima | Largest valid value | Overstates extent: one 9.78 km detection is drawn 39 km wide at level 0, 16 times its area |
+| `picture` | Natural imagery with no palette: true-colour composites, photographs | Mean in linear light; Lanczos upsampling; JPEG | Softens fine detail |
+| `colour-mapped` | RGB pictures painted through a palette with a legend, which is most of the legacy SOS catalog, and categorical maps delivered as pictures | Nearest or representative pixel, or snapped to the legend's colours; an upsample that does not ring; PNG or 4:4:4 JPEG | Aliasing, and small features that flicker between levels |
+
+A linear-light mean across a palette boundary makes colours that are
+not on the legend, red and blue averaging to a purple that means
+nothing, and on a categorical map it invents classes; Lanczos rings on
+those same edges, and 4:2:0 JPEG bleeds chroma across them. That is
+why `colour-mapped` exists. A legacy row with a legend image defaults
+to it, and the node's science reviewer confirms each dataset's method.
+
+**`max` says so wherever its picture goes.** Almost nobody who sees the
+picture sees a capabilities abstract: not a dome audience, a StoryMap
+reader or a Second Life visitor. So one sentence travels in every
+legend (§5.7's SVG and PNG, and every bundle's), the TileJSON
+`description`, the OpenSpace asset's `meta`, the manifest and the KML
+description, with the cell size at each level: for instance,
+"Zoomed out, each cell shows the highest value inside it; features look
+larger than they are." The §6 files at 2048 and 1024 carry the same
+overstatement and the same sentence. **Coverage as opacity** is the
+alternative to offer: colour the maximum, set alpha to the share of
+the cell above the cutoff, so one detection still shows, faint, and
+extent reads truthfully. The producer chooses between them, the
+Science Communicator words the caption, and on a NOAA node the
+Communications Clearance Officer clears it.
+
+**What the four methods miss.** Low extremes (there is no `min`),
+per-cell counts whose units change with level (they need `sum`, or a
+rule that only intensive fields are tiled), and cyclic fields such as
+direction or phase, where a mean is wrong. The producer says which a
+dataset is, and one with no method that fits is not tiled.
+
+**A coarse pixel is a value nobody published.** An area mean at level
+0, like a daily mean (§7.2), is the node deriving a value its producer
+never published, which `CLAUDE.md` §When a person decides sends to a
+person. So each dataset's method, and its producer's or the node's
+science reviewer's confirmation of it, is recorded in
+`dataset_delivery`: who decided, on what exact text, and when.
 
 Four rules apply whatever the method.
 
 - **Values, then colour.** A data-encoded frame is decoded to values
   (`lumaToValue`, `src/types/color-scale.ts`), decimated, and only then
   coloured. Averaging *colours* of a diverging palette produces colours
-  the palette does not contain — red and blue average to a purple that
-  means nothing. Averaging *luma codes* is wrong for the same reason in
-  another form: next to the no-data band, a valid code and a no-data
-  code average to a code that reads as a real, wrong, value.
-- **No-data stays out.** Cells inside `transparentRange` or below
-  `dataMinLuma` are excluded from every method. Whether the output
-  pixel is itself no-data depends on the method: under `mean` and
-  `mode` when less than half the block's area is valid, under `max`
+  the palette does not contain. `lumaToValue` is affine, so a masked
+  mean of codes equals the mean of values: what matters is the mask.
+  But a `max` taken on codes is the minimum of values when `vmin` is
+  greater than `vmax`, which the parser permits, so an implementation
+  that works on codes keeps that guard.
+- **Only declared absence stays out.** Cells below `dataMinLuma`, the
+  band that declares absence, are excluded from every method.
+  `transparentRange` is not absence: it hides a band that *is* data but
+  too faint to be worth drawing (`src/types/color-scale.ts`), and on the
+  live smoke rows code 0 is a real zero. So those cells are included as
+  values, and the palette hides a mean that comes out faint. Excluding
+  them would make `mean` mean "where smoke is visible": a block of
+  codes 40, 40, 5, 5 under a cutoff of 12 would show 40 where its area
+  mean is 22.5, and a thin plume would vanish. For a row with a
+  `transparentRange` and no `dataMinLuma`, the producer records whether
+  the band means zero or absent before its tiles are cut. Whether the
+  output pixel is itself no-data depends on the method: under `mean`
+  and `mode` when less than half the source area is valid, under `max`
   only when none of it is, because the point of `max` is that one fire
   pixel survives the zoom-out. The half-area threshold was decided
   (§11 q5).
 - **Area, not pixel count.** An equirectangular row's cells shrink
   toward the poles, so the two rows of a block weigh differently. The
   weights are the exact band areas `datasetStats.ts` already uses
-  (`R² · Δλ · (sin φ₁ − sin φ₀)`, `src/services/datasetStats.ts:165`);
+  (`R² · Δλ · (sin φ₁ − sin φ₀)`, `src/services/datasetStats.ts:167-176`);
   the difference only shows within a few pixels of a pole, but the
   pyramid and the Analyze panel should not disagree about what a mean
-  is.
-- **Linear light for pictures.** Averaging sRGB-encoded values darkens
-  every high-contrast edge — coastlines, city lights, a bright plume on
-  a dark sea. Decode, average, re-encode; the projector blend does the
-  same for the same reason (`src/output/projectorWarp.ts:961`).
+  is. At exactly half, the area weights decide which row wins (the
+  equatorward one), so a data region can move poleward by up to half a
+  coarse pixel; D3a states that rule.
+- **Clipped at the ends.** Zyra clips at `vmin` and `vmax`
+  (`src/services/datasetStats.ts:148`), so the top code means "at least
+  `vmax`". Legends carry extend markers, the first and last entries of
+  the GIBS colour map are open-ended, and a mean that includes clipped
+  cells is a lower bound, which the abstract says. Units are a delivery
+  condition for a data-encoded row, as a licence is, or the legend
+  prints "units not recorded"; the producer supplies any that are
+  missing. Proposed: the delivered legend uses the display units the
+  globe's colorbar shows (`src/types/unit-scale.ts`), so the two match.
+- **Linear light for natural pictures.** Averaging sRGB-encoded values
+  darkens every high-contrast edge — coastlines, city lights, a bright
+  plume on a dark sea. Decode, average, re-encode; the projector blend
+  does the same for the same reason (`src/output/projectorWarp.ts:961`).
+  The video variants relax this rule (§9.4), so a tile and a video can
+  differ at a coastline; that is known, not a bug.
+- **Magnified, not interpolated.** Clients that stretch past the native
+  level filter the expanded colours bilinearly by default (CesiumJS,
+  and probably OpenSpace), interpolating where the globe samples
+  nearest, so the companions TerraViz generates set nearest
+  magnification (CesiumJS's `magnificationFilter: NEAREST`), and D1
+  checks OpenSpace.
 
-**WebMercatorQuad is a reprojection, not a decimation.** Its tiles
-are warped from the WorldCRS84Quad native level using the same method
-(GDAL's `gdalwarp` has `average`, `mode` and `max` resampling). Toward
-its ±85.05° edge Mercator *stretches* rows, so there the warp is
-upsampling, and a data-encoded layer should use nearest neighbour
-rather than interpolate values that were never measured.
+**WebMercatorQuad is taken by nearest neighbour from the lat/lon level
+of the same width.** At the native Mercator level a Mercator row is
+cos φ of a source row, so a warp upsamples in y at every latitude, not
+only near ±85.05°, and `gdalwarp`'s `average` would blend adjacent rows
+across most of the map (about 70% of rows at 45°). Its default no-data
+rule is `max`'s, and its average weights planar overlap in degrees
+rather than area. So Mercator level z is taken by nearest neighbour
+from lat/lon level z − 2, which has the same width and whose rows are
+never coarser than Mercator's there. The dataset's method is applied
+once, in the lat/lon pyramid, and the warp never averages. Two coarser
+lat/lon levels, 512 and 256 wide, feed Mercator levels 0 and 1, and a
+parity test checks the two grids against each other.
 
 ### 7.2 Time: choosing samples
 
@@ -1256,9 +1347,12 @@ selection aliases anything periodic. An hourly field stepped every
 24 hours shows the same hour forever: the diurnal cycle disappears,
 and for anything with a day–night signal — surface temperature,
 infrared clouds — one hemisphere stays in night for the whole
-animation. A 25-hour step crawls the cycle backwards across the
-globe instead. The node cannot stop a client from choosing its step,
-but it can do two things.
+animation. A 23-hour step crawls the cycle backwards across the globe.
+A 25-hour step advances it in the true direction at 1/25 speed, which
+is worse, because it looks like real diurnal motion. A 12-hour step,
+which OpenSpace offers, swaps day and night every frame. The node
+cannot stop a client from choosing its step, but it can do three
+things.
 
 - **Advertise the native cadence.** Each layer's time dimension states
   its period, so a client that lets its user set a step (OpenSpace sets
@@ -1269,18 +1363,28 @@ but it can do two things.
   dataset's own method. They are separate layers rather than a style,
   because they are different data on a different time axis. Off by
   default; turned on per dataset, since each one is another pyramid to
-  store.
+  store. An aggregate is a value its producer never published, so it
+  needs the recorded sign-off §7.1 describes, and it states its
+  time-coverage threshold, its window convention (the UTC day, say) and
+  a title that says "daily mean". Pictures with lighting or a
+  terminator baked in are never aggregated.
+- **Say so.** A layer with a diurnal cycle says in its abstract and
+  asset description that a step of a day or more shows one fixed hour.
 
 **Frames from video must recover the source cadence.** Every upload is
 re-encoded at 30 fps (`OUTPUT_FRAME_RATE`, `cli/lib/ffmpeg-hls.ts:129`),
 holding frames to get there. Extracting at 30 fps would tile each
-source frame several times over. ffmpeg's `mpdecimate` filter drops
-near-duplicate frames, but its threshold could also drop a genuinely
-small change in a data-encoded field; for those, only exact duplicates
-are dropped. A frame's time is then derived from the dataset's span and
-the frame's index after de-duplication, which is right only when the
-source had a regular cadence — the extractor should refuse, not guess,
-when the de-duplicated count does not divide the span evenly.
+source frame several times over. The dataset records its rate
+(`playbackFps`, `src/types/index.ts`), so the extractor selects one
+frame in every 30/`playbackFps`, or better cuts from stored PNG frames
+or the kept upload (§9.4). De-duplicating instead is unreliable on a
+lossy encode: an IDR frame can fall inside a run of held frames,
+B-frames need not decode bit-identical, de-duplication drops frames
+that genuinely repeat, such as an SOS animation's held title and end
+frames, and a wrong count that divides the span still passes a
+divisibility check. Tiles cut from video carry the codec's error,
+about one code RMS with 35 of 244 codes never produced
+(`docs/DATA_ANALYSIS_PLAN.md`), and the abstract says so.
 
 **Rolling windows follow the frames.** Real-time Zyra datasets keep
 only a window of frames (`cli/lib/r2-frames.ts`); their tiles follow
@@ -1289,8 +1393,9 @@ clients that cache capabilities need to tolerate.
 
 ### 7.3 Bit depth and format
 
-- **JPEG** (quality around 85) for opaque RGB pictures, as GIBS does
-  for its opaque layers.
+- **JPEG** (quality around 85) for opaque natural pictures, as GIBS
+  does for its opaque layers; PNG or 4:4:4 JPEG for `colour-mapped`
+  ones (§7.1).
 - **Indexed PNG for data-encoded layers.** A data-encoded dataset's
   palette is exactly 256 entries (`buildColorScaleLut`), so a decimated
   value, re-quantised to the nearest of the dataset's 256 codes, can be
@@ -1298,16 +1403,25 @@ clients that cache capabilities need to tolerate.
   whose transparency chunk carries the no-data band. That is lossless
   with respect to what the TerraViz globe shows, about a quarter the
   size of RGBA, and keeps an exact code-to-colour mapping a careful
-  client could invert. ArcGIS reads palette PNGs (Esri's own tile
-  caches use them), GIBS serves its colour-mapped layers that way, and
-  GDAL — so OpenSpace and QGIS — expands them on read; D1 confirms the
-  transparency chunk survives in each.
+  client could invert, by index rather than by colour, since colours
+  repeat in flat palette segments. ArcGIS reads palette PNGs (Esri's
+  own tile caches use them), GIBS serves its colour-mapped layers that
+  way, and GDAL — so OpenSpace and QGIS — expands them on read. The
+  transparency chunk carries the palette's full alpha ramp, not only
+  the no-data band, and D1 confirms partial alpha, not only on and off,
+  survives in each. Because the index is the code, such a tile is in
+  effect a raw-code tile, so the colour map and abstract publish `vmin`,
+  `vmax` and `dataMinLuma`, and a GDAL or QGIS user does not read a bare
+  index as a measurement.
 - **Never JPEG for data.** JPEG ringing along palette boundaries invents
   colours the palette does not contain — the false-colour failure of
   averaging colours, arriving through compression instead.
-- **Re-quantising puts a mean back on the transport lattice.** The
-  step between adjacent codes is the quantisation step the Analyze
-  panel already reports; the abstract states it.
+- **Re-quantising puts a mean back on the code grid**, the 256 codes
+  (not the "transport lattice" `DATA_ANALYSIS_PLAN.md` uses for the
+  codes a video round trip never produces). The step between adjacent
+  codes is the quantisation step the Analyze panel already reports,
+  about 0.4% of full scale, with one code roughly the noise floor; the
+  abstract states it.
 - **No 16-bit or floating-point tiles in v1.** Real values travel
   through the raster channel (§4.2), which carries them without a
   256-level code.
@@ -1320,11 +1434,16 @@ output caps the rung at its own frame width (`capLevelForWidth`,
 avoids streaming 4K into a 1024-pixel texture. Data-encoded video is
 pinned to one 4096×2048 rung on purpose: lower rungs "would resample a
 data raster to a quarter scale" (`cli/lib/ffmpeg-hls.ts:102`;
-`DATA_ENCODED_VIDEO_PLAN.md` §Why the frame is 4096×2048), and an
-encoder's scaler averages luma codes — the
-§7.1 failure again. So any consumer that needs a smaller data-encoded
-video gets one built from decimated *frames* in value space, never one
-transcoded down from the 4K video (§6.2).
+`DATA_ENCODED_VIDEO_PLAN.md` §Why the frame is 4096×2048). The data
+path's scaler is nearest neighbour (`cli/lib/ffmpeg-hls.ts:254`): it
+selects rather than averages, so the trouble with a smaller rung is not
+averaged codes but aliasing, rungs that disagree about a value, and
+`max` losing three of every four fire pixels. So any consumer that
+needs a smaller data-encoded video gets one built from decimated
+*frames* in value space, never one transcoded down from the 4K video
+(§6.2). §7.1's methods also need defining for non-integer ratios
+(7200→4096, `DATA_ENCODED_RESOLUTION_PLAN.md`) and for a coarse grid
+upsampled to the native level.
 
 ### 7.5 What each tool actually uses
 
@@ -1731,17 +1850,18 @@ need more than the usual `t()` keys.
   is: the two grids, tile bounds, the native level, the URL grammar,
   lenient time parsing and the §5.3 snap.
 - **The cutter** (`cli/lib/tile-cutter.ts`): normalise each frame
-  (§5.5), place it at the native level, reduce level by level with the
-  dataset's method (§7.1) — in TypeScript, because GDAL's overview
-  builder averages palette codes, not values, and knows nothing of the
-  no-data band — then write indexed PNG for data-encoded layers and
-  JPEG for opaque pictures, under a prefix keyed by the frame's digest.
-- **The Web Mercator set** warped by `gdalwarp` from a floating-point
-  raster of *values* at the native level, with the dataset's method
-  and its no-data value, and coloured afterwards — warping coloured
-  pixels would average colours, the §7.1 failure. GDAL is installed in
-  the runner from apt, the way ffmpeg already is
-  (`.github/workflows/transcode-hls.yml:146`).
+  (§5.5), place it at the native level, and build each coarser level
+  from the source with the dataset's method and a valid-area channel
+  (§7.1) — in TypeScript, because GDAL's overview builder averages
+  palette codes, not values, and knows nothing of the no-data band —
+  then write indexed PNG for data-encoded layers, JPEG for natural
+  pictures and PNG for `colour-mapped` ones, under a prefix keyed by
+  the frame's digest.
+- **The Web Mercator set** taken by nearest neighbour from the lat/lon
+  level of the same width, two coarser lat/lon levels (512 and 256
+  wide) included, so the method is applied once and the warp never
+  averages (§7.1). GDAL is installed in the runner from apt, the way
+  ffmpeg already is (`.github/workflows/transcode-hls.yml:146`).
 - **A per-dataset index** in R2 from frame time to frame digest, which
   the serving route reads to snap a time.
 - **The `tiles` switch** (§8): its key, its row in the Features card,
@@ -1752,11 +1872,17 @@ need more than the usual `t()` keys.
 uses: for random points, a native-level tile pixel equals the source
 texel `latLonToTexelUv` names (`src/services/datasetProbe.ts:45`),
 after normalisation — a regional bounding box included, since that is
-where a US box once landed over the South Pacific. `mean` equals the
-area-weighted mean `datasetStats.ts` computes over the same cells;
-`mode` breaks ties the same way every run; `max` keeps a single valid
-pixel through every level; no block straddles the antimeridian; an
-indexed PNG's palette is byte for byte the dataset's LUT.
+where a US box once landed over the South Pacific. At every level,
+against source cells: `mean` equals the area-weighted mean
+`datasetStats.ts` computes over the same cells, and a pixel is no-data
+exactly when less than half its source area is valid; `mode` breaks
+ties the same way every run; `max` keeps a single valid pixel through
+every level; no block straddles the antimeridian; an indexed PNG's
+palette is byte for byte the dataset's LUT, alpha ramp included;
+Mercator matches lat/lon under nearest neighbour. A ramp-and-edge frame
+(one stripe per code, a data/no-data edge, a diverging red|blue edge)
+is loaded in every client at native and zoomed in, and no colour off
+the palette appears at an edge.
 
 **Gate.** Those tests pass on D1's two datasets, and a 1,000-frame
 pyramid builds inside the runner time D1 measured.
