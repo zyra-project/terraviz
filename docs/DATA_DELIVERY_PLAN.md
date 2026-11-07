@@ -182,8 +182,11 @@ browser at all** — both change what §4 recommends.
   Since February 2026 any layer can be given a start and end date that
   the slider uses to switch it on and off
   ([Esri blog](https://www.esri.com/arcgis-blog/products/arcgis-online/mapping/make-time-for-time-based-layer-visibility-in-map-viewer)),
-  so one WMTS layer per frame would animate — workable for a handful of
-  frames, not for a year of days.
+  so one layer per frame would animate — workable for a handful of
+  frames, not for a year of days. Those layers would be XYZ items with
+  the time in the path rather than WMTS layers, since a WMTS layer
+  shows only its default time and one shared capabilities document
+  gives every layer the same default.
 - **XYZ tile layers** from a URL template are Web Mercator only, with
   no time
   ([add layers from URL](https://doc.arcgis.com/en/arcgis-online/create-maps/add-layers-from-url.htm)).
@@ -467,9 +470,10 @@ data-encoded dataset must arrive with its palette already applied.
 
 - **QGIS** animates WMS-T with its Temporal Controller (since 3.14)
   and WMTS time (since 3.28)
-  ([3.28 changelog](https://changelog.qgis.org/en/version/3.28)),
-  rounds a requested time down to the period step, and resamples the
-  deepest tile level when zoomed past it
+  ([3.28 changelog](https://qgis.org/project/visual-changelogs/visualchangelog328/)),
+  sends the Temporal Controller's frame start as it is rather than a
+  listed time (for WMS-T by default, and for WMTS as far as the source
+  reads), and resamples the deepest tile level when zoomed past it
   ([`qgswmsprovider.cpp`](https://github.com/qgis/QGIS/blob/master/src/providers/wms/qgswmsprovider.cpp)).
   It opens COGs over HTTP through GDAL and browses STAC since 3.40
   ([3.40 changelog](https://qgis.org/project/visual-changelogs/visualchangelog340/)).
@@ -632,7 +636,16 @@ level 0, each level splitting every tile into four — the layout of the
 OGC Two Dimensional Tile Matrix Set standard's WorldCRS84Quad
 (OGC 17-083r4) — but with 512-pixel tiles rather than the registered
 set's 256, declared in the capabilities document under its own
-identifier.
+identifier. Its CRS is declared as `urn:ogc:def:crs:OGC:1.3:CRS84`
+with a TopLeftCorner of `-180 90`, as GIBS's 4326 sets are. Not the
+EPSG URN, which requires `90 -180`: GDAL swaps the axes for an EPSG
+URN but not for the short form `EPSG:4326`, and QGIS swaps on the CRS's
+axis order, so the `epsg4326` path name invites exactly the wrong
+choice. Level *n*'s scale denominator is 139770566.00717944 / 2ⁿ, which
+equals the registered 256-pixel set's at level *n* + 1, a useful clue if
+a client picks the wrong levels in D1. The set must not be named, or
+declare the well-known scale set, `GoogleCRS84Quad`, which GDAL
+special-cases.
 
 | Level | Tiles across × down | Image width it fills exactly |
 |---|---|---|
@@ -643,11 +656,20 @@ identifier.
 
 A W×W/2 frame fills level *n* exactly when W = 1024 × 2ⁿ, so the
 catalog's 4096×2048 frames stop at level 2: **42 tiles per frame**
-(2 + 8 + 32), and an 8192×4096 frame 170. Every tile edge falls on a
-pixel boundary of the source image at its native level, which is why
-cutting needs no resampling at the deepest level and only 2×2
-decimation above it. Frames at other widths — a 0.1° science grid is
-3600 wide, a 0.25° one 1440 — are handled in §7.1.
+(2 + 8 + 32), and an 8192×4096 frame 170. For a global 2:1 frame every
+tile edge falls on a pixel boundary of the source image at its native
+level, so cutting needs no resampling there. A regional frame's pixels
+never line up with the global grid, so placing one is a resample
+(§5.5), and every coarser level summarises the source (§7.1). Frames at
+other widths — a 0.1° science grid is 3600 wide, a 0.25° one 1440 — are
+handled in §7.1, and a global frame that is not 2:1 (a 1440×721
+pixel-is-point grid, which would land half a cell off) is refused.
+
+**How deep each layer goes.** One shared tile matrix set id needs
+`TileMatrixSetLimits` per layer to say where its levels stop; GIBS
+instead declares an id per depth (`GoogleMapsCompatible_Level6` to
+`…_Level9`), a pattern ArcGIS reads. q2's answer may depend on which
+is declared, so D1 tries both.
 
 **Why 512 pixels.** A time step through tiles costs one request per
 tile on screen, and OpenSpace refetches every tile at every step with
@@ -661,8 +683,9 @@ WorldCRS84Quad will not read it without the capabilities document.
 Decided provisionally (§11 q1): 512, with D1 loading both sizes in
 every client and free to reverse it.
 
-**Secondary: WebMercatorQuad** (`GoogleMapsCompatible`, the standard
-256-pixel set), for clients
+**Secondary: WebMercatorQuad** (declaring the `GoogleMapsCompatible`
+well-known scale set, the standard 256-pixel set; MapLibre's default
+tile size is 512 and Leaflet's 256, so D1 loads both), for clients
 whose basemaps are Web Mercator and which require the tile grid to
 match the basemap (ArcGIS Map Viewer in 2D; most XYZ web maps). This
 grid *does* need reprojection, and it cannot show latitudes beyond
@@ -693,23 +716,52 @@ set — not the structure:
 GIBS:      /wmts/epsg4326/best/{Layer}/default/{Time}/{TileMatrixSet}/{TileMatrix}/{TileRow}/{TileCol}.{ext}
 TerraViz:  /api/v1/wmts/epsg4326/{datasetId}/{style}/{time}/CRS84Quad512/{z}/{y}/{x}.{ext}
            /api/v1/wmts/epsg3857/{datasetId}/{style}/{time}/WebMercatorQuad/{z}/{y}/{x}.{ext}
-           /api/v1/wmts/1.0.0/WMTSCapabilities.xml
+           /api/v1/wmts/epsg4326/1.0.0/WMTSCapabilities.xml
+           /api/v1/wmts/epsg3857/1.0.0/WMTSCapabilities.xml
+           /api/v1/wmts/{projection}/1.0.0/{datasetId}/WMTSCapabilities.xml
 ```
+
+**One capabilities document per projection, as GIBS has.** A WMTS
+layer has one `ResourceURL` template per format, with no tie to a tile
+matrix set, and these paths differ by prefix as well as by set name,
+so a client picking WebMercatorQuad from a shared document would fill
+in `/epsg4326/…/WebMercatorQuad/…`. Each document links each layer to
+its one set. A per-dataset document beside them serves Hub items, and
+§9.14, since a fetch of the whole document names no dataset. Each
+layer advertises three `ResourceURL`s, as GIBS does: with `{Time}`,
+without it, and with a literal `default`, for clients that ignore
+dimensions.
 
 - `{datasetId}` is the catalog ULID, which is stable; slugs can change.
 - `{style}` is `default` in v1 (§5.4).
 - `{ext}` is `png` (alpha) or `jpg` (opaque); WebP is not offered,
   because GDAL builds and GIS clients do not uniformly read it.
 - `{time}` accepts any ISO 8601 UTC form a client is likely to build —
-  a date (`2026-05-16`), a date and time with or without seconds, with
-  or without `Z` — because OpenSpace formats the time from a
-  per-layer picture string the producer writes, and a strict parser
-  would turn every mismatch into a 404.
-- KVP `GetTile` requests are accepted and mapped onto the same handler,
-  since some clients only issue KVP. Time must be in the *path* for
-  OpenSpace regardless: GDAL's WMTS driver has no time option, so
-  OpenSpace reaches time-varying tiles only through a URL template read
-  by GDAL's TMS driver (§2.2).
+  a date (`2026-05-16`), a date and time with or without seconds or
+  fractional seconds, with `Z`, `+00:00` or nothing, a colon sent as
+  `%3A`, and in KVP a `+` that arrived as a space — because OpenSpace
+  formats the time from a per-layer picture string the producer
+  writes, `toISOString` and the ArcGIS SDK add milliseconds, and a
+  strict parser would turn every mismatch into a 404.
+- **A reduced-precision time names an interval.** A date is that UTC
+  day, and selects the first frame inside it; only when none does is
+  §5.3's snap applied. Without the rule, daily frames stamped at 12:00Z
+  would answer `2026-05-16` with the 15th's frame, and GIBS
+  configurations, whose easy adaptation is the point of this grammar,
+  send dates.
+- KVP `GetTile` and `GetCapabilities` requests are accepted and mapped
+  onto the same handlers, since some clients only issue KVP, and both
+  encodings are advertised in `OperationsMetadata` (`GetEncoding`).
+  Extra query parameters on the REST capabilities address are ignored,
+  since QGIS adds some and §9.14's `via` is one. Time must be in the
+  *path* for OpenSpace regardless: GDAL's WMTS driver has no time
+  option and fills each dimension with its `Default`, so OpenSpace
+  reaches time-varying tiles only through a URL template read by
+  GDAL's TMS driver (§2.2).
+- **Errors are OGC's.** A tile outside the matrix or a malformed
+  parameter is a 400 `ExceptionReport` (`TileOutOfRange`,
+  `InvalidParameterValue`), which OGC's test suite expects; a time
+  outside the dataset's span stays a 404.
 
 Living under `/api/v1/` puts the service inside the node's existing
 versioned surface: a breaking change is a `/v2/`, and the contract is
@@ -719,19 +771,36 @@ pinned in `docs/protocol/` the way STAC's is (§8).
 
 - **The dimension is `Time`, in ISO 8601 UTC**, declared per layer in
   the capabilities document. Because frame times are computed as
-  `start_time + period × index`, most layers can declare a compact
-  `start/end/period` interval rather than listing every frame; a
-  dataset with irregular frames lists them.
+  `start_time + period × index`, a layer declares a compact
+  `start/end/period` interval rather than listing every frame, with no
+  milliseconds in any advertised time: QGIS's parser for listed values
+  accepts `YYYY-MM-DDTHH:MM:SSZ`, a date or a year, and today's
+  `frameTimestamp` emits `.000Z`. **Irregular series are not tiled in
+  v1**: frame times come only from start and period
+  (`functions/api/v1/_lib/frames-manifest.ts`), so there is no source
+  for a list.
+- **Calendar periods use calendar arithmetic.** `iso-duration.ts`
+  counts `P1M` as 30.44 days and `P1Y` as 365.24, which is harmless for
+  `/frames?at=`'s nearest-frame rounding and wrong for rounding down: a
+  monthly series starting 1 January stamps frame 2 at 1 March 20:58,
+  so a request for 1 March floors to February, and a yearly series
+  starting 2001 answers 2002, 2003 and 2004 a year early. Both periods
+  are in the catalog. `tile-grid.ts` uses calendar arithmetic, a
+  declared `start/end/P1M` matches it, and D2a fixes `frameTimestamp`
+  at the source (§6.3). GIBS's check here used a mid-month date, which
+  is exactly the case that hides this; D1 requests the 1st of each
+  month.
 - **A requested time snaps down to the frame whose period contains
-  it**, and a time outside the dataset's span, or in a gap between
-  irregular frames, is a 404. That is GIBS's behaviour, checked with
-  live requests (a mid-June date returns the June tile byte for byte; a
-  date in a gap returns 404 over WMTS). It is also what the clients
-  assume: QGIS rounds a request down to the period step, and CesiumJS
-  shows the interval that contains its clock. Clients that animate on
-  a fixed step — OpenSpace rounds simulation time to a configured
-  resolution — will ask for times that are not frame times and must
-  get the frame they are inside, not an error.
+  it**, and a time outside the dataset's span is a 404. That is GIBS's
+  behaviour, checked with live requests (a mid-June date returns the
+  June tile byte for byte; a date in a gap returns 404 over WMTS).
+  Clients need it: QGIS sends its temporal controller's frame start as
+  it is, CesiumJS shows the interval that contains its clock, and
+  clients that animate on a fixed step — OpenSpace rounds simulation
+  time to a configured resolution — ask for times that are not frame
+  times and must get the frame they are inside, not an error. D3a tests
+  the round trip: for every advertised time tᵢ, the snap of tᵢ is frame
+  *i* and the snap of tᵢ less a millisecond is frame *i* − 1.
 - **This deliberately differs from `/frames?at=`**, which returns the
   *closest* frame. A closest-frame rule shows a frame up to half a
   period before its own time, which for a forecast is showing the
@@ -744,7 +813,7 @@ pinned in `docs/protocol/` the way STAC's is (§8).
   only the latest 100 periods per layer and answers a `DescribeDomains`
   request for the rest; its 4326 document is 5.3 MB for 1,332 layers.
   Regular series here declare one `start/end/period` interval and need
-  no cap; irregular ones copy GIBS's.
+  no cap.
 - **Datasets with no real time axis** — a looping diagram animation, a
   "typical year" climatology — are not tiled in v1. Exposing a frame
   index as a non-time dimension is valid WMTS, but almost no client
@@ -756,9 +825,15 @@ pinned in `docs/protocol/` the way STAC's is (§8).
 - **`default`** — what the TerraViz globe shows. For an RGB dataset
   that is the frame. For a data-encoded dataset it is the frame with the
   dataset's own palette applied, through the same `buildColorScaleLut`
-  the shaders sample (`src/types/color-scale.ts`), so a tile and the
-  globe cannot disagree about colour. `transparentRange` and the
-  no-data band become alpha.
+  the shaders sample (`src/types/color-scale.ts`), so one code maps to
+  one colour on both, and the palette's alpha, its ramp and the no-data
+  band, becomes the tile's (§7.3). A tile and the globe can still
+  differ, and the abstract says how. Zoomed out, the globe point-samples
+  (nearest, no mipmaps: `src/services/earthTileLayer.ts`) where a tile
+  shows an area mean (§7.1). The globe shows the decoded H.264, about
+  one code of noise plus the codes a video round trip never produces,
+  where a tile cut from stored PNG frames has neither. And clients
+  magnify tiles with their own filters.
 - **Raw luma tiles are not offered.** A grey tile with a sidecar is
   useful only to a client that knows TerraViz's encoding, and those
   clients are TerraViz. Analysis on values goes through §4.2's rasters,
@@ -771,20 +846,38 @@ pinned in `docs/protocol/` the way STAC's is (§8).
 
 Every frame is brought to one canonical orientation before it is cut,
 using the overlay metadata the renderers already honour
-(`src/types/index.ts:125-143`):
+(`src/types/index.ts:125-143`), in the order the probe applies it:
 
 - **`isFlippedInY`** — flip to north-up.
-- **`lonOrigin`** — rotate so the left edge is −180°.
+- **`lonOrigin`** — rotate so the left edge is −180°. A `lonOrigin` that
+  is not a whole number of source pixels needs a sub-pixel shift, and
+  then §5.1's "no resampling at the native level" does not hold.
 - **`boundingBox`** — a regional frame is placed into its box on a
   transparent full-globe canvas, or, cheaper, cut only for the tiles it
-  touches, with the rest returning an empty tile.
+  touches, with the rest returning an empty tile. Placing it is a
+  resample, nearest neighbour for data, since its pixels never line up
+  with the global grid and need not be square in degrees: its width
+  implies W × 360 / (east − west) across the globe and its height
+  H × 180 / (north − south). Its native level comes from the finer of
+  the two (§7.1), so a 4096-wide frame over 60° is cut at level 5, not
+  level 2. A box crossing the antimeridian is split, which the probe
+  already supports (`src/services/datasetProbe.ts:56-63`). A regional
+  picture needs alpha, so it is PNG, not JPEG; GDAL fills a 3-band
+  tile it could not fetch with black, which §5.7's `ZeroBlockHttpCodes`
+  addresses.
+- **Precedence.** `latLonToTexelUv` ignores `lonOrigin` when the
+  bounding box is regional, and SOS rows carry ±180, so a cutter that
+  applied all three independently would shift a regional frame 180°.
+- **`celestialBody`** — a dataset of another body (`src/types/index.ts`)
+  is excluded from both grids, or a Mars dataset is published on Earth.
 
 These three are where an export most easily goes wrong. The renderers
 record a US bounding box landing over the South Pacific once already
 (`src/services/photorealEarth.ts:676`, `src/output/layerStack.ts:711`).
 The cutter should be tested against the probe the hover readout uses
 (`src/services/datasetProbe.ts:45`, `latLonToTexelUv`) rather than
-against its own idea of where a texel lands.
+against its own idea of where a texel lands, with a regional box and an
+antimeridian-crossing one among the cases.
 
 ### 5.6 Where tiles are made and kept
 
@@ -794,45 +887,91 @@ against its own idea of where a texel lands.
   (`cli/zyra-publish-from-dispatch.ts`), with GDAL. Not on request: a
   Pages Function decoding a 4096×2048 PNG per tile would spend the CPU
   budget the STAC rollout gate is already measuring.
-- **Stored in R2** under a content-addressed prefix keyed by the frame's
-  digest, the pattern `cli/lib/frame-store.ts` uses for frames, so a
-  re-published dataset re-cuts only frames that changed and a frame
-  shared by two datasets is cut once.
+- **Stored in R2** under a content-addressed prefix keyed by everything
+  that changes a tile: the frame's digest, the palette's digest, the
+  reduction method (which the publisher can change, q6), the
+  normalisation, the grid and a cutter-recipe version. Keyed by the
+  frame alone, a palette change would neither re-cut nor invalidate
+  anything. A re-published dataset re-cuts only what changed. Unlike
+  the earlier draft, this does not promise that a frame shared by two
+  datasets is cut once: `cli/lib/frame-store.ts` keys frames per
+  dataset (`videos/{datasetId}/frames/sha256/…`). An option D1 weighs:
+  one object per frame per grid with an offset index, read by R2 range
+  requests (the PMTiles-on-R2 pattern), which cuts the object count
+  about 380 times and makes clean-up trivial, since every tile passes
+  the Function anyway.
 - **Served by a Pages Function** that resolves `{time}` to a frame,
   reads the tile from R2, and caches at the edge. A Function in front
   (rather than a public bucket URL) is what makes time snapping, KVP
-  requests, CORS and visibility checks possible. CORS has to be open:
-  CesiumJS, MapLibre and OpenLayers draw tiles with WebGL, which refuses
-  a cross-origin image without `Access-Control-Allow-Origin`. Its cost is one Worker
-  invocation per tile request; at Cloudflare's request pricing that is
-  small next to the storage, but it is not zero. Tiles are served only
-  this way, never straight from the bucket, so every tile passes the
-  same checks (decided, §11 q12).
+  requests, CORS and visibility checks possible. Its cost is one Worker
+  invocation per tile request, which on a free-plan node is the binding
+  limit (§5.8). Tiles are served only this way, never straight from the
+  bucket, so every tile passes the same checks (decided, §11 q12).
+  - **Cache key**: the resolved digest after snapping, not the request
+    address, since OpenSpace and QGIS send off-frame times and an
+    address key would miss every time; `via` is stripped before the
+    lookup. An `ETag` and a finite max-age, a short one for `default`.
+  - **The time-to-frame index** is computed arithmetically for a
+    regular series, or memoised per isolate, not read from R2 per tile.
+  - **CORS** is `Access-Control-Allow-Origin: *` on every response:
+    tiles, 404s, a `403 feature_disabled`, capabilities, TileJSON and
+    the GDAL XML, with `OPTIONS` answered, since `public/_headers`
+    rules do not reach a Function's responses. MapLibre needs it
+    because it fetches tiles, and CesiumJS and OpenLayers' WebGL layer
+    because WebGL refuses a cross-origin image without it; OpenLayers'
+    default Canvas layer does not.
 - **Visibility follows the catalog.** Only public, published,
   non-retracted datasets get tiles, the same predicate the STAC
-  projection uses (`functions/api/v1/_lib/metadata-readiness.ts`), and a retraction removes the
-  layer from the capabilities document at once and the tiles at the
-  next sweep.
+  projection uses (`functions/api/v1/_lib/metadata-readiness.ts`). The
+  tile route checks it per dataset before any cache, memoised per
+  isolate for a short time, and a cold isolate that cannot read storage
+  refuses rather than serves, because §8 relies on retraction to
+  withdraw a dataset and to fail closed. A retraction removes the layer
+  from the capabilities documents and stops its tiles at once; a
+  clean-up job, built in D3a, deletes the objects later.
 
 ### 5.7 Capabilities and companions
 
-The WMTS capabilities document is generated by a Function from D1: one
-layer per eligible dataset, its time dimension, both tile matrix sets,
-the abstract, attribution and licence from the catalog record. Beside
-it, cheap per-layer companions for clients that do not read WMTS
-capabilities:
+Each projection's WMTS capabilities document (§5.2) is generated by a
+Function from the catalog database: one layer per eligible dataset, its
+time dimension, its one tile matrix set, the abstract, attribution and
+licence from the catalog record. Beside it, cheap per-layer companions
+for clients that do not read WMTS capabilities:
 
-- **TileJSON** for MapLibre and other XYZ web maps.
-- **A GDAL WMS XML** per layer, which is what OpenSpace and any
-  GDAL-based tool loads (§2.2).
+- **TileJSON** for MapLibre and other XYZ web maps, on the Mercator
+  grid only, since MapLibre cannot draw the lat/lon one. It sets
+  `"tileSize": 256`, or MapLibre assumes 512 and renders blurry. It has
+  no time, so it bakes in `default`, or one is offered per time. Its
+  `attribution` is escaped, since TileJSON 3.0 lets clients treat it as
+  HTML and Leaflet and OpenLayers insert it as it is.
+- **A GDAL WMS XML** per layer for GDAL-based tools, with
+  `ZeroBlockHttpCodes` of `204,404` (the default is 204 alone, so a
+  regional or gap 404 aborts the read), `BandsCount` 4 for PNG layers,
+  `MaxConnections` raised from 2, and a `<Cache>`, both of which shape
+  what a time step costs. A plain GDAL tool cannot follow time, so the
+  generic XML uses `default`.
+- **An OpenSpace asset, not just the XML.** OpenSpace needs a `.asset`
+  with a `Prototyped` table (start, end, `TemporalResolution`, a time
+  format) and the XML inline as the prototype carrying
+  `${OpenSpaceTimeId}` (`modules/globebrowsing/src/tileprovider/temporaltileprovider.cpp`).
+  D1 tests that asset. What §4's table calls WMTS for OpenSpace is
+  really GDAL's TMS driver over these tiles.
 - **A colour map and legend** per data-encoded layer, in GIBS's
   ColorMap v1.3 XML (source value ranges to colours, no-data flagged,
-  each entry classed as classification, continuous or discrete) with
-  SVG and PNG legends — generated from the dataset's `color_scale`, so
-  a client that already reads GIBS colour maps reads TerraViz's.
-- **STAC links** — each item gains `wmts` / `xyz` links under the STAC
-  web-map-links extension, so a STAC client finds the tiles from the
-  catalog it already reads (§4.3).
+  the first and last entries open-ended for clipping, §7.1), with SVG
+  and PNG legends generated from the dataset's `color_scale`, so a
+  client that already reads GIBS colour maps reads TerraViz's. In v1.3
+  the classification, continuous or discrete type sits on each
+  `<ColorMap>`'s `<Legend>`, not on its entries. It is linked as GIBS
+  links it, an `ows:Metadata` with the `…/colormap/1.3` role plus a
+  `Style/LegendURL`, PNG for WMS, which ArcGIS and QGIS show.
+- **STAC links** — each item gains links under the STAC web-map-links
+  extension, so a STAC client finds the tiles from the catalog it
+  already reads (§4.3). A REST `wmts` link uses `uriTemplate` and
+  `variables` (`wmts:dimensions` is for KVP only); an `xyz` link allows
+  only `{x}`, `{y}`, `{z}` and `{s}`, so the time is baked in, which
+  suits STAC items here being one per frame (`stac-history.ts`);
+  `tilejson` and `wms` links are added too.
 
 ### 5.8 Cost, roughly
 
@@ -841,10 +980,10 @@ Order-of-magnitude only; Phase D1 replaces these with measurements.
 | Quantity | Estimate |
 |---|---|
 | Tiles per 4096×2048 frame, WorldCRS84Quad layout at 512 px | 42 |
-| Tiles per frame, WebMercatorQuad at 256 px to level 4 | 341 |
-| Bytes per frame, all levels | ~1.3× the frame itself; a few MB as JPEG, more as PNG |
-| Per 1,000 frames, one grid | a few GB to ~15 GB |
-| Runner time per frame | seconds; dominated by PNG encoding |
+| Tiles per frame, WebMercatorQuad at 256 px to level 4 | 341, about 2× the lat/lon set's pixels (level 4 is 4096×4096) and 8× its objects |
+| Bytes per frame, all levels | ~1.3× the frame itself per lat/lon grid; a few MB as JPEG, more as PNG |
+| Per 1,000 frames, both grids | 3–4× the lat/lon grid alone: tens of GB |
+| Runner time per frame | seconds; likely dominated by the 383 uploads per frame rather than PNG encoding, unless tiles are packed (§5.6) |
 
 R2 charges for storage and operations but not for egress, so a popular
 layer costs requests and Function invocations, not bandwidth. The costs
@@ -852,6 +991,15 @@ that grow with the catalog are
 runner minutes and object counts on long animations, which is why
 §9 tiles datasets that have frames already, and leaves the legacy video
 catalog to a later, opt-in phase.
+
+**The free plan has a cliff.** Every Functions request counts against
+an account-wide 100,000 a day (`docs/SELF_HOSTING.md` §0.6). Past it, a
+fail-open setup loses its API and a fail-closed one its whole site.
+One OpenSpace show, which refetches every tile on screen at every step,
+can spend tens of thousands of those in an evening. And a WMS `GetMap`
+cannot fit the free plan's 10 ms of CPU, against 30 s by default on a
+paid plan. What the `tiles` switch should default to on a free-plan
+node is open (q26), and D4's gate names the plan it was measured on.
 
 ### 5.9 WMS with time
 
@@ -862,16 +1010,36 @@ clients. So a WMS 1.3.0 endpoint with a `TIME` dimension is in scope,
 built after the WMTS because it is served from the WMTS's pyramids.
 
 - **Served from the pyramid, never from source frames.** A `GetMap`
-  for a box, a size and a time picks the pyramid level nearest the
-  requested resolution in the matching grid — the lat/lon pyramid for
-  `CRS:84` and `EPSG:4326`, the Mercator pyramid for `EPSG:3857` —
-  stitches the tiles covering the box, and scales the result to the
-  requested size. Nothing is reprojected per request, and those three
-  are the only CRSs offered.
+  for a box, a size and a time picks the pyramid level at or finer than
+  the requested resolution in the matching grid — the lat/lon pyramid
+  for `CRS:84` and `EPSG:4326`, the Mercator pyramid for `EPSG:3857`,
+  with `EPSG:102100` and `EPSG:900913` accepted as aliases — stitches
+  the tiles covering the box, wrapping one that crosses the
+  antimeridian, and scales the result to the requested size. Nothing is
+  reprojected per request.
+- **Axis order.** In WMS 1.3, `EPSG:4326` puts the BBOX and
+  `BoundingBox` in latitude, longitude order while `CRS:84` uses
+  longitude, latitude, and QGIS and GDAL send 1.3 order. D4's tests
+  request a known asymmetric box in each, since stitching tested
+  against its own tiles cannot catch a transposed map.
+- **Versions.** Version negotiation, and 1.1.1 as well as 1.3.0: GDAL's
+  WMS default is 1.1.1, which OpenSpace's panel uses, and Google Earth
+  Pro is reported to speak only 1.1.1. 1.1.1 uses `SRS` and an `Extent`
+  element.
 - **Bounded.** `MaxWidth` and `MaxHeight` are 2048, ArcGIS's own
-  default, which bounds the tiles any one request stitches. Whether
-  that fits a Pages Function's CPU budget is a measurement, not an
-  assumption; Phase D1 makes it.
+  client default, which bounds the tiles any one request stitches;
+  QGIS splits its requests to fit. Whether that fits is a measurement,
+  not an assumption. All Pages Functions are one Worker, whose 128 MB
+  is per isolate and shared by concurrent requests and every route, so
+  a `GetMap` that runs out of memory takes unrelated API calls with it,
+  and R2 reads count toward six simultaneous connections, so 81 Mercator
+  tiles arrive in about 14 waves. D1 measures memory and CPU under
+  concurrency on both plan tiers, and a separate Worker for WMS is an
+  option.
+- **A cheap path for data layers.** Decode the indexed PNGs to their
+  indices, scale by nearest neighbour, and re-encode with the same
+  palette chunks: one byte a pixel and no colour arithmetic, which may
+  decide the CPU gate.
 - **The final scale follows §7.1.** A data layer is scaled by nearest
   neighbour, because its pyramid level already carries the dataset's
   own decimation and interpolating between palette colours would undo
@@ -882,7 +1050,10 @@ built after the WMTS because it is served from the WMTS's pyramids.
 - **Time follows §5.3, with one difference.** GIBS answers a WMS
   request for a date in a gap with a blank transparent image rather
   than a 404 (checked live), because a WMS client shows an error where
-  a tile client shows a gap. This copies that.
+  a tile client shows a gap. This copies that, in PNG, since a JPEG
+  answer cannot be transparent. A `TIME=a/b` range, which QGIS offers
+  as "whole range", is defined (the latest frame in it, say), and the
+  dimension declares `nearestValue` and `multipleValues` as served.
 
 ---
 
@@ -1458,7 +1629,7 @@ deeper than the source would only spend storage.
 | Spherical displays, Digistar | 2048 or 4096 wide | 30 fps | H.264 (assumed; confirm per vendor) |
 | Second Life | The face's media width, with the address's `width` to match: 1024 by default, 2048 for close viewing | Shared clock in the output page; a plain MP4 loops on its own | H.264; the 1024 rendition at 1.5–2 Mbit/s |
 | ArcGIS Online | `GetMap` ≤ 2048; Web Mercator native at level 4 for 4096 sources; zooming past the deepest level unknown | WMS time, as an interval or a list | PNG with a palette, or JPEG; CRF with LERC for analysis |
-| QGIS | Stretches | Rounds down to the period | Any |
+| QGIS | Stretches | Sends the frame start as it is; the server snaps (§5.3) | Any |
 | CesiumJS | Stretches | The interval containing its clock, no blending, prefetches the next | Any |
 | Google Earth | ≤ 2048 a side on the web | One TimeSpan per frame (Pro only) | JPEG or PNG |
 
@@ -1467,7 +1638,7 @@ deeper than the source would only spend storage.
 ## 8. Contract and governance
 
 - **A separate projection, like STAC.** Tiles, WMS and files are new
-  routes over the canonical D1 catalog. Nothing is added to
+  routes over the canonical catalog database (Cloudflare D1). Nothing is added to
   `WireDataset`, `/api/v1/catalog` or the signed federation feed —
   the boundary the metadata audit drew for STAC
   ([`metadata/README.md`](metadata/README.md) §Relationship to earlier
@@ -1504,7 +1675,8 @@ deeper than the source would only spend storage.
     with frames (§5.8) — and backfills nothing until someone asks for
     it (the delivery dispatch, §9.4). Cost grows with publishing, not
     all at once on the day of the upgrade. `SELF_HOSTING.md`'s upgrade
-    notes say so.
+    notes say so. Whether `tiles` should start on for a node on
+    Cloudflare's free plan is open (§5.8, q26).
   - **Checked in the Function, before any cache**, with the Orbit
     gate's last-known-good memo (`functions/api/_lib/orbit-gate.ts`).
     A cached tile or capabilities document is never served while its
@@ -1681,16 +1853,19 @@ outputs to other organisations (§6.5).
 
 | Question | How | Decides |
 |---|---|---|
-| Do the grids load, the right way up, at the right longitude? | Cut both pyramids; load in OpenSpace (GDAL XML), QGIS, CesiumJS and ArcGIS Map Viewer | §5.1, §11 q1–q3 |
+| Do the grids load, the right way up, at the right longitude? | Cut both pyramids; load in OpenSpace (an `.asset` with the GDAL XML inline, `MaxConnections` and `<Cache>` varied), QGIS, CesiumJS, MapLibre and Leaflet (Mercator at 512 and 256) and ArcGIS Map Viewer; declare the lat/lon CRS both ways (CRS84, the EPSG URN) and the depth both ways (one set with limits, per-depth ids) | §5.1, §11 q1–q3 |
 | Does each client snap time as §5.3 assumes? | Request off-frame times from each client; read the server log | §5.3, §11 q4 |
+| Do calendar periods and dates snap right? | A monthly and a yearly dataset requested on the 1st of each month; 12:00Z frames requested by date alone; a capabilities document with milliseconds in its times, to confirm QGIS refuses it | §5.3 |
+| Do regional frames land in place? | A regional dataset, and a pan across the antimeridian, in each client; whether a palette PNG's transparency survives GDAL's expansion to four bands | §5.5, §7.3 |
 | Does ArcGIS stretch past the deepest level or go blank? | Zoom past level 2 in Map Viewer | §11 q2 |
-| What does a `GetMap` cost? | Stitch-and-scale in the Worker; read Cloudflare's CPU time, not elapsed time | D4's go / no-go |
+| Is WMS axis order right? | QGIS `GetMap` in `EPSG:4326` and `CRS:84` over a known asymmetric box | §5.9 |
+| What does a `GetMap` cost? | Stitch-and-scale in the Worker, alone and under concurrency, on a free and a paid plan; read Cloudflare's CPU time and memory, not elapsed time | D4's go / no-go, §11 q26 |
 | What does a time step cost OpenSpace? | `h264-4096` at keyframe intervals of 1 s and 6 s (today's encode, `cli/lib/ffmpeg-hls.ts:352-357`), time-mapped, on the collaborators' dome | §6.1's keyframe rule |
 | Does OpenSpace's Folder mode read the dates right? | Dated frame names across a month boundary | §6.3, §11 q10 |
 | Do redirects survive a real session? | Point OpenSpace's `UrlSynchronization`, Second Life's video plugin and a browser globe material at a 302 to a digest path on the same route, and play longer than any cache lifetime, with a loop, a seek, a reconnect and a `HEAD` | §6.5, §8 |
 | Does an SOS site accept the directory? | Hand one to an SOS site or the SOS team | §6.4, §11 q9 |
 | Does a plain MP4 play on a Second Life sphere? | `h264-1024` through the video plugin, in Firestorm and Linden Lab's viewer | §2.3, §4 |
-| What does a pyramid cost? | Bytes, object count and cut time per frame on a GitHub runner | §5.8, D3a sizing |
+| What does a pyramid cost? | Bytes, object count, uploads and cut time per frame on a GitHub runner, as loose tiles and as one pack per frame | §5.6, §5.8, D3a sizing |
 
 The output is `docs/delivery/D1_PROTOTYPES.md`: the measurements, the
 answers, and an amendment to every section of this plan they
@@ -1759,7 +1934,7 @@ contradict.
 - **Counting** (§9.14): the three-layer platform classifier and the
   Analytics Engine writer as a pure module, the delivery dataset's
   binding in `wrangler.toml`, the files route's counts, the nightly
-  rollup into D1, the "unknown clients" report with its list of likely
+  rollup into the database, the "unknown clients" report with its list of likely
   names, and the Delivery panel in `/publish/analytics`.
 
 **Tests.** Pure tests for the encoder arguments and the manifest; a
@@ -1782,7 +1957,7 @@ pinned renditions, and decoding a data-encoded upload); palette-applied
 RGB and PNG frames need a colour check instead; the Scientific
 Visualization Reviewer for palette application and reduction; the
 API Platform Engineer for the route's shape; the Application Security
-Engineer for headers and CORS; and, because a D1 migration is one of
+Engineer for headers and CORS; and, because a database migration is one of
 `GOVERNANCE.md`'s high-scrutiny areas, the Code Reviewer migration
 first, with the PR saying whether a person outside the loop has
 reviewed it. The counting adds the `analytics-reviewer`, run before
@@ -1848,22 +2023,34 @@ need more than the usual `t()` keys.
 - **A shared pure module**, `src/types/tile-grid.ts`, used by the
   runner and the Functions alike, as `src/types/image-sequence-constants.ts`
   is: the two grids, tile bounds, the native level, the URL grammar,
-  lenient time parsing and the §5.3 snap.
+  lenient time parsing and the §5.3 snap, with calendar arithmetic for
+  `P1M` and `P1Y` and the rule for a time given by date alone. Today's
+  `functions/api/v1/_lib/iso-duration.ts` counts a month as 30.44 days,
+  which is fine for `/frames?at=`'s nearest frame and wrong for a floor:
+  from 2020-01-01, a request for 2020-03-01 would land on February.
 - **The cutter** (`cli/lib/tile-cutter.ts`): normalise each frame
   (§5.5), place it at the native level, and build each coarser level
   from the source with the dataset's method and a valid-area channel
-  (§7.1) — in TypeScript, because GDAL's overview builder averages
-  palette codes, not values, and knows nothing of the no-data band —
-  then write indexed PNG for data-encoded layers, JPEG for natural
-  pictures and PNG for `colour-mapped` ones, under a prefix keyed by
-  the frame's digest.
+  (§7.1) — in TypeScript, because GDAL's overview builder averages a
+  palette image's colours and picks the nearest entry, never the values
+  the codes stand for, and knows nothing of the no-data band — then
+  write indexed PNG for data-encoded layers, JPEG for natural pictures
+  and PNG for `colour-mapped` ones, under the key §5.6 lists. The
+  indexed PNG's palette chunks are written directly: a general encoder
+  in palette mode, libvips's included, re-quantises and reorders the
+  palette, which would fail the byte-for-byte test below.
 - **The Web Mercator set** taken by nearest neighbour from the lat/lon
   level of the same width, two coarser lat/lon levels (512 and 256
   wide) included, so the method is applied once and the warp never
   averages (§7.1). GDAL is installed in the runner from apt, the way
   ffmpeg already is (`.github/workflows/transcode-hls.yml:146`).
 - **A per-dataset index** in R2 from frame time to frame digest, which
-  the serving route reads to snap a time.
+  the serving route memoises per isolate, or skips for a regular series
+  whose index is arithmetic (§5.6).
+- **Sharding.** A long series is cut across several jobs by frame
+  range, since a GitHub-hosted job stops at six hours.
+- **Clean-up.** A sweep that deletes the tiles of a dataset retracted,
+  unpublished or re-cut, which §5.6 relies on.
 - **The `tiles` switch** (§8): its key, its row in the Features card,
   and its check in the publish dispatch, so it is in place before any
   route serves a tile. D3b and D4 add the check to each route.
@@ -1872,7 +2059,11 @@ need more than the usual `t()` keys.
 uses: for random points, a native-level tile pixel equals the source
 texel `latLonToTexelUv` names (`src/services/datasetProbe.ts:45`),
 after normalisation — a regional bounding box included, since that is
-where a US box once landed over the South Pacific. At every level,
+where a US box once landed over the South Pacific, and one crossing the
+antimeridian. For every advertised time tᵢ, snap(tᵢ) is frame i and
+snap(tᵢ − 1 ms) is frame i − 1, on a monthly and a yearly series as
+well as a daily one, and a time given by date alone selects the frame
+on that date. At every level,
 against source cells: `mean` equals the area-weighted mean
 `datasetStats.ts` computes over the same cells, and a pixel is no-data
 exactly when less than half its source area is valid; `mode` breaks
@@ -1884,8 +2075,11 @@ Mercator matches lat/lon under nearest neighbour. A ramp-and-edge frame
 is loaded in every client at native and zoomed in, and no colour off
 the palette appears at an edge.
 
-**Gate.** Those tests pass on D1's two datasets, and a 1,000-frame
-pyramid builds inside the runner time D1 measured.
+**Gate.** Those tests pass on D1's two datasets, and the longest series
+the catalog holds (3,650 frames, `docs/metadata/PHASE4_IMPLEMENTATION.md`)
+builds both grids inside GitHub's six-hour job limit, sharded as built.
+A gate measured against D1's own runner time would pass by
+definition.
 
 **Reviewers.** The Scientific Visualization Reviewer for the reduction
 methods and colouring; the Video Streaming Engineer for the workflow
@@ -1894,12 +2088,16 @@ change; the Code Reviewer.
 ### 9.8 D3b — WMTS
 
 **Builds.** `functions/api/v1/wmts/[[path]].ts` with helpers in
-`functions/api/v1/_lib/`: RESTful and KVP `GetTile`; a capabilities
-document generated from D1 under the STAC projection's eligibility
-rules; snapping through the shared module, 404 for gaps, `default` the
-latest frame; edge caching; open CORS. Beside it, per layer: TileJSON,
-a GDAL WMS XML, and for data-encoded layers a GIBS ColorMap v1.3 file
-with SVG and PNG legends generated from the dataset's `color_scale`.
+`functions/api/v1/_lib/`: RESTful and KVP `GetTile` and
+`GetCapabilities`; one capabilities document per projection and one per
+dataset (§5.2), generated from the catalog database under the STAC
+projection's eligibility rules and checked per dataset before any cache
+(§5.6); snapping through the shared module, 404 for times outside the
+span and OGC exception reports for malformed requests, `default` the
+latest frame; edge caching keyed by the resolved digest; CORS on every
+response. Beside it, per layer: TileJSON, a GDAL WMS XML, an OpenSpace
+asset, and for data-encoded layers a GIBS ColorMap v1.3 file with SVG
+and PNG legends generated from the dataset's `color_scale` (§5.7).
 Capabilities documents and layer configurations are counted, tiles are
 not, and a tag on a capabilities request is carried into the tile
 addresses it advertises (§9.14).
@@ -1909,12 +2107,16 @@ and OGC's own WMTS test suite in a CI job that runs only when asked,
 as `.github/workflows/stac-api.yml` runs the STAC validators. Client
 tests that run only when their tools are present, on the pattern of
 the QGIS check in `functions/api/v1/stac/clients.test.ts:31`: QGIS
-animates a layer, `gdalinfo` opens the GDAL XML, CesiumJS in headless
-Chromium draws a tile at a known time.
+animates a layer; `gdallocationinfo` reads the GDAL XML at known
+points and matches `latLonToTexelUv` (`gdalinfo` alone fetches no
+pixels); CesiumJS in headless Chromium draws a tile at a known time.
+CORS headers are checked on a 200, a 404 and a `403 feature_disabled`.
 
 **Gate.** The OGC suite passes for everything the capabilities
 advertise; QGIS, CesiumJS, OpenSpace and ArcGIS Map Viewer each load a
-layer on a preview deploy; CPU per tile request is measured there.
+layer on a preview deploy (Map Viewer the Mercator layer at its default
+time, which is all it reads); CPU per tile request is measured there,
+on the plan tier named (q26).
 
 **Reviewers.** The API Platform Engineer and the TerraViz Federation
 Reviewer for a new published contract; the Scientific Visualization
@@ -1944,28 +2146,37 @@ metadata; the Technical Writer for `SELF_HOSTING.md`.
 ### 9.10 D4 — WMS with time
 
 **Builds.** `functions/api/v1/wms.ts`: capabilities with a `TIME`
-dimension per layer, and `GetMap` in `CRS:84`, `EPSG:4326` and
-`EPSG:3857`, stitched from the pyramids and scaled, at most 2048 a
-side, nearest neighbour for data layers, a transparent image for a gap
-(§5.9). Capabilities are counted; maps are not (§9.14).
+dimension per layer, in versions 1.3.0 and 1.1.1 with negotiation, and
+`GetMap` in `CRS:84`, `EPSG:4326` and `EPSG:3857` (with its two
+aliases), stitched from the pyramids and scaled, at most 2048 a side,
+nearest neighbour for data layers, a transparent PNG for a gap (§5.9).
+Capabilities are counted; maps are not (§9.14).
 
 **The CPU gate comes first.** Before any route lands, the worst-case
 `GetMap` — 2048×2048, in each CRS, a data layer and a picture layer —
 is measured on an isolated preview deployment against its CPU limit,
+with memory under concurrent requests, since every Pages Function
+shares one Worker's isolates, and on both a free and a paid plan,
 by the protocol the STAC rollout gate uses
 (`docs/metadata/PHASE4_IMPLEMENTATION.md` §Rollout Gate). Decoding and
 encoding images inside a Worker means a WebAssembly codec, which is a
 new dependency, accepted if the CPU test passes (decided, §11 q15). If
 the measurement
-fails, D4 stops there: ArcGIS users get one WMTS layer per frame with
-time-based visibility (§2.1), which works for short series and not for
-long ones, and the plan says so.
+fails, D4 stops there: ArcGIS users get one XYZ item per frame, the
+time in its path, with time-based visibility (§2.1), which works for
+short series and not for long ones, and the plan says so. A WMTS layer
+per frame does not work, since ArcGIS shows only a layer's default
+time.
 
 **Tests.** OGC's WMS 1.3 test suite in the same opt-in CI job; the
-stitching tested against the tiles it came from.
+stitching tested against the tiles it came from; and a known asymmetric
+box requested in `EPSG:4326` and `CRS:84`, in 1.3.0 and 1.1.1, since
+stitching checked only against its own tiles cannot catch a transposed
+map.
 
 **Gate.** ArcGIS Map Viewer's time slider animates a layer from a
-preview deploy, and QGIS's Temporal Controller does the same.
+preview deploy, and QGIS's Temporal Controller does the same. The gate
+names the plan tier it was measured on (q26).
 
 **Reviewers.** As D3b.
 
@@ -2146,7 +2357,7 @@ exclusion has to be a mechanism rather than an intention:
   row, with its arrival time, for about three months, and when a month
   closes its rollup rows are recomputed from Analytics Engine, which
   still holds the whole month. No daily row carrying a country is kept
-  in D1.
+  in the database.
 - **The platform's version, as `major.minor`**, for platforms on the
   curated list only, and only on a layer load or a download — never on
   anything finer. It answers support questions such as whether to rely
@@ -2193,7 +2404,10 @@ each open in a different way.
      `curl`, RFC 9110's `name/version` form, version dropped) are
      matched anywhere in the string, not only first, since every
      browser's User-Agent starts `Mozilla/5.0` and QGIS's own token
-     comes later. Only the curated name is stored. An unknown first
+     comes later: QGIS sends `Mozilla/5.0 QGIS/34000/<OS>`
+     (`src/core/network/qgsnetworkaccessmanager.cpp`), whose version
+     is an integer to decode (34000 is 3.40) for the versions table.
+     Only the curated name is stored. An unknown first
      token is accepted only if it is an RFC 9110 `token` with no `@`,
      at most 32 characters, and no run of six or more digits or eight
      or more hex characters (the `sanitizeMessage` rule); anything else
@@ -2333,7 +2547,7 @@ configures no Workers Logs, that is the most detailed per-request
 record the operator has, so who holds the Analytics Engine SQL token
 matters and `SELF_HOSTING.md` says so.
 
-From there a monthly rollup writes to D1, which the publisher portal's
+From there a monthly rollup writes to the catalog database, which the publisher portal's
 analytics tab already reads (`docs/ANALYTICS_STORAGE_AND_ADMIN_PLAN.md`
 Phase A), as **separate tables, never one cross-table**, since a
 single cell like (one dataset, frame zip, QGIS 3.34, one small country,
@@ -2439,7 +2653,7 @@ people never see the app:
   whoever runs both the site and the node can match records by time
   and country;
 - section 6's additions: the Analytics Engine dataset, its retention,
-  the D1 tables, and that nothing goes to R2;
+  the database tables, and that nothing goes to R2;
 - Vimeo, whose CDN sees the requester's address when the files route
   redirects a legacy video there, and which the policy does not
   mention today for the app either.
@@ -2519,7 +2733,9 @@ stays a draft for review.
    Mercator set only.
 3. **Is Esri's "WGS 1984 Version 2" scheme the same as the lat/lon
    layout?** It decides whether ArcGIS Scene Viewer can use the lat/lon
-   pyramid.
+   pyramid. From memory it is two tiles of 0.703125° pixels from −180,
+   90, which is WorldCRS84Quad; Esri states scales at 96 DPI, so D1
+   compares resolutions rather than scale denominators.
 4. *Decided 2026-11-06 by the maintainer:* tiles snap to the containing
    period as GIBS does, `/frames?at=` keeps the closest frame, and the
    difference is documented on both routes (§5.3).
@@ -2636,6 +2852,16 @@ stays a draft for review.
     - don't count the request;
     - count it with no country, version or domain, which keeps totals
       whole at the cost of one header read.
+26. **What should the `tiles` switch default to on a free-plan node?**
+    Every Functions request counts against an account-wide 100,000 a
+    day, one OpenSpace show can spend tens of thousands of them, and a
+    WMS `GetMap` cannot fit the free plan's 10 ms of CPU (§5.8). The
+    2026-11-07 decision put every delivery switch on by default, which
+    a free-plan node may not survive. Options:
+    - a separate `wms` switch, so WMS can be off while WMTS stays on;
+    - `tiles` off by default on a free plan, on on a paid one, with
+      `SELF_HOSTING.md` saying why;
+    - leave it on everywhere and say what it costs.
 
 ---
 
