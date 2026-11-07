@@ -1048,7 +1048,8 @@ of the page, never raise it, and write nothing:
   `#`, and a repeated key's off value wins, since it can only lower.
   A host's embed code carries it for everyone who sees the embed; it
   works on any page of the app. The app's own address rewrites keep
-  both parts, so it survives a change of dataset and a reload.
+  both parts, so it survives a change of dataset and a reload, and
+  related-dataset links carry them into a tab opened from the link.
 - **Global Privacy Control, on every page**, read once, as the page
   loads, like the address. In the embed view it is the only preference
   the app can hear. Honouring it everywhere rather

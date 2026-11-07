@@ -513,51 +513,93 @@ function renderRelatedDatasetsHtml(
   html += `<ul class="info-related">`
   for (const entry of manualLinks) {
     if (entry.match) {
-      html += `<li><a href="${escapeAttr(relatedHref(entry.match))}" data-dataset-id="${escapeAttr(entry.match.id)}">${escapeHtml(entry.label)}</a></li>`
+      html += `<li>${relatedLinkHtml(entry.match, entry.label)}</li>`
     } else {
       html += `<li><span class="info-related-offcatalog">${escapeHtml(entry.label)}</span></li>`
     }
   }
   for (const candidate of algorithmic) {
-    html += `<li><a href="${escapeAttr(relatedHref(candidate))}" data-dataset-id="${escapeAttr(candidate.id)}">${escapeHtml(candidate.title)}</a></li>`
+    html += `<li>${relatedLinkHtml(candidate, candidate.title)}</li>`
   }
   html += `</ul></div>`
   return html
 }
 
 /**
- * Where a related-dataset link goes: the dataset's own address, with
- * the rest of this page's query and the part after `#` kept. It is the
- * link's real `href`, not only what a click pushes, because a middle
- * click or "Open link in new tab" never reaches the click handler, and
- * a bare `?dataset=` would drop a host's `telemetry=0` there
- * (`src/analytics/pageOptOut.ts`). A draft-preview token is dropped, as
- * on every other dataset change (`buildDatasetPath`).
+ * Query keys a related link leaves out of its `href`, the address a new
+ * tab or a copied link opens. `tourEdit` names the draft this tab's
+ * authoring dock owns, and a second tab on it would autosave over the
+ * first. A click keeps it, since it stays in this tab.
  */
-function relatedHref(dataset: DatasetUrlRef): string {
-  return buildDatasetPath(dataset, window.location.search, window.location.hash)
+const NEW_TAB_DROPPED_KEYS = ['tourEdit'] as const
+
+/**
+ * The address a click on a related link pushes: the dataset's own, with
+ * the rest of the query and the part after `#` as they are at the
+ * moment of the click, not when the panel rendered, since the catalog
+ * tabs, the browse filters and the tour dock all rewrite the address
+ * without re-rendering it. A draft-preview token is dropped, as on
+ * every other dataset change (`buildDatasetPath`).
+ */
+function relatedAddress(ref: DatasetUrlRef, search: string = window.location.search): string {
+  return buildDatasetPath(ref, search, window.location.hash)
 }
 
 /**
- * Wire related-dataset links within `scope` to load in-place. The URL
- * the click pushes is the link's own `href` (`relatedHref`), so it
- * preserves any existing `?catalog=true` flag (Phase 1 §3.2) — a
- * related-link click while in catalog mode keeps the catalog↔sphere
- * tab control visible, the same contract as `selectDatasetFromBrowse`
- * in main.ts — and a click and a new tab land on the same address.
- * Extracted so the async semantic enhancement can re-wire its
- * freshly-rendered links.
+ * A related link's `href`: the same address, less
+ * `NEW_TAB_DROPPED_KEYS`. It has to be the real destination, because a
+ * middle click, a modified click or "Open link in new tab" never
+ * reaches the click handler, and a bare `?dataset=` would drop a host's
+ * `telemetry=0` there (`src/analytics/pageOptOut.ts`). Rebuilt as the
+ * visitor reaches for the link (`wireRelatedLinks`), for the same reason
+ * the click reads the address afresh.
+ */
+function relatedHref(ref: DatasetUrlRef): string {
+  const params = new URLSearchParams(window.location.search)
+  for (const key of NEW_TAB_DROPPED_KEYS) params.delete(key)
+  const query = params.toString()
+  return relatedAddress(ref, query ? `?${query}` : '')
+}
+
+/** One related link. The `href` goes through `escapeHtml`, which
+ *  escapes `&`, so a query key such as `not-x` cannot be read back as
+ *  the `&not` entity. */
+function relatedLinkHtml(dataset: DatasetUrlRef, label: string): string {
+  const slug = dataset.slug ? ` data-dataset-slug="${escapeAttr(dataset.slug)}"` : ''
+  return `<a href="${escapeHtml(relatedHref(dataset))}" data-dataset-id="${escapeAttr(dataset.id)}"${slug}>${escapeHtml(label)}</a>`
+}
+
+/**
+ * Wire related-dataset links within `scope` to load in-place. The click
+ * pushes `relatedAddress`, which keeps any existing `?catalog=true` flag
+ * (Phase 1 §3.2), so a related-link click while in catalog mode keeps
+ * the catalog↔sphere tab control visible — the same contract as
+ * `selectDatasetFromBrowse` in main.ts — and pushes nothing when the
+ * address would not change. A modified click or another button is left
+ * to the browser, which opens the link's freshly built `href` in a new
+ * tab or window. Extracted so the async semantic enhancement can
+ * re-wire its freshly-rendered links.
  */
 function wireRelatedLinks(scope: ParentNode, onLoadDataset: (id: string) => void): void {
-  scope.querySelectorAll('a[data-dataset-id]').forEach(link => {
+  scope.querySelectorAll<HTMLAnchorElement>('a[data-dataset-id]').forEach(link => {
+    const id = link.dataset.datasetId
+    if (!id) return
+    const ref: DatasetUrlRef = { id, slug: link.dataset.datasetSlug }
+    const refresh = (): void => link.setAttribute('href', relatedHref(ref))
+    link.addEventListener('pointerdown', refresh)
+    link.addEventListener('focus', refresh)
+    link.addEventListener('contextmenu', refresh)
     link.addEventListener('click', (ev) => {
-      ev.preventDefault()
-      const id = (link as HTMLElement).dataset.datasetId
-      const href = link.getAttribute('href')
-      if (id && href) {
-        window.history.pushState({}, '', href)
-        onLoadDataset(id)
+      if (ev.button !== 0 || ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.altKey) {
+        refresh()
+        return
       }
+      ev.preventDefault()
+      const next = relatedAddress(ref)
+      if (next !== `${window.location.pathname}${window.location.search}${window.location.hash}`) {
+        window.history.pushState({}, '', next)
+      }
+      onLoadDataset(id)
     })
   })
 }

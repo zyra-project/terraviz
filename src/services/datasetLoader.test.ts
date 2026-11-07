@@ -440,6 +440,80 @@ describe('displayDatasetInfo', () => {
     ])
   })
 
+  function renderRelated(onLoad = vi.fn()): HTMLAnchorElement {
+    const target = makeDataset({
+      id: 'target',
+      enriched: { relatedDatasets: [{ title: 'Wind', url: '' }] },
+    })
+    displayDatasetInfo(target, [makeDataset({ id: 'related-1', title: 'Wind' })], onLoad)
+    return document.querySelector('a[data-dataset-id="related-1"]') as HTMLAnchorElement
+  }
+
+  // The catalog tabs, the browse filters and the tour dock rewrite the
+  // address without re-rendering the panel, so a click built from the
+  // render-time address would undo them.
+  it('builds the click from the address at the moment of the click, not at render', () => {
+    window.history.replaceState({}, '', '/?catalog=true&tourEdit=new&dataset=target')
+    const link = renderRelated()
+    // The visitor switches to the Sphere tab and the dock saves a draft.
+    window.history.replaceState({}, '', '/?tourEdit=01ABC&dataset=target')
+    link.click()
+    expect(window.location.pathname).toBe('/dataset/related-1')
+    const params = new URLSearchParams(window.location.search)
+    expect(params.get('catalog')).toBeNull()
+    expect(params.get('tourEdit')).toBe('01ABC')
+  })
+
+  it('refreshes the href as the visitor reaches for the link, without tourEdit', () => {
+    window.history.replaceState({}, '', '/?catalog=true&tourEdit=new&dataset=target')
+    const link = renderRelated()
+    expect(link.getAttribute('href')).toBe('/dataset/related-1?catalog=true')
+    window.history.replaceState({}, '', '/?telemetry=0&tourEdit=01ABC&dataset=target#telemetry=0')
+    link.dispatchEvent(new Event('pointerdown'))
+    // A new tab must not open a second authoring dock on this tab's draft.
+    expect(link.getAttribute('href')).toBe('/dataset/related-1?telemetry=0#telemetry=0')
+  })
+
+  it('escapes & in the href, so a key such as not-x is not read as an entity', () => {
+    window.history.replaceState({}, '', '/?embed=1&not-x=1&times_x=2&dataset=target')
+    const link = renderRelated()
+    expect(link.getAttribute('href')).toBe('/dataset/related-1?embed=1&not-x=1&times_x=2')
+  })
+
+  it('leaves a modified click to the browser, with a fresh href', () => {
+    window.history.replaceState({}, '', '/?dataset=target')
+    const onLoad = vi.fn()
+    const link = renderRelated(onLoad)
+    window.history.replaceState({}, '', '/?telemetry=0&dataset=target')
+    let prevented: boolean | null = null
+    document.addEventListener(
+      'click',
+      (ev) => {
+        prevented = ev.defaultPrevented
+        ev.preventDefault() // keep the test page from navigating
+      },
+      { once: true },
+    )
+    link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true }))
+    expect(prevented).toBe(false)
+    expect(onLoad).not.toHaveBeenCalled()
+    expect(link.getAttribute('href')).toBe('/dataset/related-1?telemetry=0')
+  })
+
+  it('pushes no history entry when the address would not change', () => {
+    window.history.replaceState({}, '', '/dataset/related-1?embed=1')
+    const onLoad = vi.fn()
+    const link = renderRelated(onLoad)
+    const push = vi.spyOn(window.history, 'pushState')
+    try {
+      link.click()
+      expect(onLoad).toHaveBeenCalledWith('related-1')
+      expect(push).not.toHaveBeenCalled()
+    } finally {
+      push.mockRestore()
+    }
+  })
+
   it('toggles expand/collapse when header is clicked', () => {
     displayDatasetInfo(makeDataset(), [], vi.fn())
 
