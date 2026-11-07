@@ -62,7 +62,11 @@ The app has three telemetry modes. You can see which mode is active —
 and change it — under **Tools → Privacy**, except in the app's minimal
 embedded view (an address with `embed=1`, which sites embedding the app
 normally use), which has no Tools menu (see "The app inside another
-site's page" under Mode 1).
+site's page" under Mode 1). Whatever mode you chose, a page sends no
+telemetry if your browser sends Global Privacy Control, or if the
+address it was opened with turns telemetry off, and the Privacy panel
+says so when either applies (section 8). No address can turn telemetry
+on over your own choice.
 
 ### Mode 1 — Essential (on by default)
 
@@ -193,10 +197,11 @@ Small, anonymous events about the health of the app:
   notice, so there is no Privacy panel to reach. And in any frame on
   another site, a mode you chose on this site does not carry over:
   current browsers keep a framed page's storage separate for each site
-  it appears on. Instead, the minimal embedded view reports nothing if
-  your browser sends Global Privacy Control, and any embed reports
-  nothing if the site embedding it turns reporting off; section 8 has
-  the details
+  it appears on. So an embed sends these Essential events unless your
+  browser or the site embedding it turns that off: no page of the app
+  sends telemetry if your browser sends Global Privacy Control, and an
+  embed sends none if the site embedding it turns telemetry off.
+  Section 8 has the details
 - When something goes wrong — a classification of the error (tile
   fetch, video stream, AI model, uncaught exception, browser-console
   message, native crash on desktop, or a globe's page), a short sanitized summary of
@@ -617,23 +622,29 @@ profiles, or sell to third parties.
 ## 8. Your choices
 
 - **Change telemetry mode** at any time: **Tools → Privacy**. Changes
-  take effect immediately — no restart required
+  take effect immediately — no restart required — except on a page
+  that sends no telemetry because of Global Privacy Control or its
+  address (both below). There the panel says so, and the mode you pick
+  is saved and used on visits without that reason
+- **Your browser's Global Privacy Control setting.** If your browser
+  sends it, the app sends no telemetry, on any page, embedded or not,
+  whatever mode you chose. Turn the setting off in your browser to let
+  your chosen mode apply again
 - **Inside another site's page** a mode you chose on this site does
   not reach the frame, and the minimal embedded view has no Privacy
-  panel at all (section 2). Three things stop an embedded view from
-  reporting instead:
-  - **Your browser's Global Privacy Control setting.** If your browser
-    sends it, the minimal embedded view reports nothing. (Outside that
-    view, the notice and the Privacy panel are your controls.)
-  - **The site embedding the app.** It can turn reporting off for
+  panel at all (section 2). Three things stop an embedded view sending
+  telemetry instead:
+  - **Your browser's Global Privacy Control setting**, as above.
+  - **The site embedding the app.** It can turn telemetry off for
     everyone who sees its embed, by adding `telemetry=0` to the
     address it embeds.
   - **A browser content blocker** that blocks requests to this site's
     `/api/ingest`.
 - **The same `telemetry=0` works on any address of the app**, not only
-  an embed: a page opened with it reports nothing for that visit, and
-  the Privacy panel says so. Your own setting stays as you left it for
-  visits without it
+  an embed: a page opened with it sends no telemetry for that visit,
+  and the Privacy panel says so. Your own setting stays as you left it
+  for visits without it. No address can turn telemetry on over your
+  own choice: `telemetry=1` leaves it as you set it
 - **Disable telemetry entirely**: pick "Off" in the same panel
 - **Run a telemetry-free build**: the source code is public; you or
   someone you trust can build the app with the compile-time

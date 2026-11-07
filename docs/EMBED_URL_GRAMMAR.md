@@ -21,9 +21,14 @@ The parameters are read at boot by `src/main.ts` and the helpers in
 `src/utils/{catalogMode,embedMode,posterDeepLinks}.ts` /
 `src/services/deepLinkService.ts`, and `telemetry` by
 `src/analytics/pageOptOut.ts`. Behaviour is deliberately
-conservative: an unknown parameter value is a silent no-op, and the
-URL is not rewritten after boot, so a refresh preserves the linked
-state. The output page's parameters (below) are read by
+conservative: an unknown parameter value is a silent no-op. The app
+does rewrite its own address, at boot and as the visitor moves around:
+the dataset on screen goes in the path as `/dataset/<slug>`, and the
+catalog view and its filters set their own keys. Every such rewrite
+keeps the rest of the query and the part after `#` as they were
+(`src/utils/datasetUrl.ts`), so a refresh preserves the linked state
+and a key a host set, `telemetry` included, is still there after it.
+The output page's parameters (below) are read by
 `src/output/webMode.ts`, at load and on every change to the part after
 `#`, under the same rules, and applied by `src/output/webOutput.ts`,
 `webDataset.ts` and `webClock.ts`.
@@ -56,7 +61,7 @@ wins, and `?tour=` is skipped when `?dataset=` is also set —
 | Parameter | Value | Effect | Source |
 |---|---|---|---|
 | `dataset` | catalog ID (e.g. `INTERNAL_SOS_123`) | Boot straight into that dataset on the globe. | `src/main.ts` initial-load path |
-| *(path form)* `/dataset/<id>` | catalog ID | Equivalent to `?dataset=<id>`; canonicalized to the query form at boot. | `src/services/deepLinkService.ts:72-77` |
+| *(path form)* `/dataset/<id>` | slug or catalog ID | Equivalent to `?dataset=<id>`, and the canonical form: at boot either form is rewritten to `/dataset/<slug>` (the ID, for a dataset without a slug), keeping the rest of the query and the part after `#`. | `src/utils/datasetUrl.ts`, `src/services/deepLinkService.ts:72-77` |
 | `tour` | tour slug, catalog ID, or legacy ID | Boot straight into a tour. Resolves **only** to rows whose `format === 'tour/json'`; a non-tour match is a no-op by design. | `src/utils/posterDeepLinks.ts:111-137` |
 | `catalog` | `true` (or any value except `false`/`0`) | Catalog mode — the dataset browser is the primary surface; the globe stays hidden until selection. | `src/utils/catalogMode.ts:21-28` |
 | `preview` | opaque token (with `&dataset=<id>`) | Load a token-gated **draft** dataset. For authoring previews, not public embeds. | `src/main.ts` preview deep-link path |
@@ -82,7 +87,7 @@ grid is the point of that embed.
 
 | Parameter | Value | Effect |
 |---|---|---|
-| `telemetry` | `1` or `true` (case-insensitive, untrimmed) leaves reporting as the visitor set it; **any other value**, a bare `telemetry` and an empty value included, turns it off | Whether this page load sends the app's anonymous telemetry. It can only turn reporting **off**: `telemetry=1` never turns on telemetry a visitor switched off, and when the key appears more than once, a value that turns it off wins. Read once, when the page loads, from the query **and** the part after `#`, so `#telemetry=0` works too; a later change to the address does not turn it back on. Applies to any page of the app, not only `embed=1`. Nothing is stored, so the visitor's own setting stands on their next visit without it. |
+| `telemetry` | `1` or `true` (case-insensitive, untrimmed) leaves reporting as the visitor set it; **any other value**, a bare `telemetry` and an empty value included, turns it off | Whether this page load sends the app's anonymous telemetry. It can only turn reporting **off**: `telemetry=1` never turns on telemetry a visitor switched off, and when the key appears more than once, a value that turns it off wins. Read once, when the page loads, from the query **and** the part after `#`, so `#telemetry=0` works too. A later change to the address neither turns it off nor back on, so a host that decides after the frame has loaded has to reload it. Applies to any page of the app, not only `embed=1`. Nothing is stored, so the visitor's own setting stands on their next visit without it. |
 
 **What an embed reports, and what a host can do about it.** An
 embedded view (`embed=1`) sends the same anonymous Essential telemetry
@@ -94,21 +99,27 @@ storage separate per site. So the host page's own privacy promise has
 to cover it, or the embed code turns it off:
 
 ```text
-https://terraviz.zyra-project.org/?dataset=INTERNAL_SOS_123&embed=1&telemetry=0
+https://terraviz.zyra-project.org/?telemetry=0&dataset=INTERNAL_SOS_123&embed=1
 ```
 
-Put it in the **query**, as above. `#telemetry=0` turns reporting off
-for that page load too, but when the visitor changes dataset the app
-rewrites the address keeping the query and not the part after `#`, so a
-reload after that would report again. A query key survives every
-address the app writes.
+Put it first, straight after the `?`, as above. A content system that
+escapes the `&` twice turns `&telemetry=0` into a key named
+`amp;telemetry`, which the app does not read, so the embed would go on
+reporting; the first key has no `&` in front of it to escape.
+`#telemetry=0` works as well, for a host that writes its settings
+there, since the app keeps both parts of the address whenever it
+rewrites it. Then check: open the host page with the browser's
+developer tools on the Network tab, and confirm that no request goes to
+`/api/ingest`. That check matters most when the node is someone else's,
+because a node that has not deployed this ignores the key, and nothing
+a node publishes says whether its build reads it.
 
 Two things hold whatever the host writes:
 
-- **Global Privacy Control turns it off in the embed view.** A visitor
-  whose browser sends it is not reported there, since the notice it
-  would otherwise answer is never shown. Outside the embed view the
-  notice and the Privacy panel are the visitor's controls.
+- **Global Privacy Control turns it off.** A visitor whose browser
+  sends it is not reported, on any page of the app, embedded or not.
+  It is not a parameter, and `embed=1` changes nothing about it. The
+  Privacy panel, where there is one, says so.
 - **The framing page is never recorded.** The app notes that it is in
   a frame, and whether `embed=1` was set (`session_start.window_context`);
   it never reads the host page's address. The dataset or tour an embed
@@ -165,7 +176,9 @@ It draws the globe unwrapped into a 2:1 equirectangular picture with
 no chrome at all. That is the texture a sphere, a dome or a Second Life
 prim is wrapped in
 ([`SECOND_LIFE_COMPAT.md`](SECOND_LIFE_COMPAT.md) §7). So none of the
-main app's parameters apply here, and these apply nowhere else. A bare
+main app's parameters apply here, and these apply nowhere else, with
+one exception: `telemetry` is read by both, with opposite defaults
+([Privacy parameters](#privacy-parameters--what-the-page-reports)). A bare
 address is the live Earth: today's clouds and the real day/night line.
 
 **The query and the fragment are one parameter set.** A key after `#`
@@ -395,7 +408,7 @@ https://terraviz.zyra-project.org/?dataset=INTERNAL_SOS_123&embed=1&layout=4
 | v1 | 2026-10-25 | Additive, with one behavior change. The output page gains `lat`, the latitude at the picture's centre, and `zoom`, which magnifies it, through the desktop output's follow turn; a zoom past what the picture can magnify (about 5.67) reads as that most. `rotation` keeps its meaning and draws the same picture at rest as before; at a pole it names the meridian the centre sits on. The behavior change: the three keys name the view the picture comes to rest on, and a change to any of them after the `#` now sets the picture moving, coasting to a stop on the new view like a spun globe on its bearing, instead of jumping there. The first reading of an address, and every view for a viewer whose browser reports reduced motion, still jump. Kept in v1 by the maintainer's decision of 25 October 2026, recorded in #501: the section was a day old, and every known composer writes at most once a second, the Second Life limit. **Migration:** a composer that animated `rotation` by writing it faster than once a second now sees the picture trail by about 0.8 s, and its swings shrink to about 40% at 0.5 Hz; write the view the picture should come to rest on, at most once a second. No main-app parameter changes. |
 | v1 | 2026-10-26 | One behavior change. The output page's clock (`t`, `at`, `rate`, `paused`) wraps on the clip's playlist total, the `#EXTINF`s summed from the first rendition a copy loads, rather than on the video element's `duration`. That `duration` was the same number until a stream had buffered to its end and then the latest end of every track: measured in Chromium, 21 to 40 ms longer on the node's bundles with a sound track. So a copy changed its period partway through, copies on different engines looped on different periods, and the gap grew with every loop since `at`. A copy with no playlist to read a length from (a single file, or a browser playing HLS itself) still wraps on the video's own length. No key, type or range changes. Kept in v1 by the maintainer's decision of 26 October 2026, recorded in #502: the section was two days old, and the old period was never stable even on one copy. **Migration:** nothing for a composer, which writes the same keys. A copy opened before the change keeps the old period until it reloads, so on a bundle with a sound track it can show a different point of the loop from a new copy; any change before the `#` reloads every copy. No main-app parameter changes. The same day, "Paused is exact; playing is close" was reworded to state its limit, which was already so: each pass round the clip restarts the video, so how close playing copies stay depends on the clip's length and the rate, and on a short clip at a high rate they don't settle. No behavior changes with that. |
 | v1 | 2026-10-27 | Additive. The output page gains `sound=1`, which plays a video's sound track. It is muted by default and fails toward muted like `telemetry`, so every address without `sound=1` stays silent; a browser that refuses to play aloud without a click leaves that copy muted until it reloads. A copy loaded before a node deploys this ignores `sound` and stays muted until it reloads, which a `#` change doesn't do, so during a rollout visitors at one globe can hear different things. No main-app parameter changes. |
-| v1 | 2026-11-07 | Additive. The main app gains `telemetry`: any value but `1`/`true`, in the query or after the `#`, turns off the page's telemetry for that page load, read like the output page's key and failing toward off, and able only to lower what the visitor set. In the embed view (`embed=1`) the app now also honours Global Privacy Control. Both are the controls the maintainer decided on 6 November 2026 for embedded views, which have no notice and no Privacy panel (`docs/PRIVACY_ANALYSIS.md` §9l). A page loaded before a node deploys this ignores `telemetry` and reports as before until it reloads. No output-page parameter changes. |
+| v1 | 2026-11-07 | Additive. The main app gains `telemetry`: any value but `1`/`true`, in the query or after the `#`, turns off the page's telemetry for that page load, read like the output page's key and failing toward off, and able only to lower what the visitor set. It is the control the maintainer decided on 6 November 2026 for embedded views, which have no notice and no Privacy panel (`docs/PRIVACY_ANALYSIS.md` §9l), and by the decisions of 7 November 2026 it applies on every page of the app, and the app's own address rewrites keep the part after `#` as well as the query, so neither form is lost on a change of dataset. The app also honours Global Privacy Control on every page; that is not a parameter, and it leaves `embed=1` presentational. A node that has not deployed this ignores `telemetry` and reports as before, and nothing a node publishes (its `/.well-known/terraviz.json` included) says whether its build reads the key. Two descriptions corrected with no behaviour change: the app canonicalizes to the path form `/dataset/<slug>`, not from it, and it does rewrite its address after boot. No output-page parameter changes. |
 
 ---
 
@@ -403,7 +416,8 @@ https://terraviz.zyra-project.org/?dataset=INTERNAL_SOS_123&embed=1&layout=4
 
 - [`WORDPRESS_INTEGRATION_PLAN.md`](WORDPRESS_INTEGRATION_PLAN.md) §3 — the Gutenberg blocks that consume this grammar
 - `src/utils/embedMode.ts` — the `embed` / `chat` reader + body-class application
-- `src/analytics/pageOptOut.ts` — the main app's `telemetry` reader, and Global Privacy Control in the embed view
+- `src/analytics/pageOptOut.ts` — the main app's `telemetry` reader, and Global Privacy Control
+- `src/utils/datasetUrl.ts` — the `/dataset/<slug>` path form, and the address rewrites that keep the rest of the query and the part after `#`
 - `src/utils/catalogMode.ts` — the `catalog` reader
 - `src/utils/posterDeepLinks.ts` — `tour` / view-toggle / `orbit` dispatch
 - `src/services/deepLinkService.ts` — `/dataset/:id` path form and native `zyra://` links

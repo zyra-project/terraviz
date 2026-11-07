@@ -211,7 +211,11 @@ footer.site-footer {
       and change it — under <strong>Tools → Privacy</strong>, except in the app&#39;s minimal
       embedded view (an address with <code>embed=1</code>, which sites embedding the app
       normally use), which has no Tools menu (see &quot;The app inside another
-      site&#39;s page&quot; under Mode 1).</p>
+      site&#39;s page&quot; under Mode 1). Whatever mode you chose, a page sends no
+      telemetry if your browser sends Global Privacy Control, or if the
+      address it was opened with turns telemetry off, and the Privacy panel
+      says so when either applies (section 8). No address can turn telemetry
+      on over your own choice.</p>
       <h3>Mode 1 — Essential (on by default)</h3>
       <p>Small, anonymous events about the health of the app:</p>
       <ul>
@@ -350,10 +354,11 @@ footer.site-footer {
       notice, so there is no Privacy panel to reach. And in any frame on
       another site, a mode you chose on this site does not carry over:
       current browsers keep a framed page&#39;s storage separate for each site
-      it appears on. Instead, the minimal embedded view reports nothing if
-      your browser sends Global Privacy Control, and any embed reports
-      nothing if the site embedding it turns reporting off; section 8 has
-      the details</p>
+      it appears on. So an embed sends these Essential events unless your
+      browser or the site embedding it turns that off: no page of the app
+      sends telemetry if your browser sends Global Privacy Control, and an
+      embed sends none if the site embedding it turns telemetry off.
+      Section 8 has the details</p>
       </li>
       <li><p>When something goes wrong — a classification of the error (tile
       fetch, video stream, AI model, uncaught exception, browser-console
@@ -741,15 +746,20 @@ footer.site-footer {
       <h2>8. Your choices</h2>
       <ul>
       <li><strong>Change telemetry mode</strong> at any time: <strong>Tools → Privacy</strong>. Changes
-      take effect immediately — no restart required</li>
+      take effect immediately — no restart required — except on a page
+      that sends no telemetry because of Global Privacy Control or its
+      address (both below). There the panel says so, and the mode you pick
+      is saved and used on visits without that reason</li>
+      <li><strong>Your browser&#39;s Global Privacy Control setting.</strong> If your browser
+      sends it, the app sends no telemetry, on any page, embedded or not,
+      whatever mode you chose. Turn the setting off in your browser to let
+      your chosen mode apply again</li>
       <li><strong>Inside another site&#39;s page</strong> a mode you chose on this site does
       not reach the frame, and the minimal embedded view has no Privacy
-      panel at all (section 2). Three things stop an embedded view from
-      reporting instead:<ul>
-      <li><strong>Your browser&#39;s Global Privacy Control setting.</strong> If your browser
-      sends it, the minimal embedded view reports nothing. (Outside that
-      view, the notice and the Privacy panel are your controls.)</li>
-      <li><strong>The site embedding the app.</strong> It can turn reporting off for
+      panel at all (section 2). Three things stop an embedded view sending
+      telemetry instead:<ul>
+      <li><strong>Your browser&#39;s Global Privacy Control setting</strong>, as above.</li>
+      <li><strong>The site embedding the app.</strong> It can turn telemetry off for
       everyone who sees its embed, by adding <code>telemetry=0</code> to the
       address it embeds.</li>
       <li><strong>A browser content blocker</strong> that blocks requests to this site&#39;s
@@ -757,9 +767,10 @@ footer.site-footer {
       </ul>
       </li>
       <li><strong>The same <code>telemetry=0</code> works on any address of the app</strong>, not only
-      an embed: a page opened with it reports nothing for that visit, and
-      the Privacy panel says so. Your own setting stays as you left it for
-      visits without it</li>
+      an embed: a page opened with it sends no telemetry for that visit,
+      and the Privacy panel says so. Your own setting stays as you left it
+      for visits without it. No address can turn telemetry on over your
+      own choice: <code>telemetry=1</code> leaves it as you set it</li>
       <li><strong>Disable telemetry entirely</strong>: pick &quot;Off&quot; in the same panel</li>
       <li><strong>Run a telemetry-free build</strong>: the source code is public; you or
       someone you trust can build the app with the compile-time

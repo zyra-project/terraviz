@@ -174,9 +174,9 @@ the four server-stamped blobs. Order is alphabetical by field name
 > `file:` kiosk pages; in a framed session `viewport_class` and
 > `aspect_class` describe the frame, not the visitor's window; and a
 > framed session's `session_end` times measure how long the *host* page
-> was open, since visibility follows the host page's tab. An embed that
-> opts out (`telemetry=0`, or Global Privacy Control in the embed view)
-> sends no `session_start` at all, so the framed counts are a floor.
+> was open, since visibility follows the host page's tab. A page that
+> opts out (`telemetry=0`, or Global Privacy Control, on any page)
+> sends no `session_start` at all, so every count here is a floor.
 
 ### `session_end` (Tier A)
 
