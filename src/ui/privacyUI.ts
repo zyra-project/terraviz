@@ -25,9 +25,11 @@
 import {
   applyTierChange,
   emit,
+  getPageOptOut,
   getSessionId,
   loadConfig,
   setTier,
+  type PageOptOut,
 } from '../analytics'
 import type { TelemetryTier } from '../types'
 import { t, tAttr, tHtml, type MessageKey } from '../i18n'
@@ -87,6 +89,7 @@ function buildPanel(): HTMLElement {
         >&#x2715;</button>
       </header>
       <p id="privacy-ui-desc" class="privacy-ui-desc">${tHtml('privacy.desc')}</p>
+      <p id="privacy-ui-pageoptout" class="privacy-ui-pageoptout" hidden></p>
       <fieldset class="privacy-ui-tiers" role="radiogroup" aria-label="${tAttr('privacy.radiogroup.aria')}">
         <legend class="sr-only">${tHtml('privacy.radiogroup.aria')}</legend>
         ${renderTierOption('essential')}
@@ -140,6 +143,51 @@ function syncRadios(): void {
   radios.forEach((r) => {
     r.checked = r.value === current
   })
+}
+
+/** The note for each reason this page sends nothing. */
+const PAGE_OPT_OUT_NOTE = {
+  address: 'privacy.pageOptOut.address',
+  gpc: 'privacy.pageOptOut.gpc',
+} as const satisfies Record<PageOptOut, MessageKey>
+
+/** What a choice made on such a page is announced as. */
+const PAGE_OPT_OUT_ANNOUNCE = {
+  address: 'privacy.announce.setSaved',
+  gpc: 'privacy.announce.setSavedGpc',
+} as const satisfies Record<PageOptOut, MessageKey>
+
+/**
+ * Show, or hide, the note that this page sends no telemetry because its
+ * address turned it off or the browser sent Global Privacy Control
+ * (`pageOptOut.ts`). Without it the panel would show the stored tier,
+ * Essential by default, over a page that reports nothing. The radios
+ * still show and set the stored tier, which a page opened without that
+ * reason uses, and the note says so.
+ *
+ * The dialog's description changes with it, to a version without "the
+ * change takes effect immediately", which is untrue here for everyone,
+ * sighted readers included. The note then describes the radio group
+ * only. Focus lands on the checked radio when the panel opens, so a
+ * screen reader that reads container descriptions enters the dialog
+ * and the group at once; describing both read the note twice before
+ * the focused control. Hidden, the note is referenced by nothing,
+ * because a hidden element that is referenced directly is still read.
+ */
+function syncPageOptOut(): void {
+  const note = document.getElementById('privacy-ui-pageoptout')
+  const group = document.querySelector<HTMLElement>('.privacy-ui-tiers')
+  const desc = document.getElementById('privacy-ui-desc')
+  const reason = getPageOptOut()
+  if (desc) desc.textContent = t(reason === null ? 'privacy.desc' : 'privacy.pageOptOut.desc')
+  if (note) {
+    note.hidden = reason === null
+    note.textContent = reason === null ? '' : t(PAGE_OPT_OUT_NOTE[reason])
+  }
+  if (group) {
+    if (reason !== null) group.setAttribute('aria-describedby', 'privacy-ui-pageoptout')
+    else group.removeAttribute('aria-describedby')
+  }
 }
 
 /** Refresh the session-ID display. Called on every open because the
@@ -260,10 +308,18 @@ function handleTierChange(tier: TelemetryTier): void {
     key: 'telemetry_tier',
     value_class: tier,
   })
+  // On a page that sends nothing, "Telemetry set to Research" would be
+  // untrue, and the status region is the one thing every screen reader
+  // announces, VoiceOver and TalkBack included, which may not have read
+  // the note on entering the group. So say what happened: the choice is
+  // saved, and this page still sends nothing.
+  const reason = getPageOptOut()
   announce(
     tier === 'off'
       ? t('privacy.announce.off')
-      : t('privacy.announce.set', { tier: tierLabel(tier) }),
+      : reason !== null
+        ? t(PAGE_OPT_OUT_ANNOUNCE[reason], { tier: tierLabel(tier) })
+        : t('privacy.announce.set', { tier: tierLabel(tier) }),
   )
 }
 
@@ -302,6 +358,7 @@ function ensureMounted(): void {
 export function openPrivacyUI(triggeredBy?: HTMLElement | null): void {
   ensureMounted()
   syncRadios()
+  syncPageOptOut()
   syncSessionId()
   syncClearVisitsButton()
   const panel = document.getElementById('privacy-ui-panel')

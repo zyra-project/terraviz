@@ -17,6 +17,7 @@ import { formatDate, isSubDailyPeriod, inferDisplayInterval } from '../utils/tim
 import { logger } from '../utils/logger'
 import { waitForDecodableFrame, playableStart } from '../utils/mediaReadiness'
 import { escapeHtml, escapeAttr } from '../ui/domUtils'
+import { buildDatasetPath, type DatasetUrlRef } from '../utils/datasetUrl'
 import { closeChat } from '../ui/chatUI'
 import type { PlaybackState } from '../ui/playbackController'
 import { updatePlayButton, loadCaptions } from '../ui/playbackController'
@@ -478,11 +479,17 @@ function renderRelatedDatasetsHtml(
   algorithmicOverride: Dataset[] | null = null,
 ): string {
   const manual = target.enriched?.relatedDatasets ?? []
-  const manualLinks: Array<{ label: string; match: Dataset | null }> = manual.map((rd) => {
-    const wanted = normalizeRelatedTitle(rd.title)
-    const match = datasets.find((d) => normalizeRelatedTitle(d.title) === wanted) ?? null
-    return { label: rd.title, match }
-  })
+  const manualLinks: Array<{ label: string; match: Dataset | null }> = manual
+    .map((rd) => {
+      const wanted = normalizeRelatedTitle(rd.title)
+      const match = datasets.find((d) => normalizeRelatedTitle(d.title) === wanted) ?? null
+      return { label: rd.title, match }
+    })
+    // A curated entry naming the dataset itself is dropped, as the
+    // algorithmic and semantic lists already exclude it: a link to the
+    // page you are on adds nothing, and during a draft preview its click
+    // would push the address without the token while the draft stays.
+    .filter((entry) => entry.match?.id !== target.id)
 
   const manualIds = new Set<string>()
   const manualTitles = new Set<string>()
@@ -512,37 +519,98 @@ function renderRelatedDatasetsHtml(
   html += `<ul class="info-related">`
   for (const entry of manualLinks) {
     if (entry.match) {
-      html += `<li><a href="?dataset=${encodeURIComponent(entry.match.id)}" data-dataset-id="${escapeAttr(entry.match.id)}">${escapeHtml(entry.label)}</a></li>`
+      html += `<li>${relatedLinkHtml(entry.match, entry.label)}</li>`
     } else {
       html += `<li><span class="info-related-offcatalog">${escapeHtml(entry.label)}</span></li>`
     }
   }
   for (const candidate of algorithmic) {
-    html += `<li><a href="?dataset=${encodeURIComponent(candidate.id)}" data-dataset-id="${escapeAttr(candidate.id)}">${escapeHtml(candidate.title)}</a></li>`
+    html += `<li>${relatedLinkHtml(candidate, candidate.title)}</li>`
   }
   html += `</ul></div>`
   return html
 }
 
 /**
- * Wire related-dataset links within `scope` to load in-place. The URL
- * update preserves any existing `?catalog=true` flag (Phase 1 §3.2) so
- * a related-link click while in catalog mode keeps the catalog↔sphere
- * tab control visible — same contract as `selectDatasetFromBrowse` in
- * main.ts. Extracted so the async semantic enhancement can re-wire its
- * freshly-rendered links.
+ * Query keys a related link leaves out of its `href`, the address a new
+ * tab or a copied link opens. `tourEdit` names the draft this tab's
+ * authoring dock owns, and a second tab on it would autosave over the
+ * first. `tour` is a one-shot boot selector, and a tab opened on
+ * `/dataset/<slug>?tour=…` would play that tour over the dataset, since
+ * the poster deep-link guard reads only `?dataset=`. A click keeps both,
+ * since it stays in this tab and boots nothing.
+ */
+const NEW_TAB_DROPPED_KEYS = ['tourEdit', 'tour'] as const
+
+/**
+ * The address a click on a related link pushes: the dataset's own, with
+ * the rest of the query and the part after `#` as they are at the
+ * moment of the click, not when the panel rendered, since the catalog
+ * tabs, the browse filters and the tour dock all rewrite the address
+ * without re-rendering it. A draft-preview token is dropped, as on
+ * every other dataset change (`buildDatasetPath`).
+ */
+function relatedAddress(ref: DatasetUrlRef, search: string = window.location.search): string {
+  return buildDatasetPath(ref, search, window.location.hash)
+}
+
+/**
+ * A related link's `href`: the same address, less
+ * `NEW_TAB_DROPPED_KEYS`. It has to be the real destination, because a
+ * middle click, a modified click or "Open link in new tab" never
+ * reaches the click handler, and a bare `?dataset=` would drop a host's
+ * `telemetry=0` there (`src/analytics/pageOptOut.ts`). Rebuilt as the
+ * visitor reaches for the link (`wireRelatedLinks`), for the same reason
+ * the click reads the address afresh.
+ */
+function relatedHref(ref: DatasetUrlRef): string {
+  const params = new URLSearchParams(window.location.search)
+  for (const key of NEW_TAB_DROPPED_KEYS) params.delete(key)
+  const query = params.toString()
+  return relatedAddress(ref, query ? `?${query}` : '')
+}
+
+/** One related link. The `href` goes through `escapeHtml`, which
+ *  escapes `&`, so a query key such as `not-x` cannot be read back as
+ *  the `&not` entity. */
+function relatedLinkHtml(dataset: DatasetUrlRef, label: string): string {
+  // escapeHtml, not escapeAttr: an `&` left unescaped could decode into
+  // a different slug than the one the href was built from.
+  const slug = dataset.slug ? ` data-dataset-slug="${escapeHtml(dataset.slug)}"` : ''
+  return `<a href="${escapeHtml(relatedHref(dataset))}" data-dataset-id="${escapeAttr(dataset.id)}"${slug}>${escapeHtml(label)}</a>`
+}
+
+/**
+ * Wire related-dataset links within `scope` to load in-place. The click
+ * pushes `relatedAddress`, which keeps any existing `?catalog=true` flag
+ * (Phase 1 §3.2), so a related-link click while in catalog mode keeps
+ * the catalog↔sphere tab control visible — the same contract as
+ * `selectDatasetFromBrowse` in main.ts — and pushes nothing when the
+ * address would not change. A modified click or another button is left
+ * to the browser, which opens the link's freshly built `href` in a new
+ * tab or window. Extracted so the async semantic enhancement can
+ * re-wire its freshly-rendered links.
  */
 function wireRelatedLinks(scope: ParentNode, onLoadDataset: (id: string) => void): void {
-  scope.querySelectorAll('a[data-dataset-id]').forEach(link => {
+  scope.querySelectorAll<HTMLAnchorElement>('a[data-dataset-id]').forEach(link => {
+    const id = link.dataset.datasetId
+    if (!id) return
+    const ref: DatasetUrlRef = { id, slug: link.dataset.datasetSlug }
+    const refresh = (): void => link.setAttribute('href', relatedHref(ref))
+    link.addEventListener('pointerdown', refresh)
+    link.addEventListener('focus', refresh)
+    link.addEventListener('contextmenu', refresh)
     link.addEventListener('click', (ev) => {
-      ev.preventDefault()
-      const id = (link as HTMLElement).dataset.datasetId
-      if (id) {
-        const params = new URLSearchParams(window.location.search)
-        params.set('dataset', id)
-        window.history.pushState({}, '', `?${params.toString()}`)
-        onLoadDataset(id)
+      if (ev.button !== 0 || ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.altKey) {
+        refresh()
+        return
       }
+      ev.preventDefault()
+      const next = relatedAddress(ref)
+      if (next !== `${window.location.pathname}${window.location.search}${window.location.hash}`) {
+        window.history.pushState({}, '', next)
+      }
+      onLoadDataset(id)
     })
   })
 }

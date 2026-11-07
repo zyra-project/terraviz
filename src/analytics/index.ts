@@ -17,6 +17,8 @@ export {
   getSessionDurationMs,
   tierGate,
   applyTierChange,
+  optOutForPage,
+  getPageOptOut,
   setTransport,
   BATCH_SIZE,
   BATCH_INTERVAL_MS,
@@ -51,6 +53,13 @@ export {
 } from './errorCapture'
 
 export { initSession, emitSessionEnd } from './session'
+
+export {
+  readPageOptOut,
+  pageOptOutFromBrowser,
+  type PageOptOut,
+  type PageOptOutInput,
+} from './pageOptOut'
 
 export { startDwell, type DwellHandle } from './dwell'
 

@@ -60,7 +60,10 @@ import { showDisclosureBannerIfNeeded } from './ui/disclosureBanner'
 import {
   createFetchTransport,
   emit,
+  getPageOptOut,
   initSession,
+  optOutForPage,
+  pageOptOutFromBrowser,
   pauseForVrEntry,
   resumeForVrExit,
   setTransport,
@@ -155,6 +158,19 @@ import { maybeInitShaderTuner } from './ui/shaderTunerUI'
 // SSR-safe (the service no-ops when `document` is undefined).
 // See docs/WEB_CATALOG_FEATURES_PLAN.md §7.1.
 initUiScale()
+
+// Whether this page load reports nothing: `telemetry=` in the address
+// (the switch an embed code can carry), or the browser's Global Privacy
+// Control signal (src/analytics/pageOptOut.ts). Latched at module
+// evaluation, like the UI scale above, before any transport exists, so
+// nothing can be sent and anything already queued is dropped; the
+// emitter holds it for the rest of the page's life. The address
+// writers below keep `telemetry=` in both parts of the address anyway,
+// so the key a host set is still there after a reload.
+{
+  const pageOptOut = pageOptOutFromBrowser()
+  if (pageOptOut) optOutForPage(pageOptOut)
+}
 
 // Apply persisted shader settings (§7.2) — currently the specular-
 // strength preset. Contrast / saturation / bump are dev-tuned and
@@ -656,8 +672,14 @@ class InteractiveSphere {
       // after the user dismisses it. Skipped inside an embed — the
       // host page owns consent, and a privacy banner popping up in a
       // third-party iframe is both wrong and intrusive (§J of
-      // `docs/WORDPRESS_INTEGRATION_PLAN.md`).
-      if (!embedModeActive) showDisclosureBannerIfNeeded()
+      // `docs/WORDPRESS_INTEGRATION_PLAN.md`). The host's means of
+      // exercising it is `telemetry=0` in the embed code, and the
+      // visitor's is Global Privacy Control (pageOptOut.ts). Skipped
+      // too on any page that reports nothing for either reason: the
+      // notice describes what is collected, and here nothing is, so it
+      // would mislead. It shows on the next visit without that reason,
+      // since nothing marks it seen.
+      if (!embedModeActive && !getPageOptOut()) showDisclosureBannerIfNeeded()
       // Telemetry transport — skipped entirely when the compile-time
       // flag is off (telemetry-free builds) and when console mode
       // is on (dev convenience: events log locally, no POSTs).
@@ -1024,8 +1046,9 @@ class InteractiveSphere {
       const previewId = dataService.getDatasetById(previewRef)?.id ?? previewRef
       if (previewId === id) return
     }
-    const next = buildDatasetPath(dataService.getDatasetById(id) ?? { id }, search)
-    if (next === `${window.location.pathname}${search}`) return
+    const hash = window.location.hash
+    const next = buildDatasetPath(dataService.getDatasetById(id) ?? { id }, search, hash)
+    if (next === `${window.location.pathname}${search}${hash}`) return
     if (mode === 'push') {
       window.history.pushState({}, '', next)
     } else {
@@ -1034,9 +1057,10 @@ class InteractiveSphere {
   }
 
   /** Reset the address bar to the no-dataset form, keeping whatever
-   *  mode the visitor arrived in (`?catalog=true`, `?embed=1`). */
+   *  mode the visitor arrived in (`?catalog=true`, `?embed=1`) and the
+   *  part after `#`. */
   private clearDatasetUrl(mode: 'push' | 'replace'): void {
-    const next = buildNoDatasetPath(window.location.pathname, window.location.search)
+    const next = buildNoDatasetPath(window.location.pathname, window.location.search, window.location.hash)
     if (mode === 'push') {
       window.history.pushState({}, '', next)
     } else {
