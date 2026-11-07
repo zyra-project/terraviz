@@ -2529,7 +2529,7 @@ is [`scripts/lib/expected-bindings.ts`](../scripts/lib/expected-bindings.ts).
 | `FEEDBACK_DB` | D1 | 8 | Feedback form |
 | `CATALOG_DB` | D1 | 8 | All of Tier 2 |
 | `ANALYTICS` | AE | 8 | Telemetry storage |
-| `TELEMETRY_KILL_SWITCH` | KV | 8 | Kill lever (fails open) |
+| `TELEMETRY_KILL_SWITCH` | KV | 8 | Telemetry kill switch: key `telemetry_enabled` (fails open; see [After a successful launch](#after-a-successful-launch)) |
 | `CATALOG_KV` | KV | 8 | Catalog read cache |
 | `CATALOG_R2` | R2 | 8 | Assets, screenshots |
 | `AI` | Workers AI | 8 | Orbit, embeddings, voice |
@@ -2556,7 +2556,6 @@ is [`scripts/lib/expected-bindings.ts`](../scripts/lib/expected-bindings.ts).
 | `VOICE_STREAM_MODEL` | plaintext | 14.5 | STT model override |
 | `YOUTUBE_API_KEY` | secret | 14.5 | YouTube suggestions |
 | `KILL_VOICE` | plaintext | 14.5 | Stops the Cloud voice engine, not the browser's |
-| `KILL_TELEMETRY` | plaintext | — | Telemetry kill switch (410) |
 | `FEEDBACK_ADMIN_TOKEN` | secret | 6.4 | Bearer fallback for legacy admin routes |
 | `CATALOG_R2_BUCKET` | plaintext | — | Bucket-name override |
 
@@ -3023,10 +3022,45 @@ Tools → Privacy.
 
 ## After a successful launch
 
-- **Kill switches.** You have two: `wrangler kv key put
-  telemetry_enabled disabled --namespace-id=<W5>` (clients get 410
-  + `Retry-After: 300`; `wrangler kv key delete` to resume), and
-  the `KILL_TELEMETRY=1` env var. Document who can flip them.
+- **Kill switches.** You have two, and they work differently.
+  Document who can flip each.
+
+  **Telemetry** is the key `telemetry_enabled` in the
+  `TELEMETRY_KILL_SWITCH` KV namespace (`W5`). It takes effect
+  without a redeploy, though KV can take up to about a minute to
+  reach every location.
+
+  ```bash
+  # On: /api/ingest answers 410 (+ Retry-After: 300) and each client
+  # stops sending for the rest of its session.
+  wrangler kv key put telemetry_enabled disabled --namespace-id=<W5> --remote
+
+  # Off: new sessions report again. A session that already got a 410
+  # stays quiet until the page is reloaded.
+  wrangler kv key delete telemetry_enabled --namespace-id=<W5> --remote
+  ```
+
+  `--remote` is required. Without it Wrangler 4 writes to a local
+  copy, prints `Resource location: local` and exits successfully,
+  while production keeps ingesting. The switch also fails **open**:
+  a `TELEMETRY_KILL_SWITCH` binding missing from Settings → Bindings,
+  a failed KV read, or any value other than `disabled`, `false`,
+  `off` or `0` leaves ingestion running. So check it from outside:
+
+  ```bash
+  curl -s -o /dev/null -w '%{http_code}\n' -X POST https://<W2>/api/ingest \
+    -H 'Origin: https://<W2>' -H 'Content-Type: application/json' --data '{}'
+  ```
+
+  `410` means the switch is on. `400` means ingestion is still open;
+  the empty body is rejected, so the check itself stores nothing.
+  There is no `KILL_TELEMETRY` environment variable: earlier
+  versions of this guide named one, and nothing reads it. If you
+  set one, delete it.
+
+  **Cloud voice** is `KILL_VOICE=1`, a plaintext variable (see
+  **Turning voice off** in §14.5). Unlike the KV key, a variable
+  takes effect on the next deployment, not when you save it.
 - **Token expiry.** If `W11` or `ANALYTICS_SQL_TOKEN` has an expiry (a TTL),
   put the date in a calendar. A silently expired token is a
   silently broken dashboard.

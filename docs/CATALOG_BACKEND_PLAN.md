@@ -2593,9 +2593,13 @@ specific to backend telemetry:
 Backend telemetry is **always-on operational metric**, not Tier
 A or Tier B. It's never gated by user consent because it
 doesn't observe users — it observes the node itself. The
-existing `KILL_TELEMETRY=1` server-side env still suppresses
+existing server-side kill switch — the key `telemetry_enabled`
+in the `TELEMETRY_KILL_SWITCH` KV namespace — should suppress
 backend events alongside product events for kill-switch
-parity; the client-side tier setting has no effect on backend
+parity. Today only `/api/ingest` reads it (`isKillSwitchOn` in
+`functions/api/ingest.ts`), so the backend emitter has to read
+the same key with the same fail-open rule; it does not inherit
+it. The client-side tier setting has no effect on backend
 telemetry because clients don't see it.
 
 ---
