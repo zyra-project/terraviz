@@ -129,9 +129,10 @@ export function datasetUrlRef(dataset: DatasetUrlRef): string {
  * `hash` is the part after `#`, kept as it was, because the embed
  * grammar lets a host put settings there and `#telemetry=0` must not
  * be lost when the page rewrites its own address
- * (`src/analytics/pageOptOut.ts`).
+ * (`src/analytics/pageOptOut.ts`). Both are required, so a caller
+ * cannot drop the fragment by leaving it out; pass `''` for none.
  */
-export function buildDatasetPath(dataset: DatasetUrlRef, search = '', hash = ''): string {
+export function buildDatasetPath(dataset: DatasetUrlRef, search: string, hash: string): string {
   const params = new URLSearchParams(search)
   params.delete('dataset')
   params.delete('preview')
@@ -174,7 +175,7 @@ export function previewDatasetRef(search: string): string | null {
  * visitor's `?catalog=true` or `?embed=1` mode along with the data,
  * and the part after `#` for `buildDatasetPath`'s reason.
  */
-export function buildNoDatasetPath(pathname: string, search = '', hash = ''): string {
+export function buildNoDatasetPath(pathname: string, search: string, hash: string): string {
   const path = parseDatasetPathname(pathname) ? '/' : pathname
   const params = new URLSearchParams(search)
   params.delete('dataset')

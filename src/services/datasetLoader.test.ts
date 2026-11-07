@@ -380,6 +380,29 @@ describe('displayDatasetInfo', () => {
     expect(params.get('dataset')).toBe('related-1')
   })
 
+  // A host's #telemetry=0 must outlive a click to a related dataset,
+  // or a reload after it reports again (src/analytics/pageOptOut.ts).
+  it('keeps telemetry= and the part after # when a related-dataset link is clicked', () => {
+    const onLoad = vi.fn()
+    const target = makeDataset({
+      id: 'target',
+      enriched: { relatedDatasets: [{ title: 'Wind', url: '' }] },
+    })
+    const related = makeDataset({ id: 'related-1', title: 'Wind' })
+
+    window.history.replaceState({}, '', '/?embed=1&telemetry=0&dataset=target#telemetry=0')
+    displayDatasetInfo(target, [related], onLoad)
+
+    const link = document.querySelector('a[data-dataset-id="related-1"]') as HTMLAnchorElement
+    link.click()
+
+    expect(onLoad).toHaveBeenCalledWith('related-1')
+    const params = new URLSearchParams(window.location.search)
+    expect(params.get('telemetry')).toBe('0')
+    expect(params.get('dataset')).toBe('related-1')
+    expect(window.location.hash).toBe('#telemetry=0')
+  })
+
   it('toggles expand/collapse when header is clicked', () => {
     displayDatasetInfo(makeDataset(), [], vi.fn())
 

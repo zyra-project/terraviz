@@ -1068,10 +1068,11 @@ mode chosen there is saved for a visit without that reason.
 What these do not change: an embed whose host sets nothing, seen by a
 visitor whose browser sends no GPC, reports as before, so the routes
 above still apply to it. And one thing they do change for the
-dashboards: a page that opts out sends no `session_start`, so every
-session count leaves it out. For `window_context` the framed share is
-a floor, not a total, and since GPC applies on every page, the counts
-of top-level sessions are a floor too.
+dashboards: a page that opts out sends no events at all, so every count
+is a floor. And since GPC applies on every page and some browsers send
+it by default, the pages left out are not a random sample, so shares
+and mixes, the framed share of `window_context` included, can be off in
+either direction.
 
 **Decisions** (the maintainer's, 6 November 2026, after the privacy
 review):

@@ -114,28 +114,28 @@ describe('datasetUrlRef', () => {
 
 describe('buildDatasetPath', () => {
   it('builds the canonical path', () => {
-    expect(buildDatasetPath(SMOKE)).toBe('/dataset/north-america-smoke')
+    expect(buildDatasetPath(SMOKE, '', '')).toBe('/dataset/north-america-smoke')
   })
 
   it('carries the visitor’s mode across a dataset switch', () => {
-    expect(buildDatasetPath(SMOKE, '?catalog=true')).toBe('/dataset/north-america-smoke?catalog=true')
-    expect(buildDatasetPath(SMOKE, '?embed=1&layout=2')).toBe('/dataset/north-america-smoke?embed=1&layout=2')
+    expect(buildDatasetPath(SMOKE, '?catalog=true', '')).toBe('/dataset/north-america-smoke?catalog=true')
+    expect(buildDatasetPath(SMOKE, '?embed=1&layout=2', '')).toBe('/dataset/north-america-smoke?embed=1&layout=2')
   })
 
   it('drops the dataset param the path segment now carries', () => {
-    expect(buildDatasetPath(SMOKE, '?dataset=OLD&catalog=true'))
+    expect(buildDatasetPath(SMOKE, '?dataset=OLD&catalog=true', ''))
       .toBe('/dataset/north-america-smoke?catalog=true')
   })
 
   it('drops a draft-preview token rather than pointing it at another dataset', () => {
-    expect(buildDatasetPath(SMOKE, '?preview=tok&dataset=DRAFT')).toBe('/dataset/north-america-smoke')
+    expect(buildDatasetPath(SMOKE, '?preview=tok&dataset=DRAFT', '')).toBe('/dataset/north-america-smoke')
   })
 
   // A host's telemetry switch, in either part of the address, must
   // survive the boot-time rewrite of `?dataset=` to the path form and
   // every dataset change after it (src/analytics/pageOptOut.ts).
   it('keeps telemetry= in the query', () => {
-    expect(buildDatasetPath(SMOKE, '?dataset=OLD&embed=1&telemetry=0'))
+    expect(buildDatasetPath(SMOKE, '?dataset=OLD&embed=1&telemetry=0', ''))
       .toBe('/dataset/north-america-smoke?embed=1&telemetry=0')
   })
 
@@ -173,22 +173,22 @@ describe('previewDatasetRef', () => {
 
 describe('buildNoDatasetPath', () => {
   it('strips the dataset segment but keeps the mode', () => {
-    expect(buildNoDatasetPath('/dataset/north-america-smoke', '?catalog=true')).toBe('/?catalog=true')
-    expect(buildNoDatasetPath('/dataset/north-america-smoke', '')).toBe('/')
+    expect(buildNoDatasetPath('/dataset/north-america-smoke', '?catalog=true', '')).toBe('/?catalog=true')
+    expect(buildNoDatasetPath('/dataset/north-america-smoke', '', '')).toBe('/')
   })
 
   it('strips the legacy query form too', () => {
-    expect(buildNoDatasetPath('/', '?dataset=01KYK82VR6KDQK0915JNMQQ8RG&embed=1')).toBe('/?embed=1')
+    expect(buildNoDatasetPath('/', '?dataset=01KYK82VR6KDQK0915JNMQQ8RG&embed=1', '')).toBe('/?embed=1')
   })
 
   it('leaves a non-dataset path in place', () => {
     // Tauri can serve the SPA from /index.html; resetting to '/'
     // unconditionally would break the webview's asset path.
-    expect(buildNoDatasetPath('/index.html', '')).toBe('/index.html')
+    expect(buildNoDatasetPath('/index.html', '', '')).toBe('/index.html')
   })
 
   it('keeps telemetry= and the part after #', () => {
-    expect(buildNoDatasetPath('/dataset/north-america-smoke', '?embed=1&telemetry=0'))
+    expect(buildNoDatasetPath('/dataset/north-america-smoke', '?embed=1&telemetry=0', ''))
       .toBe('/?embed=1&telemetry=0')
     expect(buildNoDatasetPath('/dataset/north-america-smoke', '?embed=1', '#telemetry=0'))
       .toBe('/?embed=1#telemetry=0')

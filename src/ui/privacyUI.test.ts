@@ -344,6 +344,8 @@ describe('privacyUI — page opt-out note', () => {
     const status = document.getElementById('privacy-ui-status')?.textContent ?? ''
     expect(status).toMatch(/^saved/i)
     expect(status).toMatch(/global privacy control/i)
+    // The choice's settings_changed event is dropped like any other.
+    expect(size()).toBe(0)
   })
 
   it('announces a choice on an opted-out page as saved, not as in effect', () => {

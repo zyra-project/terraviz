@@ -63,8 +63,8 @@ and change it — under **Tools → Privacy**, except in the app's minimal
 embedded view (an address with `embed=1`, which sites embedding the app
 normally use), which has no Tools menu (see "The app inside another
 site's page" under Mode 1). Whatever mode you chose, a page sends no
-telemetry if your browser sends Global Privacy Control, or if the
-address it was opened with turns telemetry off, and the Privacy panel
+telemetry if your browser sends Global Privacy Control when the page
+opens, or if the address it was opened with turns telemetry off, and the Privacy panel
 says so when either applies (section 8). No address can turn telemetry
 on over your own choice.
 
@@ -627,9 +627,12 @@ profiles, or sell to third parties.
   address (both below). There the panel says so, and the mode you pick
   is saved and used on visits without that reason
 - **Your browser's Global Privacy Control setting.** If your browser
-  sends it, the app sends no telemetry, on any page, embedded or not,
-  whatever mode you chose. Turn the setting off in your browser to let
-  your chosen mode apply again
+  sends it when a page of the app opens, that page sends no telemetry,
+  embedded or not, whatever mode you chose. The app checks it as each
+  page opens, so turning the setting on or off applies from the next
+  page you open or reload. The desktop app runs in its own window, not
+  in your browser, so your browser's setting does not reach it; use the
+  Privacy panel there
 - **Inside another site's page** a mode you chose on this site does
   not reach the frame, and the minimal embedded view has no Privacy
   panel at all (section 2). Three things stop an embedded view sending

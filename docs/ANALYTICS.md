@@ -57,9 +57,13 @@ into the emitter (`optOutForPage`) at module evaluation; from then the
 emitter drops every event ahead of `tierGate`, sends nothing on flush
 or unload, and does not hydrate a persisted queue. Nothing is stored,
 so the stored tier is untouched (`docs/PRIVACY_ANALYSIS.md` §9l). An
-opted-out page sends no `session_start`, so every session count leaves
-it out: read the `window_context` mix's framed share as a floor, and,
-since GPC applies everywhere, its top-level counts as a floor too.
+opted-out page sends no events at all, `session_start` included, so
+every count is a floor. Shares and mixes computed from those counts are
+not bounded in either direction: GPC applies on every page, and some
+browsers and extensions send it by default, so the pages left out are
+not a random sample, and the OS, locale, viewport and performance
+mixes lean away from those browsers' users. Session counts step down
+on the day a node deploys this, which is not lost traffic.
 
 ## Where the data goes
 
