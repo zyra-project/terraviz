@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE martif PUBLIC "ISO 12200:1999A//DTD MARTIF core (DXFcdV04)//EN" "TBXcdv04.dtd">
+<martif type="TBX" xml:lang="en">
+    <martifHeader>
+        <fileDesc>
+            <sourceDesc>
+                <p>Weblate Glossary</p>
+            </sourceDesc>
+        </fileDesc>
+    </martifHeader>
+    <text>
+        <body>
+            <termEntry id="Acronym for “Science On a Sphere” (the NOAA program above). Not the international distress signal — even if your target language translates that meaning, this acronym refers to the NOAA program and stays as “SOS” in all locales." weblate-flags="read-only, terminology">
+                <descrip type="Translation needed">No</descrip>
+                <langSet xml:lang="en"><tig><term>SOS</term></tig></langSet>
+                <langSet xml:lang="ru"><tig><term></term></tig></langSet>
+            </termEntry>
+            <termEntry id="Character name. TerraViz’s AI companion (an iridescent sphere with a central eye and two orbiting satellites). Proper noun — never translate. Keep capitalized as “Orbit,” not “orbit” (which would be the astronomical term)." weblate-flags="read-only, terminology">
+                <descrip type="Translation needed">No</descrip>
+                <langSet xml:lang="en"><tig><term>Orbit</term></tig></langSet>
+                <langSet xml:lang="ru"><tig><term></term></tig></langSet>
+            </termEntry>
+            <termEntry id="Proper noun. NASA’s Global Imagery Browse Services — the satellite imagery API that supplies global remote-sensing layers to TerraViz. Never translate or expand the acronym in UI strings." weblate-flags="read-only, terminology">
+                <descrip type="Translation needed">No</descrip>
+                <langSet xml:lang="en"><tig><term>NASA GIBS</term></tig></langSet>
+                <langSet xml:lang="ru"><tig><term></term></tig></langSet>
+            </termEntry>
+            <termEntry id="Proper noun. NASA’s nighttime Earth dataset (composite of artificial lights visible from space). Named for the contrast with “Blue Marble.” Never translate; keep capitalization." weblate-flags="read-only, terminology">
+                <descrip type="Translation needed">No</descrip>
+                <langSet xml:lang="en"><tig><term>Black Marble</term></tig></langSet>
+                <langSet xml:lang="ru"><tig><term></term></tig></langSet>
+            </termEntry>
+            <termEntry id="Product name. The application itself. Never translate, never transliterate, never localize capitalization (it's &quot;TerraViz&quot;, not &quot;Terraviz&quot; or &quot;TerraVIZ&quot;)." weblate-flags="read-only, terminology">
+                <descrip type="Translation needed">No</descrip>
+                <langSet xml:lang="en"><tig><term>TerraViz</term></tig></langSet>
+                <langSet xml:lang="ru"><tig><term></term></tig></langSet>
+            </termEntry>
+            <termEntry id="Software product name. The open-source mapping library powering TerraViz’s 2D rendering (an open fork of Mapbox GL JS). Never translate or alter capitalization." weblate-flags="read-only, terminology">
+                <descrip type="Translation needed">No</descrip>
+                <langSet xml:lang="en"><tig><term>MapLibre</term></tig></langSet>
+                <langSet xml:lang="ru"><tig><term></term></tig></langSet>
+            </termEntry>
+            <termEntry id="Proper noun. NOAA’s spherical projection display system that visualizes planetary data on a 6-foot suspended sphere. Official capitalization is “Science On a Sphere” — the lowercase “a” is intentional and part of the trademark. Never translate." weblate-flags="read-only, terminology">
+                <descrip type="Translation needed">No</descrip>
+                <langSet xml:lang="en"><tig><term>Science On a Sphere</term></tig></langSet>
+                <langSet xml:lang="ru"><tig><term></term></tig></langSet>
+            </termEntry>
+            <termEntry id="Software product name. The 3D rendering library powering TerraViz’s globe visualization. Default form is lowercase “three.js” to match the project’s own canonical branding. Capitalize to “Three.js” only at the start of a sentence (normal English sentence-case rule). Never translate; never alter the “.js” portion; never write “ThreeJS” or “Three JS.”" weblate-flags="read-only, terminology">
+                <descrip type="Translation needed">No</descrip>
+                <langSet xml:lang="en"><tig><term>three.js</term></tig></langSet>
+                <langSet xml:lang="ru"><tig><term></term></tig></langSet>
+            </termEntry>
+            <termEntry id="Acronym for the U.S. National Oceanic and Atmospheric Administration — the federal agency that develops and hosts TerraViz. Always “NOAA” in all locales, even if your target language has a translated expansion of the full agency name." weblate-flags="read-only, terminology">
+                <descrip type="Translation needed">No</descrip>
+                <langSet xml:lang="en"><tig><term>NOAA</term></tig></langSet>
+                <langSet xml:lang="ru"><tig><term></term></tig></langSet>
+            </termEntry>
+            <termEntry id="Proper noun. The iconic daytime full-Earth dataset, named after the 1972 Apollo 17 photograph “The Blue Marble.” Never translate; keep capitalization." weblate-flags="read-only, terminology">
+                <descrip type="Translation needed">No</descrip>
+                <langSet xml:lang="en"><tig><term>Blue Marble</term></tig></langSet>
+                <langSet xml:lang="ru"><tig><term></term></tig></langSet>
+            </termEntry>
+            <termEntry id="Acronym for NASA’s Global Imagery Browse Services. Used standalone in technical UI where the NASA prefix is already established. Never translate or localize." weblate-flags="read-only, terminology">
+                <descrip type="Translation needed">No</descrip>
+                <langSet xml:lang="en"><tig><term>GIBS</term></tig></langSet>
+                <langSet xml:lang="ru"><tig><term></term></tig></langSet>
+            </termEntry>
+        </body>
+    </text>
+</martif>
