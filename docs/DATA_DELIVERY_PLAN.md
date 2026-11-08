@@ -1319,8 +1319,12 @@ period, and links to the palette and legend. For a calendar period
 that computation is wrong today: `frameTimestamp` uses average months
 and years (`functions/api/v1/_lib/iso-duration.ts`), which dates
 frame 1 of a monthly series starting 1 January at 31 January 10:29.
-D2a fixes it at the source with calendar arithmetic, so the route stays
-the one computation. Each group's own form is derived from it:
+D1 found the yearly form worse for a label: a series starting 2001
+stamps 2005's frame `2004-12-31T23:16:48Z`, so `labels.txt` or a
+filename cut to the date would call it 2004
+(`delivery/D1_PROTOTYPES.md` §3.3). D2a fixes it at the source with
+calendar arithmetic, so the route stays the one computation. Each
+group's own form is derived from it:
 
 - **SOS:** `labels.txt`, one line per frame.
 - **OpenSpace video:** the start and end times the asset passes to
@@ -1329,12 +1333,22 @@ the one computation. Each group's own form is derived from it:
   mid-frame. OpenSpace floors the frame position
   (`modules/video/src/videoplayer.cpp`), and with the bounds on the
   dates themselves a monthly series shows the previous month on nearly
-  every month-start step. D1 steps across month boundaries.
+  every month-start step. D1 steps across month boundaries. D1's
+  arithmetic adds a cost. Under the floor, bounds half a step out make
+  the video show the **nearest** frame between frames, up to half a
+  period ahead, which §5.3 rejects for tiles. A regular period snaps
+  down exactly with bounds on the first frame and one period past the
+  last; only a calendar period needs the half step, and even then a
+  mid-month time shows the next month. Which to use is §11 q30, and the
+  OpenSpace kit records what the dome shows (D1 §3.9).
 - **OpenSpace frames:** dated filenames, `<id>_YYYYmmdd_HHMMSS.png`, for
   `TemporalTileProvider`'s Folder mode, seconds included so that a
   sub-minute cadence does not collide. Its filename date parsing
   looked off by one day in OpenSpace's source, so the exact form is
-  settled by a Phase D1 test, not by reading (§11).
+  settled by a Phase D1 test, not by reading (§11). D1 found the line.
+  `TemporalTileProvider` hands SPICE `tm_mday + 1`, the day of the
+  month plus one, so the 31st becomes day 32. The dome test, with date
+  cards across three month ends, is in the OpenSpace kit (D1 §3.10).
 - **OpenSpace sync:** `SecondsUntilResync` set for a dataset that
   updates, since the default caches forever and each resync downloads
   the whole file again, and `PlaybackMode = RealTimeLoop` for the 130
@@ -1977,6 +1991,7 @@ new §11 question instead.
 | 2026-11-08 | Calendar floors measured wrong on 10 of 12 months and 116 of 175 years; QGIS sends its range start; noon-stamped daily frames show the previous day in QGIS and CesiumJS; QGIS expands at most 1,000 instants (D1 §3.2, §3.3) | Measurements added to the calendar, snap, milliseconds and long-list rules; two new questions | §5.3, q27, q29 |
 | 2026-11-08 | Pyramids cut for 161 frames of four datasets on four tile sets (D1 §3.15) | The cost table's estimates replaced by measurements; the bytes estimate corrected for sources not 1024 × 2ⁿ wide; upload time still open | §5.8 |
 | 2026-11-08 | `-q:v 1` equals `-q:v 2` without `-qmin 1`; the quantiser floor gave 17 Mbit/s on easy content; a 1-second keyframe interval cost 0.05 dB at the cap and 2.5% uncapped, all-intra 3.5% on a weekly series (D1 §3.9, §3.12) | Measurements added to the SOS variant and the keyframe rule | §6.1 |
+| 2026-11-08 | `frameTimestamp` stamps a yearly frame in the previous calendar year; half-step video bounds give the nearest frame under OpenSpace's floor; Folder mode hands SPICE `tm_mday + 1` (D1 §3.3, §3.9, §3.10) | Notes on the manifest's dates, the video bounds and Folder mode; a new question on the bounds | §6.3, q30 |
 | 2026-11-08 | GDAL makes a Mercator layer bounded at ±90° 12 times too tall; GDAL and QGIS read an antimeridian-crossing box as its complement; Leaflet misplaces 512 tiles without `zoomOffset`; CesiumJS sends a literal `{Time}` outside its intervals; the GDAL XML aborts on 404 without `ZeroBlockHttpCodes` (D1 §3.1, §3.2, §3.4) | Two bounding-box rules for the capabilities; companion and documentation notes; `tileSize` and `ZeroBlockHttpCodes` confirmed | §5.7 |
 
 ### 9.3 D1 — Prove it by hand
