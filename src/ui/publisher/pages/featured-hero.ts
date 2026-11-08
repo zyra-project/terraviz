@@ -51,7 +51,8 @@ interface HeroResponse {
 const ME_ENDPOINT = '/api/v1/publish/me'
 // Published only — pinning a draft/retracted dataset would never resolve
 // in the public catalog's dataset list, so the override would silently
-// fall through to auto-derive. Restrict the picker to what can actually
+// be skipped for the next source (the settings file, then an approved
+// event, then auto-derive). Restrict the picker to what can actually
 // surface as a hero.
 const DATASETS_ENDPOINT = '/api/v1/publish/datasets?limit=500&status=published'
 const HERO_PUBLIC_ENDPOINT = '/api/v1/featured-hero'

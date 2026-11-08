@@ -182,7 +182,11 @@ export async function getHeroCandidate(
   // cleared, one scheduled for later, or one pointing at a missing row
   // blocks nothing, so the file is consulted next. The file is fetched
   // only when the backend has no pin that shows.
-  for (const fetchSource of [fetchBackendOverride, fetchOverride]) {
+  const sources = [
+    ['portal', fetchBackendOverride],
+    ['featured-now.json', fetchOverride],
+  ] as const
+  for (const [label, fetchSource] of sources) {
     const override = await fetchSource(opts.signal)
     if (!override || !windowIsActive(override.window, now)) continue
     const dataset = datasets.find(d => d.id === override.datasetId && !d.isHidden)
@@ -191,7 +195,7 @@ export async function getHeroCandidate(
     }
     // A configured override that points at a missing/hidden row is a
     // curator error — log it but don't let it suppress the next source.
-    logger.warn('[hero] override datasetId did not resolve:', override.datasetId)
+    logger.warn(`[hero] ${label} override datasetId did not resolve:`, override.datasetId)
   }
 
   // A curator-approved current event headlines the hero next — between

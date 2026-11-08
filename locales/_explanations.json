@@ -228,6 +228,8 @@
   "publisher.feeds.rematch.partial": "Shown when the client stops paging at its safety limit before the server said it was finished. Keep all three placeholders.",
   "publisher.feeds.rematch.progress": "{scanned} is a running count across several server requests; the work is paged. Keep the placeholder.",
   "publisher.feeds.runDone": "Summary after running all enabled feeds. Preserve {created}, {refreshed}, and {failed} (counts).",
+  "publisher.hero.intro": "Intro above the hero form in the publisher portal. Keep “Real-Time” in English: it is the literal tag name the code matches. “Right now” should match the translation of browse.hero.heading. The list is a sequence: the catalog uses the first item that applies, not any of them.",
+  "publisher.hero.readonly.none": "Shown to view-only users when no hero is pinned in the portal. Keep “Real-Time” in English: it is the literal tag name the code matches. “Right now” should match the translation of browse.hero.heading. The list is a sequence: the catalog uses the first item that applies, not any of them.",
   "publisher.markdownToolbar.aria": "ARIA label for the markdown toolbar above the abstract textarea. Read by screen readers when the user enters the toolbar.",
   "publisher.markdownToolbar.blockquote.aria": "ARIA label for the Blockquote button — prepends `> ` to each selected line. Read by screen readers; not visible text.",
   "publisher.markdownToolbar.blockquote.title": "Hover tooltip on the Blockquote button. Explains what the button does. The literal `>` markdown syntax appears in the tooltip; preserve it verbatim.",

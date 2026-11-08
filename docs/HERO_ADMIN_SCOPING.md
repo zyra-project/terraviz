@@ -17,7 +17,8 @@
 > - a bad body returns 400, not 422;
 > - an approved current event sits between the pin and the automatic
 >   pick;
-> - a `hero` switch on the Features card can turn it off;
+> - a `hero` switch on the Features card turns off the portal pin
+>   (not yet the homepage hero itself);
 > - a pin that is not showing no longer blocks the file.
 >
 > The page does not yet show who set the pin or whether it has

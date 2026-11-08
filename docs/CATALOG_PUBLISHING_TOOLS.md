@@ -968,8 +968,9 @@ the first that qualifies:
 
 1. A pin set in the portal, read from `GET /api/v1/featured-hero`.
 2. A pin in `public/featured-now.json`.
-3. The freshest curator-approved current event with an approved link
-   to a visible dataset (`GET /api/v1/featured-event`;
+3. The dataset linked to the freshest curator-approved current event
+   from the last 14 days, through a link that was also approved
+   (`GET /api/v1/featured-event`;
    [`CURRENT_EVENTS_PLAN.md`](CURRENT_EVENTS_PLAN.md) §6.1).
 4. A dataset tagged `Real-Time` whose `endTime` is within the last
    24 hours, the freshest first.
@@ -990,10 +991,10 @@ blocked the file whatever its window.
 | Window | Required at the schema (`NOT NULL`) and on write (both bounds, parseable, start before end). | `functions/api/v1/_lib/hero-override-store.ts` |
 | Who can set it | The `hero.manage` capability: editor, admin and service. Everyone else sees a read-only view of the current pin. The scoping doc proposed `isPrivileged`; the five-role matrix replaced it ([`PUBLISHER_ROLES_PLAN.md`](PUBLISHER_ROLES_PLAN.md) D3). | `functions/api/v1/publish/featured-hero.ts` |
 | Public read | Returns the raw pin. The client decides whether it is live, one rule for both sources. | `functions/api/v1/featured-hero.ts` |
-| Freshness | KV `hero:v1` for 60 s, cleared on every write. In the browser, 60 s for the portal pin and 5 minutes for the file. | Both routes; `src/services/heroService.ts` |
-| Errors | `400 { errors }` for a bad body (the scoping doc said 422), `404` for an unknown dataset, `403 forbidden_role`. A read failure returns `{ hero: null }`, so visitors fall back cleanly; `503` only when `CATALOG_DB` is unbound. | Both routes |
+| Freshness | KV `hero:v1` for 60 s, cleared on every write. In the browser, 60 s in memory for the portal pin and 5 minutes for the file. The read also sends `Cache-Control: public, max-age=60`, which clearing KV cannot reach, so a visitor's change can take up to two minutes. | Both routes; `src/services/heroService.ts` |
+| Errors | `400 { errors }` for a bad field (the scoping doc said 422) and `400 invalid_json` for a body that is not JSON, `404` for an unknown dataset, `403 forbidden_role`. A read failure returns `{ hero: null }`, so visitors fall back cleanly; `503` only when `CATALOG_DB` is unbound. | Both routes |
 | Audit | `hero.set` and `hero.clear` rows in `audit_events`, plus `set_by` and `set_at` on the row. | `functions/api/v1/publish/featured-hero.ts` |
-| Switch | The `hero` toggle on the Features card. Off, the public read returns `{ hero: null }` uncached. | `src/types/node-features.ts` |
+| Switch | The `hero` toggle on the Features card. Off, the portal page and write API refuse, and the public read returns `{ hero: null }` uncached, so a portal pin is ignored. The homepage hero itself stays: the public app does not read this toggle, so a file pin, an approved event (gated by `events`) or a real-time dataset still shows. See the follow-ups. | `src/types/node-features.ts`, `functions/api/v1/featured-hero.ts` |
 | Headline | Optional, trimmed, at most 120 characters, rendered as text. | Store and page |
 | Preview | A lookalike of the homepage card built with the live `hero-panel.css`, not the `heroPanelUI` module the scoping doc recommended. | `src/ui/publisher/pages/featured-hero.ts` |
 | Scheduling | Falls out of the window's start. Since 2026-11-08 a scheduled pin leaves the file in place until it starts. | `src/services/heroService.ts` |
@@ -1001,7 +1002,8 @@ blocked the file whatever its window.
 ### Follow-ups
 
 The scoping doc promised three things the page does not do yet. The
-maintainer kept all three as future work on 2026-11-08.
+maintainer kept all three as future work on 2026-11-08. A fourth, a
+bug found in review the same day, needs a decision.
 
 - **Show who set the pin and when.** The row and the audit log both
   record it, but the page reads the public endpoint, which leaves it
@@ -1010,10 +1012,20 @@ maintainer kept all three as future work on 2026-11-08.
   publisher's display name.
 - **Say whether the pin is live**: "expires in 3 days", "expired",
   "starts Saturday". Today both views list the dates even after the
-  end has passed.
+  end has passed. The read-only view labels a lapsed or
+  not-yet-started pin "Currently featured", and the Overview's
+  newsroom pipeline counts it as live, while the homepage shows the
+  next source instead.
 - **Strip invisible control characters from the headline** on write.
   It is already capped and rendered as text, so this is extra care,
   not a fix.
+- **Decide what the `hero` switch turns off.** The Features card
+  describes it as "the 'Right now' hero spotlight", and
+  [`FEATURE_TOGGLES_PLAN.md`](FEATURE_TOGGLES_PLAN.md) expected a
+  `{ hero: null }` read to hide the panel. It does not: the client
+  goes on to the file, the event and the automatic pick. Making the
+  switch hide the panel means the public app reading it, as it
+  already reads `orbit` (`src/services/nodeFeatures.ts`).
 
 ## Other tools that round out the experience
 

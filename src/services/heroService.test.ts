@@ -170,6 +170,11 @@ describe('getHeroCandidate — backend read-through', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn((url: unknown) => {
+        // The approved-event source is covered in its own describe;
+        // here it answers "none" rather than receiving the file body.
+        if (String(url).includes('featured-event')) {
+          return Promise.resolve({ ok: false, json: async () => ({}) })
+        }
         const isBackend = String(url).includes('featured-hero')
         const r = isBackend ? routes.backend : routes.file
         if (!r) return Promise.resolve({ ok: false, json: async () => ({}) })
@@ -295,6 +300,24 @@ describe('getHeroCandidate — approved event source', () => {
       }),
     )
   }
+
+  // A lapsed portal pin blocks nothing (2026-11-08): with a file pin
+  // the file beats the event, and without one the event shows.
+  const lapsedPin = { hero: { datasetId: 'pinned', window: { start: '2026-01-01T00:00:00.000Z', end: '2026-02-01T00:00:00.000Z' } } }
+
+  it('a lapsed portal pin lets a file pin beat the event', async () => {
+    stubHero({ hero: lapsedPin, file: { datasetId: 'filed', window: activeWindow }, event: eventBody })
+    const res = await getHeroCandidate([ds('pinned'), ds('filed'), ds('feat'), realtime], { now: NOW })
+    expect(res?.source).toBe('override')
+    expect(res?.dataset.id).toBe('filed')
+  })
+
+  it('a lapsed portal pin and no file pin lets the event show', async () => {
+    stubHero({ hero: lapsedPin, file: {}, event: eventBody })
+    const res = await getHeroCandidate([ds('pinned'), ds('feat'), realtime], { now: NOW })
+    expect(res?.source).toBe('event')
+    expect(res?.dataset.id).toBe('feat')
+  })
 
   it('surfaces an approved event when there is no curator pin', async () => {
     stubHero({ hero: { hero: null }, file: {}, event: eventBody })
