@@ -142,7 +142,49 @@ graticule drawn over it, plus a regional variant whose box crosses
 
 ## 2. Environment
 
-To be completed as the tools are used.
+Everything in §3 that is not a kit ran in one Claude Code cloud
+container on 2026-11-08: Ubuntu 24.04, 4 vCPU, 16 GB of memory, the
+same shape as a GitHub `ubuntu-latest` runner. Cut times are therefore
+a fair proxy for the runner the plan names (§5.6), not a measurement on
+one. The scratch directory held about 7 GB of frames, tiles and
+encodes, none of it in the repository.
+
+| Tool | Version | Used for |
+|---|---|---|
+| GDAL | 3.8.4 (Ubuntu package) | The WMTS and WMS/TMS drivers, `gdal_translate`, palette expansion |
+| QGIS | 3.34.4 (Ubuntu package), driven headless through PyQGIS | §3.1–§3.4, §3.7 |
+| ffmpeg | 6.1.1 (Ubuntu package), libx264, libx265, `mpeg4` | §3.9 |
+| Chromium and Playwright | as installed in the container | The browser clients |
+| CesiumJS | 1.146.0 | Lat/lon at 512 and 256, time |
+| MapLibre GL JS | 6.15.0 | Mercator at 512 and 256 |
+| Leaflet | 1.9.4 | Mercator at 256 and 512 |
+| numpy 1.26, scipy 1.11, Pillow 10.2 | Ubuntu packages | The scratch cutter |
+
+**The scratch cutter.** The pyramids were cut by a short numpy script
+rather than `gdal2tiles`, because `gdal2tiles` builds each level from
+the one below, which §7.1 rejects. Every level is computed straight
+from the source with exact overlap weights in longitude and in
+sin(latitude), so a cell's weight is its true area. Native and finer
+levels are taken by nearest neighbour. `mean` re-quantises to the
+code grid under the half-area rule. `max` takes the largest valid code
+over every overlapping source cell. `picture` averages in linear light.
+Mercator is taken by nearest neighbour from the lat/lon level of the
+same width (§7.1). Data tiles are 8-bit indexed PNG whose palette and
+`tRNS` chunks are the dataset's own LUT, built by the repository's
+`buildColorScaleLut`; picture tiles are JPEG at quality 85 (Pillow's
+default 4:2:0). It is a prototype for measuring, not D3a's cutter.
+
+**The tile server.** A small Python server, also scratch, serves those
+tiles under §5.2's URL grammar, generates WMTS capabilities in every
+variant compared below, snaps time by §5.3 with calendar arithmetic and
+§5.2's reduced-precision rule, sends `Access-Control-Allow-Origin: *`,
+answers a missing tile with a 404, and logs every request, with the
+time each client asked for and the frame it got. Each variant is a path
+prefix, so every client configuration hits distinct addresses:
+`crs84` or `urn` (or a deliberately mismatched corner) for the lat/lon
+CRS, `limits` (one shared set with `TileMatrixSetLimits`) or
+`perdepth` (a set per depth, GIBS's `_LevelN` pattern), `512` or `256`,
+and `ms` for times advertised with milliseconds.
 
 ---
 
@@ -209,7 +251,96 @@ Pending.
 
 ### 3.15 What does a pyramid cost?
 
-Pending.
+**Question.** Bytes, object count, upload count and cut time per frame,
+as loose tiles and as one pack per frame (§5.6, §5.8, D3a's sizing).
+
+**Method.** Every frame of the drought (51), RRFS (85) and MPAS (20)
+sets, and five frames of the clouds slice, cut into all four tile sets:
+lat/lon at 512 (`ll512`, the primary grid) and 256 (`ll256`, the
+registered WorldCRS84Quad), and Web Mercator at 256 (`wm256`, the
+secondary grid) and 512 (`wm512`, for MapLibre). Five drought frames
+were also cut as PNG with nearest-neighbour levels (`drought-cm`), the
+`colour-mapped` treatment, and one MPAS frame with `mean` as well as
+`max`. Timings are single-threaded wall time per frame on §2's machine:
+reading the source, building every level, and encoding all four sets.
+A pack is a header, a 16-byte index entry per tile and the tiles
+concatenated, the shape of a PMTiles archive without its compressed
+directory.
+
+**What was measured.** Means per frame:
+
+| Dataset, source, method | Native level | `ll512` tiles / MB | `ll256` tiles / MB | `wm256` tiles / MB | `wm512` tiles / MB | MB `ll512` ÷ source | Cut, all four sets |
+|---|---|---|---|---|---|---|---|
+| Drought, 4096×2048 RGB PNG, `picture`, JPEG | 2 (4096) | 42 / 1.79 | 170 / 1.90 | 341 / 3.39 | 85 / 3.21 | 0.27 | 5.0 s |
+| Drought, same, nearest, PNG | 2 | 42 / 8.87 | 170 / 9.04 | 341 / 8.95 | 85 / 8.83 | 1.33 | 6.2 s |
+| Clouds, 4096×2048 JPEG, `picture`, JPEG | 2 | 42 / 2.00 | 170 / 2.12 | 341 / 3.19 | 85 / 3.01 | 1.85 | 4.8 s |
+| MPAS, 7200×3600 grey PNG, `max`, indexed PNG | 3 (8192) | 170 / 21.10 | 682 / 21.90 | 1,365 / 22.96 | 341 / 21.77 | 1.89 | 10.5 s |
+| MPAS, same, `mean` (one frame) | 3 | 170 / 18.65 | 682 / 19.43 | 1,365 / 20.43 | 341 / 19.24 | 1.67 | 11.7 s |
+| RRFS, 2250×960 grey PNG over 75°×32°, `mean`, indexed PNG | 4 (16384) | 47 / 0.59 | 145 / 0.68 | 181 / 0.74 | 55 / 0.62 | 3.11 | 1.5 s |
+
+All 167 frames, cut four at a time on four cores, took 173 s of wall
+time.
+
+The pack adds 8 bytes plus 16 per tile: under 22 KB for MPAS's 1,365
+Mercator tiles, against 23 MB of tiles. A frame's upload count is its
+object count loose (383 for a 4096-wide frame on the two grids the
+plan serves, 1,535 for MPAS, 228 for RRFS) and one per grid packed.
+**Upload time to R2 was not measured**: that needs the scratch bucket,
+and is the first thing to run once credentials are set up (§3.8).
+
+Per 1,000 frames on the two grids the plan serves (`ll512` + `wm256`):
+5.2 GB and 383,000 objects for the drought pictures, 1.3 GB and 228,000
+objects for RRFS, and 44 GB and 1.5 million objects for MPAS.
+
+**The answer.**
+
+- **§5.1 and §5.8's counts hold.** 42 lat/lon tiles and 341 Mercator
+  tiles for a 4096-wide frame, 383 objects per frame, and Mercator at
+  eight times the objects and about twice the bytes (1.9×) of the
+  lat/lon set. Cut time is seconds per frame, as estimated.
+- **"About 1.3× the frame per lat/lon grid" is right only for a source
+  1024 × 2ⁿ wide.** The pyramid's levels add a third, but the cut to
+  the native level adds its own factor: the square of (native width ÷
+  effective source width). MPAS's 7200 columns become 8192, so its
+  pyramid is 1.9× its PNGs, not 1.3×. RRFS's box puts it at an
+  effective 10,800 wide, cut at 16,384, so its pyramid is 3.1× its
+  frames. A regional or odd-width dataset costs storage that §5.8's
+  estimate does not show, and the estimate should say so.
+- **Data-encoded datasets are the expensive ones.** Indexed PNG of a
+  noisy field compresses about as well as its source and no better, so
+  MPAS stores 44 GB per 1,000 frames where a JPEG picture stores 5. The
+  plan's "tens of GB" is true of data, not of pictures.
+- **A colour-mapped picture costs five times its JPEG as PNG.** The
+  drought frames are class speckles over Blue Marble. Pillow's default
+  JPEG (quality 85, 4:2:0) lost 36% of the speckle pixels at the native
+  level, by a colour threshold, which is §7.1's warning about chroma
+  bleeding, measured. 4:4:4 JPEG at quality 85 kept all of them at
+  2.15 MB a frame, against 1.37 MB for 4:2:0 and 6.66 MB for PNG. That
+  is the format to suggest for `colour-mapped` pictures where PNG's
+  cost matters.
+- **`mean` and `max` cost about the same to cut.** Packed or loose is
+  a question of object count and upload time, not of cut time; packing
+  added under 0.1 s a frame here.
+
+**A finding about §7.1's Mercator rule.** Taking Mercator level *z* by
+nearest neighbour from the lat/lon level of the same width, as §7.1
+proposes, makes every Mercator level but the native one visibly blocky
+toward the poles. A lat/lon row is 360/W degrees tall; a Mercator row
+at latitude φ is cos φ of that, so each lat/lon row fills 1 ÷ cos φ
+Mercator rows: 2 at 60°, 2.9 at 70°, 5.8 at 80° and 11.5 at 85°. At
+level 2 of the drought set, Antarctica and Greenland show stair-steps
+several pixels tall. At the native level that is honest, because the
+source has no more rows; at coarser levels a finer lat/lon level does
+have them. Choosing, per Mercator row, the coarsest lat/lon level whose
+rows are no taller than that Mercator row would keep §7.1's rule (no
+averaging across rows in the warp) without the blocks, at the cost of
+sampling columns from a finer level than the row's width. That is a
+choice for D3a, recorded here so the rule is not built as written
+without it.
+
+**Settles.** §5.8's table (counts confirmed; the bytes row needs the
+native-level factor); D3a's sizing, except upload time. **Still open:**
+R2 upload time, loose against packed, with the scratch bucket.
 
 ---
 
