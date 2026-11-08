@@ -300,7 +300,9 @@ shifts every later position. Rules to keep dashboards stable:
   only on the server's `internal` stamp, which a dev session doesn't
   get. So `/publish/analytics` counts an opted-in dev session as a
   visitor. `VITE_TELEMETRY_CONSOLE=true` turns console mode on in a
-  build.
+  build. Both defaults key on Vite's mode, so a dev server started
+  with a custom one (`vite --mode staging`) counts as a build. It
+  sends, and reports `public`, unless you set both variables.
 - **Disabled mode.** Set `VITE_TELEMETRY_ENABLED=false` to compile
   out the entire emitter (`TELEMETRY_BUILD_ENABLED` becomes a
   const `false` and the call sites tree-shake).

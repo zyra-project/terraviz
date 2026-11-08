@@ -1272,7 +1272,7 @@ export interface SessionStartEvent extends TelemetryEventBase {
    * with `VITE_BUILD_CHANNEL=internal` (staff dogfood) or
    * `VITE_BUILD_CHANNEL=canary` (staged rollout). The Vite dev server
    * defaults to `'internal'` (#531); see `resolveBuildChannel` in
-   * `vite.config.ts`. */
+   * `scripts/lib/build-channel.ts`. */
   build_channel: BuildChannel
   vr_capable: VrCapability
   schema_version: string

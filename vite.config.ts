@@ -4,28 +4,10 @@
 import { defineConfig, loadEnv } from 'vite'
 import path from 'path'
 import { readFileSync } from 'fs'
+import { resolveBuildChannel } from './scripts/lib/build-channel'
 
 const pkg = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8')) as {
   version: string
-}
-
-/** Validate and normalize the build-channel env var so a typo
- * doesn't leak a bespoke string into `session_start.build_channel`.
- * Reads from the merged env object so .env.local + shell env
- * follow the same precedence as every other VITE_* knob.
- *
- * An explicit `public`, `internal` or `canary` wins. With none, the
- * dev server (`mode === 'development'`) is `internal` and everything
- * else `public`, so a contributor who turns console mode off to test
- * the real transport still sends rows that can be told from visitors
- * (#531). A built bundle is `public` by default, as before. */
-export function resolveBuildChannel(
-  env: Record<string, string>,
-  mode: string,
-): 'public' | 'internal' | 'canary' {
-  const raw = process.env.VITE_BUILD_CHANNEL ?? env.VITE_BUILD_CHANNEL
-  if (raw === 'public' || raw === 'internal' || raw === 'canary') return raw
-  return mode === 'development' ? 'internal' : 'public'
 }
 
 export default defineConfig(({ mode }) => {
@@ -40,12 +22,18 @@ export default defineConfig(({ mode }) => {
 
   return {
     define: {
+      // `mode !== 'production'` on purpose. The telemetry defaults
+      // (here and in `src/analytics/config.ts`) key on
+      // `mode === 'development'` instead: the client reads
+      // `import.meta.env.MODE`, which is `test` under vitest, and
+      // tests must not be treated as the dev server.
       __BUNDLED_DEV__: JSON.stringify(mode !== 'production'),
       __APP_VERSION__: JSON.stringify(pkg.version),
       // Baked in at build time. Internal / canary bundles are tagged
       // so a query can filter them out of public-user rollups
       // without needing IP-based allowlists. Default `'public'` for a
-      // build, `'internal'` under the dev server.
+      // build, `'internal'` under the dev server; the rule lives in
+      // `scripts/lib/build-channel.ts`.
       __BUILD_CHANNEL__: JSON.stringify(resolveBuildChannel(env, mode)),
     },
     root: './src',
