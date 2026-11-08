@@ -1055,8 +1055,13 @@ or missing hashing/sanitization of free-text fields.
 
 ### Local dev
 
-- `VITE_TELEMETRY_CONSOLE=true` — log batches to console instead
-  of POSTing.
+- Console mode is **on by default under the dev server**
+  (`npm run dev`, `npm run dev:desktop`): batches are logged to the
+  console, not POSTed, because the dev proxy would otherwise send them
+  to the production node as real visitors (#531). Set
+  `VITE_TELEMETRY_CONSOLE=false` to exercise the real transport, and
+  those sessions report `build_channel=internal`. A built bundle sends
+  unless `VITE_TELEMETRY_CONSOLE=true`.
 - `VITE_TELEMETRY_ENABLED=false` — compile out the emitter
   entirely (call sites tree-shake).
 

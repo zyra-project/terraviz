@@ -96,8 +96,9 @@ export function buildHandoff(state: SetupState, opts: HandoffOptions = {}): Hand
             'them in the dashboard would have no effect.',
     items: [
       // Both already resolve to these values with nothing set:
-      // `resolveBuildChannel` returns 'public' for anything that is
-      // not 'internal' or 'canary', and TELEMETRY_BUILD_ENABLED is
+      // `resolveBuildChannel` returns 'public' for a build unless told
+      // 'internal' or 'canary' (only the dev server defaults to
+      // 'internal'), and TELEMETRY_BUILD_ENABLED is
       // `!== 'false'`. Printing them as work to do sends an operator
       // to a dashboard to type in the default. Still named, so the
       // list stays complete, carrying the value that would change

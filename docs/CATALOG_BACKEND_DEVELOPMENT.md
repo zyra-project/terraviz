@@ -132,12 +132,12 @@ come from these sources:
 | `MOCK_AI` | `.dev.vars.example` sets this to `true` by default. The embedding helper returns a deterministic 768-dim feature-hashed vector instead of calling Workers AI; vocabulary overlap drives cosine similarity so the mock walks behave like real embeddings at a coarse level. Same fail-closed surface as `MOCK_VECTORIZE`. | Phase 1c |
 
 Phase-1a contributors realistically only need `NODE_ID_PRIVATE_KEY_PEM`
-and `DEV_BYPASS_ACCESS=true`. To keep a local session out of the
-analytics, put `VITE_TELEMETRY_CONSOLE=true` (batches are logged, not
-sent) or `VITE_TELEMETRY_ENABLED=false` (the emitter is compiled out)
-in `.env.local` and restart `npm run dev`. That matters because the
+and `DEV_BYPASS_ACCESS=true`. Telemetry needs nothing: under
+`npm run dev` batches are logged to the console, not sent, because the
 dev server's proxy sends `/api/ingest` to the production node unless
-`VITE_DEV_API_TARGET` points elsewhere. There is no `KILL_TELEMETRY`
+`VITE_DEV_API_TARGET` points elsewhere. To test the real transport, put
+`VITE_TELEMETRY_CONSOLE=false` in `.env.local` and restart; those
+sessions report `build_channel=internal`. There is no `KILL_TELEMETRY`
 variable; the production kill switch is a KV key
 (`docs/ANALYTICS.md`). Phase 1b adds
 `MOCK_STREAM=true` + `MOCK_R2=true` (both set by the example

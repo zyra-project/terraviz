@@ -32,6 +32,7 @@ Most of these files carry a substantial header comment explaining the
 
 | File | Responsibility |
 |---|---|
+| `scripts/lib/build-channel.ts` | The `session_start.build_channel` a bundle reports, which `vite.config.ts` bakes into `__BUILD_CHANNEL__`: an explicit `VITE_BUILD_CHANNEL` wins, otherwise `internal` under the dev server and `public` for a build (#531). Keyed on `mode` to match the client's console-mode default. Moved out of the config file so `functions/tsconfig.json` type-checks it |
 | `scripts/lib/catalog-migrations.ts` | Where the migrations live + how to apply them to an in-memory DB, shared so `dump-catalog-schema.ts` and the migrations smoke test cannot disagree about either |
 | `scripts/lib/cf-pages-api.ts` | Cloudflare Pages REST **read** client for the bindings audit — pure mapping from `GET /accounts/{id}/pages/projects/{name}` into binding shapes |
 | `scripts/lib/cli.ts` | Shared CLI helpers for the tsx-based scripts; `isInvokedAsScript()` is the cross-platform "is this file the entry point" check that gates `main()`-style top-level calls |
