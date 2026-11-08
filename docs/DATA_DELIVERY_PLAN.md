@@ -1632,6 +1632,24 @@ once, in the lat/lon pyramid, and the warp never averages. Two coarser
 lat/lon levels, 512 and 256 wide, feed Mercator levels 0 and 1, and a
 parity test checks the two grids against each other.
 
+**D1 found the rule blocky toward the poles** (`delivery/D1_PROTOTYPES.md`
+§3.15). A lat/lon row of the same width fills 1 ÷ cos φ Mercator rows:
+2 at 60°, 2.9 at 70°, 5.8 at 80°, 11.5 at 85°. So every Mercator level
+but the native one shows stair-steps several pixels tall over
+Antarctica and Greenland. At the native level that is honest, since
+the source has no more rows; coarser, a finer lat/lon level does have
+them. Taking each Mercator row from the coarsest lat/lon level whose
+rows are no taller than it keeps the rule, with no averaging across
+rows in the warp, without the blocks. The cost is sampling columns
+from a level finer than the row's width. D3a chooses.
+
+**Pictures with palette classes over imagery are common**, and D1
+measured one (§3.15). The drought frames are single-pixel class
+speckles over Blue Marble. At the native level, 4:2:0 JPEG at quality
+85 lost 36% of the speckle pixels by a colour threshold; 4:4:4 JPEG at
+the same quality kept all of them, at 1.6 times the size of 4:2:0 and
+a third of PNG's.
+
 ### 7.2 Time: choosing samples
 
 **A client chooses times; the node chooses frames.** Snapping a
@@ -1992,6 +2010,7 @@ new §11 question instead.
 | 2026-11-08 | Pyramids cut for 161 frames of four datasets on four tile sets (D1 §3.15) | The cost table's estimates replaced by measurements; the bytes estimate corrected for sources not 1024 × 2ⁿ wide; upload time still open | §5.8 |
 | 2026-11-08 | `-q:v 1` equals `-q:v 2` without `-qmin 1`; the quantiser floor gave 17 Mbit/s on easy content; a 1-second keyframe interval cost 0.05 dB at the cap and 2.5% uncapped, all-intra 3.5% on a weekly series (D1 §3.9, §3.12) | Measurements added to the SOS variant and the keyframe rule | §6.1 |
 | 2026-11-08 | `frameTimestamp` stamps a yearly frame in the previous calendar year; half-step video bounds give the nearest frame under OpenSpace's floor; Folder mode hands SPICE `tm_mday + 1` (D1 §3.3, §3.9, §3.10) | Notes on the manifest's dates, the video bounds and Folder mode; a new question on the bounds | §6.3, q30 |
+| 2026-11-08 | Mercator taken from the same-width lat/lon level repeats each row up to 11.5 times near the poles; 4:2:0 JPEG lost 36% of a picture's class speckles, 4:4:4 none (D1 §3.15) | A note on the Mercator rule, with an alternative for D3a; the speckle measurement | §7.1 |
 | 2026-11-08 | GDAL makes a Mercator layer bounded at ±90° 12 times too tall; GDAL and QGIS read an antimeridian-crossing box as its complement; Leaflet misplaces 512 tiles without `zoomOffset`; CesiumJS sends a literal `{Time}` outside its intervals; the GDAL XML aborts on 404 without `ZeroBlockHttpCodes` (D1 §3.1, §3.2, §3.4) | Two bounding-box rules for the capabilities; companion and documentation notes; `tileSize` and `ZeroBlockHttpCodes` confirmed | §5.7 |
 
 ### 9.3 D1 — Prove it by hand
