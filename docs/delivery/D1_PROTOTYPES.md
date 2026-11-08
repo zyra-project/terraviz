@@ -820,4 +820,24 @@ R2 upload time, loose against packed, with the scratch bucket.
 
 ## 4. Kits
 
-Pending.
+Each kit is a folder with a one-page checklist: what to load, the
+exact steps, what to record, and what counts as a pass. They sit
+outside the repository with the rest of D1's scratch, and the
+maintainer hands them on; this phase sends nothing to anyone. Every
+address in them reads `{{NODE}}` until the scratch Worker is deployed
+(§3.8); a script replaces it, and the Worker serves the files and logs
+every request, so a result can be matched to what the client actually
+asked for.
+
+| Kit | Who runs it | What it carries | Rows |
+|---|---|---|---|
+| `openspace/` | The OpenSpace collaborators, on a dome or a desktop | Eight assets: the test pattern at 512 and 256; drought tiles through time with `MaxConnections` 2 and 8 and `<Cache>` on and off, stepping 7 days and 1 day; RRFS tiles hourly; time-mapped `h264-4096` video at 1 s and 6 s keyframes, of clouds (for cost) and of date cards (for correctness); Folder-mode date cards across month ends; RRFS as palette-applied frames against grey frames with OpenSpace's own colormap | §3.1, §3.2, §3.9, §3.10, and §6.2's palette question |
+| `arcgis/` | The maintainer's ArcGIS test organisation | The WMTS in each grid and depth form, the WMS, and a Hub step | §3.1 (q1), §3.5 (q2), §3.6 (q3), §3.7, §3.14 (q11), ArcGIS's time slider |
+| `sos/` | An SOS site or the SOS team | A complete SOS directory: two playlists, frames, labels, legend, the `sos-mpeg4` movie, colour squares | §3.12 (q9), §6.1's colour matrix |
+| `secondlife/` | The Second Life sphere | Two `h264-1024` MP4s | §3.13 |
+| `redirect/` | The maintainer | A browser globe page, an OpenSpace asset, and `curl` checks against a 302 to a digest path | §3.11 |
+
+Each kit's results come back as a short note: the version of the
+client, what was recorded at each step, and any error text verbatim.
+Each row above then moves from "kit handed over" to a result, and this
+document's `Last reviewed:` line with it.
