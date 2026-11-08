@@ -1723,7 +1723,13 @@ clients that cache capabilities need to tolerate.
   survives in each. Because the index is the code, such a tile is in
   effect a raw-code tile, so the colour map and abstract publish `vmin`,
   `vmax` and `dataMinLuma`, and a GDAL or QGIS user does not read a bare
-  index as a measurement.
+  index as a measurement. **D1 confirmed it for GDAL and QGIS**
+  (`delivery/D1_PROTOTYPES.md` §3.4). RRFS's LUT fades through 48 alpha
+  values, and `gdal_translate -expand rgba`, the GDAL XML's
+  `BandsCount` 4 and QGIS's render all reproduced them exactly. It also
+  found a gap: a row with no `dataMinLuma` uses every index for a
+  value, so outside a regional box the tile can only write index 0,
+  which reads as a measured zero (§11 q28).
 - **Never JPEG for data.** JPEG ringing along palette boundaries invents
   colours the palette does not contain — the false-colour failure of
   averaging colours, arriving through compression instead.
@@ -2011,6 +2017,7 @@ new §11 question instead.
 | 2026-11-08 | `-q:v 1` equals `-q:v 2` without `-qmin 1`; the quantiser floor gave 17 Mbit/s on easy content; a 1-second keyframe interval cost 0.05 dB at the cap and 2.5% uncapped, all-intra 3.5% on a weekly series (D1 §3.9, §3.12) | Measurements added to the SOS variant and the keyframe rule | §6.1 |
 | 2026-11-08 | `frameTimestamp` stamps a yearly frame in the previous calendar year; half-step video bounds give the nearest frame under OpenSpace's floor; Folder mode hands SPICE `tm_mday + 1` (D1 §3.3, §3.9, §3.10) | Notes on the manifest's dates, the video bounds and Folder mode; a new question on the bounds | §6.3, q30 |
 | 2026-11-08 | Mercator taken from the same-width lat/lon level repeats each row up to 11.5 times near the poles; 4:2:0 JPEG lost 36% of a picture's class speckles, 4:4:4 none (D1 §3.15) | A note on the Mercator rule, with an alternative for D3a; the speckle measurement | §7.1 |
+| 2026-11-08 | Partial palette alpha survives GDAL's expansion and QGIS exactly; a row with no reserved code has no index for absence (D1 §3.4) | Transparency confirmed; the gap noted, with a new question | §7.3, q28 |
 | 2026-11-08 | GDAL makes a Mercator layer bounded at ±90° 12 times too tall; GDAL and QGIS read an antimeridian-crossing box as its complement; Leaflet misplaces 512 tiles without `zoomOffset`; CesiumJS sends a literal `{Time}` outside its intervals; the GDAL XML aborts on 404 without `ZeroBlockHttpCodes` (D1 §3.1, §3.2, §3.4) | Two bounding-box rules for the capabilities; companion and documentation notes; `tileSize` and `ZeroBlockHttpCodes` confirmed | §5.7 |
 
 ### 9.3 D1 — Prove it by hand
