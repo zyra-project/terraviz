@@ -1197,6 +1197,9 @@ D1 measured the SOS variant (`delivery/D1_PROTOTYPES.md` §3.12):
   25, and 34 seconds of 10-minute clouds at 58.5 Mbit/s (245 MB). The
   bundle states the rate it reached; whether SOS accepts a movie under
   25 Mbit/s at the best quantiser is for the SOS contact (q9).
+  **Decided 2026-11-08 by the maintainer:** the movie is made at the
+  best quantiser, never padded up to 25 Mbit/s, and the SOS kit asks
+  the SOS contact whether that is acceptable.
 
 - **One video frame per data frame.** Frame *i* of the file is frame *i*
   of the dataset, so a player that maps a start and end time linearly
@@ -2041,6 +2044,7 @@ and a Second Life sphere. The maintainer can line up all four.
 | 2026-11-08 | The maintainer | Licensed or gated access by a node is out of this plan's scope and continues in #528; the delivery channels serve only datasets the node publishes, never rows mirrored from a peer; D3c's discovery field waits on one capabilities and extensions convention (#529) | §8, §9.9, §10 |
 | 2026-11-08 | The maintainer | A frame that represents a period (a day, a month) is advertised at that period's start, where the dataset's record says what it represents; otherwise as stamped | §5.3, q27 |
 | 2026-11-08 | The maintainer | Time dimensions stay a compact `start/end/period` interval past QGIS's 1,000-step limit; QGIS animates them through the server's snapping | §5.3, q29 |
+| 2026-11-08 | The maintainer | The `sos-mpeg4` movie is made at the best quantiser and never padded to 25 Mbit/s; D1's SOS kit asks the SOS contact whether a lower rate is acceptable | §6.1, q9 |
 | 2026-11-08 | The maintainer | D3a takes each Mercator row from the coarsest lat/lon level whose rows are no taller than it, instead of the same-width level, so the poles are not blocky | §7.1 |
 | 2026-11-08 | The maintainer | The RRFS smoke rows' codes below `transparentRange` are real zeros, not absence; GSL not yet asked | §7.1, `delivery/D1_PROTOTYPES.md` §1.2 |
 | 2026-11-08 | The maintainer | For now, a data layer with no reserved code says in its abstract and colour map that index 0 outside its box is not a measurement | §7.3, q28 |
