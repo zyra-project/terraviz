@@ -1170,6 +1170,18 @@ quantiser, and ffmpeg's `mpeg4` encoder labels every stream Simple
 Profile @ Level 1 whatever its size. Zyra's `compose-video` `sos`
 preset rescales luma and is never used for data-encoded content.
 
+D1 measured the SOS variant (`delivery/D1_PROTOTYPES.md` §3.12):
+- **The label is confirmed:** Simple Profile, level 1, untagged, for a
+  2048×1024 stream at 58 Mbit/s.
+- **`-q:v 1` produced the same file as `-q:v 2`**, because ffmpeg's
+  default `qmin` is 2. The encode passes `-qmin 1` with `-q:v 1`, or
+  states its floor as 2.
+- **The floor gives the encoder's best quality, not SOS's bitrate.**
+  At `-q:v 2` a weekly drought series ran at 17 Mbit/s, under SOS's
+  25, and 34 seconds of 10-minute clouds at 58.5 Mbit/s (245 MB). The
+  bundle states the rate it reached; whether SOS accepts a movie under
+  25 Mbit/s at the best quantiser is for the SOS contact (q9).
+
 - **One video frame per data frame.** Frame *i* of the file is frame *i*
   of the dataset, so a player that maps a start and end time linearly
   onto the file's duration — OpenSpace does exactly that — lands on the
@@ -1189,7 +1201,17 @@ preset rescales luma and is never used for data-encoded content.
   drops steps rather than stalling; D1 compares 1 s against shorter
   GOPs, and all-intra for short series, with hardware decoding on and
   off, and checks keyframe positions with `ffprobe` rather than trusting
-  the flags.
+  the flags. **D1 found the 1-second interval nearly free.**
+  - Keyframes landed every second exactly.
+  - At the 25 Mbit/s cap, 1,008 frames of clouds at 4096×2048 came out
+    the same size at 1 s and 6 s, with luma PSNR 34.70 against 34.74
+    dB.
+  - With no cap, at the same CRF, the 1-second file was 2.5% larger.
+  - For 51 weekly drought frames, which share little from one to the
+    next, all-intra cost 3.5% more than a 1-second interval.
+  
+  What a seek costs on the dome's hardware decoder is the OpenSpace
+  kit's question (D1 §3.9).
 - **Everything else pinned.** `-profile:v high -level:v 5.1`, so a
   variant above 30 fps fails a test rather than quietly needing level
   5.2 (4096×2048 at 30 fps is exactly 5.1's macroblock rate). No audio
@@ -1953,7 +1975,8 @@ new §11 question instead.
 | 2026-11-08 | GDAL and QGIS each take the deepest matrix in a shared tile matrix set as the layer's, whatever its `TileMatrixSetLimits` say, and ask past its last level (D1 §3.1) | Each layer declares a tile matrix set per depth, GIBS's `_LevelN` pattern; CRS84 and the EPSG URN both confirmed, each with the corner in its own axis order | §5.1 |
 | 2026-11-08 | QGIS sends ISO 8601's basic form when listed times carry milliseconds, and uses KVP for every tile (D1 §3.1, §3.3) | The time parser also accepts the basic form; KVP is noted as the encoding QGIS depends on | §5.2 |
 | 2026-11-08 | Calendar floors measured wrong on 10 of 12 months and 116 of 175 years; QGIS sends its range start; noon-stamped daily frames show the previous day in QGIS and CesiumJS; QGIS expands at most 1,000 instants (D1 §3.2, §3.3) | Measurements added to the calendar, snap, milliseconds and long-list rules; two new questions | §5.3, q27, q29 |
-| 2026-11-08 | Pyramids cut for 160 frames of four datasets on four tile sets (D1 §3.15) | The cost table's estimates replaced by measurements; the bytes estimate corrected for sources not 1024 × 2ⁿ wide; upload time still open | §5.8 |
+| 2026-11-08 | Pyramids cut for 161 frames of four datasets on four tile sets (D1 §3.15) | The cost table's estimates replaced by measurements; the bytes estimate corrected for sources not 1024 × 2ⁿ wide; upload time still open | §5.8 |
+| 2026-11-08 | `-q:v 1` equals `-q:v 2` without `-qmin 1`; the quantiser floor gave 17 Mbit/s on easy content; a 1-second keyframe interval cost 0.05 dB at the cap and 2.5% uncapped, all-intra 3.5% on a weekly series (D1 §3.9, §3.12) | Measurements added to the SOS variant and the keyframe rule | §6.1 |
 | 2026-11-08 | GDAL makes a Mercator layer bounded at ±90° 12 times too tall; GDAL and QGIS read an antimeridian-crossing box as its complement; Leaflet misplaces 512 tiles without `zoomOffset`; CesiumJS sends a literal `{Time}` outside its intervals; the GDAL XML aborts on 404 without `ZeroBlockHttpCodes` (D1 §3.1, §3.2, §3.4) | Two bounding-box rules for the capabilities; companion and documentation notes; `tileSize` and `ZeroBlockHttpCodes` confirmed | §5.7 |
 
 ### 9.3 D1 — Prove it by hand
