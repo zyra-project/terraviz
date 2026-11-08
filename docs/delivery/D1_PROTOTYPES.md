@@ -623,7 +623,84 @@ session's credential flow.
 
 ### 3.9 What does a time step cost OpenSpace? Video variants and keyframes
 
-Pending.
+**Question.** What do §6.1's variants weigh, and what does a keyframe
+interval of 1 s cost against today's 6 s, in bytes, in quality, and in
+the seek a time-synced OpenSpace step makes (§6.1's keyframe rule)?
+
+**Method.** §6.1's encode settings with libx264:
+- High@5.1, constant frame rate, no B-frames, `-sc_threshold 0`, BT.709
+  conversion and tags, no audio;
+- the catalog's own rate control: CRF 18 under a 25 Mbit/s cap at
+  4096, CRF 20 under 8 at 2048, CRF 22 under 2 at 1024.
+
+Two sources:
+- the clouds slice, 1,008 frames at 30 fps;
+- the drought set, 51 frames at 10 fps.
+
+Quality is luma PSNR against the same frames converted the same way.
+The seek is a proxy, not OpenSpace: the wall time for ffmpeg, in
+software on four threads, to decode one exact frame after seeking to a
+random time. Thirty targets per file. Seeking to a keyframe costs about
+250 ms on its own, mostly process start, so that is the floor.
+
+**What was measured.**
+
+| File | Size | Rate | Keyframes (`ffprobe`) | Notes |
+|---|---|---|---|---|
+| Clouds `h264-4096`, 1 s GOP | 107.4 MB | 25.6 Mbit/s (at the cap) | Every 1.000 s | Luma PSNR 34.70 dB; 122 s to encode |
+| Clouds `h264-4096`, 6 s GOP | 107.4 MB | 25.6 Mbit/s (at the cap) | Every 6.000 s | Luma PSNR 34.74 dB |
+| Clouds `h264-4096`, no cap, 1 s / 6 s | 534.8 / 521.6 MB | 127 / 124 Mbit/s | — | The 1-second interval costs 2.5% |
+| Clouds `h264-2048`, 1 s | 34.4 MB | 8.2 Mbit/s | Every second | — |
+| Clouds `h264-1024`, 1 s | 8.6 MB | 2.0 Mbit/s | Every second | §6.1's 1.5–2 Mbit/s |
+| Drought `h264-4096`, 1 s / 6 s / all-intra | 17.6 / 16.9 / 18.2 MB | 27.6 / 26.5 / 28.5 Mbit/s | As set | 5.1 s files: all-intra costs 3.5% over 1 s |
+| Drought `h264-1024`, 1 s | 1.2 MB | 1.9 Mbit/s | Every second | — |
+| Date-card `h264-4096` (for the OpenSpace kit), 1 s / 6 s | 52.7 / 52.3 MB | — | As set | — |
+
+| File | Seek to a random frame: median | p90 | worst |
+|---|---|---|---|
+| Clouds 4096, 1 s GOP | 437 ms | 560 ms | 619 ms |
+| Clouds 4096, 6 s GOP | 1,340 ms | 2,020 ms | 2,184 ms |
+| Clouds 4096 uncapped, 1 s | 716 ms | 1,055 ms | 1,288 ms |
+| Clouds 4096 uncapped, 6 s | 2,404 ms | 3,759 ms | 4,576 ms |
+
+Every H.264 variant came out High@5.1, yuv420p, `tv` range, BT.709
+throughout, at a constant frame rate.
+
+**The answer.**
+
+- **A 1-second keyframe interval costs almost nothing** at the
+  catalog's cap: the same bytes, 0.05 dB of luma PSNR. Uncapped, it
+  costs 2.5%.
+- **It makes a random seek about five to six times cheaper.** Above
+  the ~250 ms floor, the median was ~190 ms against ~1,090 ms at 6
+  seconds, in line with decoding up to 30 frames against up to 180.
+  §6.1's rule stands. On a dome stepping time faster than a second
+  per step, the 6-second file would drop steps; the kit (§4,
+  `openspace/`, steps 5–7) measures it on OpenSpace's own hardware
+  decoder.
+- **All-intra is worth offering for short series** whose frames share
+  little, such as weekly composites, at a few percent more.
+- **The 4096 picture is rate-capped, not quality-capped.** For noisy
+  satellite infrared the uncapped encode at CRF 18 is five times the
+  cap. A dome file at the cap is what the catalog already ships; a
+  higher-rate variant for domes is a choice, not a need D1 found.
+
+**Found on the way: §6.3's bounds give the nearest frame.** The kit's
+time-mapped assets follow §6.3: bounds half a mean step outside the
+first and last frames. Under OpenSpace's floor
+(`modules/video/src/videoplayer.cpp`), the frame shown at clock *t* is
+⌊(*t* − *t*₀ + P/2) ÷ P⌋. That is the **nearest** frame, which shows a
+frame up to half a period before its own time, the behaviour §5.3
+rejects for tiles. For a regular period, bounds on the first frame and
+one period past the last give ⌊(*t* − *t*₀) ÷ P⌋, a snap down. For a
+calendar period no linear mapping is exact: the half step avoids
+showing the previous month on the 1st, but shows the next month from
+mid-month. The kit's step 5 checks this on a dome; the choice is §11
+q30.
+
+**Settles.** §6.1's keyframe rule (confirmed, with its cost) and its
+variant sizes. **Still open:** the time-step cost on OpenSpace's
+hardware decoder, and q30.
 
 ### 3.10 Does OpenSpace's Folder mode read the dates right? (q10)
 
