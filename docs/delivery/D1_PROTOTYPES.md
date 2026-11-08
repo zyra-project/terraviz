@@ -599,7 +599,27 @@ version 1.1.1 (GDAL's default), which needs the Worker's WMS.
 
 ### 3.8 What does a `GetMap` cost? (q26)
 
-Pending.
+**Not run yet: needs Cloudflare credentials.** The test is a
+throwaway Worker that stitches and scales tiles from the cut pyramids
+in R2, measured alone and under concurrency, reading Cloudflare's CPU
+time and memory rather than elapsed time, on a free and a paid plan.
+The pyramids it needs are cut (§3.15), and so is the WMS logic,
+prototyped and checked against QGIS (§3.7). What it needs is a scratch
+R2 bucket and the right to deploy a Worker on each plan tier. The same
+Worker serves the kits' addresses, the redirect route of §3.11, and the
+R2 upload timing §3.15 leaves open.
+
+**One hypothesis already checked without credentials.** The brief
+listed Wrangler 4 writing KV to local storage unless told `--remote`.
+That is confirmed for Wrangler 4.153.0, the repository's minimum:
+`wrangler kv key put --binding …` and `wrangler r2 object put …`, run
+without `--remote`, printed `Resource location: local` and wrote to
+`.wrangler/state/v3/` (Miniflare's store), touching nothing in the
+account. Any D2–D4 runbook that seeds KV or R2 from the command line
+must pass `--remote`.
+
+**Unblocks it:** credentials for the scratch account(s), through the
+session's credential flow.
 
 ### 3.9 What does a time step cost OpenSpace? Video variants and keyframes
 
@@ -607,23 +627,101 @@ Pending.
 
 ### 3.10 Does OpenSpace's Folder mode read the dates right? (q10)
 
-Pending.
+**Kit handed over** (§4, `openspace/`, step 8), with a finding from
+OpenSpace's source that sharpens what the dome will look for.
+
+**What the source says.** `TemporalTileProvider` in Folder mode reads
+each filename with `std::get_time` and then formats the date it hands
+to SPICE as `tm_year + 1900`, `tm_mon + 1`, **`tm_mday + 1`**
+(`modules/globebrowsing/src/tileprovider/temporaltileprovider.cpp`,
+`master`, read 2026-11-08). `tm_mday` is already the day of the month,
+from 1 to 31, so every file is dated a day late. A file for the 31st is
+handed to SPICE as day 32 of its month. Whether SPICE rolls that into
+the 1st of the next month, refuses it, or does something else is what
+the kit tests. The `%j` (day-of-year) branch does not add one.
+
+**The kit.** 66 equirectangular date cards, each printing its own date
+three times round the sphere, one a day at 00:00Z from 28 December 2025
+to 3 March 2026, crossing three month ends and the end of a year. Their
+names follow §6.3 (`d1datecards_YYYYmmdd_HHMMSS.png`). They arrive as a
+zip through `UrlSynchronization` with an explicit `Filename`, as §6.4
+specifies. The operator sets the clock to six dates either side of each
+boundary and writes down the date the card shows.
+
+**What it decides.**
+- **If the source reading holds**, Folder mode's dates are a day late
+  everywhere and possibly wrong at every month end.
+- **For §6.3**, frames for Folder mode would then be named a day
+  *early* to compensate, which would break the day OpenSpace fixes it.
+- **The alternative** is time-mapped video or Prototyped tiles, which
+  do not go through this code.
+
+The maintainer should also consider reporting it upstream. That is
+something for a person to send, and this phase sends nothing.
 
 ### 3.11 Do redirects survive a real session?
 
-Pending.
+**Not run yet: needs the scratch Worker.** The kit is written (§4,
+`redirect/`): a stable address that answers with a 302 to a
+digest-named path on the same route, cacheable for 60 seconds, played
+in a browser globe, Second Life and OpenSpace for longer than that,
+with a loop, a seek, a reconnect and a `HEAD`.
+
+**Found on the way.** The node's existing `/frames/{index}` route is a
+live example of the pattern the plan rejects for files. It answers with
+a 302 to `https://video.zyra-project.org/…/frames/sha256/<digest>.png`,
+on the bucket's public domain, with `Cache-Control: public, max-age=60`.
+That is a cross-origin second hop, the one §6.5 says sends
+`Origin: null` and that §8's "off withdraws the bytes" cannot follow.
+§8 already leaves the frames route outside the switches, so this is not
+a defect in the plan. But it is the address a client would copy, and
+D2a's files route should not be modelled on it.
 
 ### 3.12 Does an SOS site accept the directory? (q9)
 
-Pending.
+**Kit handed over** (§4, `sos/`). The directory is built to the SOS
+playlist reference (`sos.noaa.gov/support/sos/manuals/playlist-format/`,
+read 2026-11-08). It holds:
+- `playlist.sos` naming the movie, and `playlist_frames.sos` naming a
+  folder of 51 frames, 2048×1024;
+- `labels.txt` with one date per frame;
+- the legend as a pip, at 10 fps.
+
+Four colour squares of known value sit in both the movie and the
+frames, so the site can compare SOS's decoding of the MPEG-4 movie with
+its display of the frames. §6.1 says SOS's own colour matrix is
+unknown.
+
+**Measured here, for §6.1:**
+- **ffmpeg labels the movie wrongly**, as §6.1 says: "Simple Profile",
+  level 1, for a 2048×1024 stream, with no colour tags.
+- **`-q:v 1` produced the same file as `-q:v 2`**, because ffmpeg's
+  default `qmin` is 2. A quantiser of 1 needs `-qmin 1` as well.
+- **The quantiser floor does not reach SOS's bitrate.** At `-q:v 2` the
+  drought movie ran at 17.0 Mbit/s, under SOS's 25. The clouds movie
+  ran at 58.5 Mbit/s, about 245 MB for 34 seconds. The floor gives the
+  encoder's best quality; the bitrate it reaches is the content's. §6.1
+  should say that 25 Mbit/s is SOS's guidance for difficult content,
+  not something a quantiser floor guarantees. The SOS contact is the
+  person to say whether a 17 Mbit/s movie at the encoder's best
+  quantiser is acceptable.
 
 ### 3.13 Does a plain MP4 play on a Second Life sphere?
 
-Pending.
+**Kit handed over** (§4, `secondlife/`). Two `h264-1024` files, both
+High@5.1 with BT.709 tags, no audio and a 1-second keyframe interval:
+- clouds: 1024×512, 30 fps, 33.6 s, 8.6 MB, about 2.0 Mbit/s;
+- drought: 10 fps, 5.1 s, 1.2 MB.
+
+Both are inside §6.1's 1.5–2 Mbit/s target. The checklist covers
+Firestorm and Linden Lab's viewer, ten loops, walking out of media
+range and back, and a second avatar.
 
 ### 3.14 Does Hub's DCAT feed list WMS or WMTS items? (q11)
 
-Pending.
+**Kit handed over** (§4, `arcgis/`, step 8). Needs a Hub site in the
+maintainer's organisation, with the WMS and WMTS registered as public
+items, and the site's `/api/feed/dcat-us/1.1.json` read after indexing.
 
 ### 3.15 What does a pyramid cost?
 
