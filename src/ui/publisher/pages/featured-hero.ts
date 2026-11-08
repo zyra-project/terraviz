@@ -2,8 +2,8 @@
 // Copyright 2026 The Zyra Project
 
 /**
- * /publish/featured-hero — set the "Right now" hero override (Phase C
- * of `docs/HERO_ADMIN_SCOPING.md`).
+ * /publish/featured-hero — set the "Right now" hero override
+ * (`docs/CATALOG_PUBLISHING_TOOLS.md` §"Right now" hero override).
  *
  * The page fetches the caller's role (`/api/v1/publish/me`), the
  * catalog datasets for the picker (`/api/v1/publish/datasets`), and

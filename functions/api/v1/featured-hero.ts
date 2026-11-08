@@ -5,7 +5,8 @@
  * Cloudflare Pages Function — GET /api/v1/featured-hero
  *
  * Public, unauthenticated read of the operator's "Right now" hero
- * override (Phase 7 §9.1; see `docs/HERO_ADMIN_SCOPING.md`). Returns
+ * override (Phase 7 §9.1; see `docs/CATALOG_PUBLISHING_TOOLS.md`
+ * §"Right now" hero override). Returns
  *
  *   { "hero": { "datasetId", "window": { "start", "end" }, "headline"? } }
  *
