@@ -87,8 +87,9 @@ Small, anonymous events about the health of the app:
   a 2-letter code (derived by our Cloudflare edge from your IP
   address and attached server-side; the IP itself is never
   written to analytics storage), and which build of the app you
-  ran (public, internal-staff, or canary — so internal dogfood
-  sessions can be excluded from public dashboards without us
+  ran (public, internal, or canary — internal covers staff test
+  builds and developers running the app on their own computers, so
+  those sessions can be excluded from public dashboards without us
   needing to know your network address), and a `true`/`false`
   flag indicating whether the request carried a valid internal-
   staff single-sign-on header (set by Cloudflare's edge when a
