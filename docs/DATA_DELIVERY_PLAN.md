@@ -14,7 +14,7 @@ desk research (vendor documentation, source code and release notes,
 cited in the sources section), not hands-on testing, except where a
 sibling document already records a test.
 
-**Last reviewed:** 2026-11-07 (first draft 2026-11-06, from desk
+**Last reviewed:** 2026-11-08 (first draft 2026-11-06, from desk
 research on each consumer; §9's phased implementation and §9.14's usage
 metrics added the same day. On 2026-11-07 the four follow-ups this
 plan spun off were merged and are marked done: the ArcGIS wildcard
@@ -26,9 +26,10 @@ sections against client source code: the Web GIS Developer §5, the
 Video Streaming Engineer §6, the Scientific Visualization Reviewer §7
 and the Privacy Engineer §9.14. Their findings are applied. They are
 AI review, not hands-on testing, and no person outside the drafting
-loop has reviewed the plan.)
+loop has reviewed the plan. On 2026-11-08 the scope was drawn against
+#528's licensed-access proposal: §8, §9.9 and §10.)
 
-**Decisions recorded:** twenty-nine, all by the maintainer and logged
+**Decisions recorded:** thirty, all by the maintainer and logged
 in §9.2. Twenty-five were made on 2026-11-06: rasters for analysis carry the producer's own values on
 the producer's own grid, before any regridding (§9.11); use is measured
 per platform and per method (§9.14); five choices about how that
@@ -45,7 +46,9 @@ behind its own switch in the portal's Features card, on by default
 more: WMS gets its own switch, off by default (q26); an unrecognised
 site is counted as `other-origin`, unhashed (q21b); and a request
 sending Global Privacy Control is counted with no country, version or
-domain (q25). Open: q2, q3, q10's date parsing and q11, tested in D1;
+domain (q25). On 2026-11-08, licensed or gated access by a node was
+put outside this plan's scope (§10, #528). Open: q2, q3, q10's date
+parsing and q11, tested in D1;
 and q23, now only for datasets whose known licence is No-Derivatives.
 
 **Revisit when any of the following becomes true:**
@@ -1662,8 +1665,8 @@ deeper than the source would only spend storage.
   that adds the route, as `architecture/federation-scoping.md` §7
   Directive 2 asks of every public wire format.
 - **Advertised only when it answers.** `/.well-known/terraviz.json`
-  gains an additive field naming the capabilities and file roots,
-  present only while the service answers, its rollout flag set (§9)
+  gains an additive field naming the capabilities and file roots, in
+  the shape D3c settles, present only while the service answers, its rollout flag set (§9)
   and its switch on (next item) — the pattern `federation.feed`
   already follows (`functions/.well-known/terraviz.json.ts`).
 - **Switched per node, in the portal** (decided 2026-11-07). Each
@@ -1738,6 +1741,11 @@ deeper than the source would only spend storage.
 - **Same eligibility as STAC.** Public, published, not retracted, with
   a curated licence (`functions/api/v1/_lib/metadata-readiness.ts`);
   every file names its credit and licence.
+- **Only datasets this node publishes.** Rows mirrored from a peer
+  (`federated_datasets`) are never cut into tiles, rasters or files. The
+  node holds no licence to redistribute them, and the federation
+  protocol has no relays (`docs/protocol/README.md`). So a peer's own
+  terms, whatever they are, never reach these channels.
 - **Reviewers, when it is built**, routed as `CLAUDE.md` §Review agents
   directs: the TerraViz Federation Reviewer and the API Platform
   Engineer for the routes, `.well-known` and `docs/protocol/`; the
@@ -1861,6 +1869,7 @@ and a Second Life sphere. The maintainer can line up all four.
 | 2026-11-07 | The maintainer | WMS gets its own switch, `wms`, off by default and failing to off, since a `GetMap` cannot fit the free plan's CPU limit and the free plan's daily request budget is account-wide; `SELF_HOSTING.md` says to turn it on only on a plan tier where D4's CPU gate passed; WMTS stays under `tiles`, on by default | §5.8, §8, q26 |
 | 2026-11-07 | The maintainer | An unrecognised `Origin` domain is stored as `other-origin` with no hash; new sites are found through partner tags and the curated list | §9.14, q21b |
 | 2026-11-07 | The maintainer | A delivery request sending Global Privacy Control is counted with no country, version or domain | §9.14, q25 |
+| 2026-11-08 | The maintainer | Licensed or gated access by a node is out of this plan's scope and continues in #528; the delivery channels serve only datasets the node publishes, never rows mirrored from a peer; D3c's discovery field waits on one capabilities and extensions convention | §8, §9.9, §10 |
 
 ### 9.3 D1 — Prove it by hand
 
@@ -2149,10 +2158,15 @@ Reviewer.
 **Builds.** STAC items gain web-map-links to their WMTS layers
 (`functions/api/v1/_lib/stac-builders.ts`); `/.well-known/terraviz.json`
 gains an additive field naming the tile root, present only when
-`TILES_ENABLED` is set and the `tiles` switch is on; `docs/protocol/` gains the delivery contract
-and a changelog entry; `docs/SELF_HOSTING.md` says that each
-delivery switch is on by default, what it costs, and how to turn it
-off; `docs/BACKEND_MODULES.md` gains its rows; STAC
+`TILES_ENABLED` is set and the `tiles` switch is on. Its shape waits on
+one convention for capabilities and extensions in the discovery
+document, decided before D3c starts. Three designs want that slot: this
+field, the `capabilities` array `CATALOG_FEDERATION_PROTOCOL.md`
+documents but the code does not serve, and the discovery capability
+proposed in #528. Beside it, `docs/protocol/` gains the delivery
+contract and a changelog entry; `docs/SELF_HOSTING.md` gives each
+delivery switch's default (on, except `wms`), what it costs, and how to
+change it; `docs/BACKEND_MODULES.md` gains its rows; STAC
 reads are counted (§9.14).
 
 **Gate.** The TerraViz Federation Reviewer classes the `.well-known`
@@ -2752,6 +2766,11 @@ stays a draft for review.
   and country, never an IP, a raw User-Agent or anything that links
   one request to another (§9.14).
 - **Changing `WireDataset`, the native catalog or the federation feed.**
+- **Licensed or gated access.** Every channel openly serves what may be
+  redistributed, under the dataset's own licence and credit (§6.5). A
+  node that charges for, or gates, delivery of the bytes is a federation
+  question, under discussion in #528 (the `ayni-access/1` proposal), and
+  not part of this plan.
 - **Editing `SECOND_LIFE_COMPAT.md` here.** The corrections in §2.3
   were made in their own change (#522).
 
