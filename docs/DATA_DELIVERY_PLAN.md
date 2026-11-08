@@ -769,7 +769,11 @@ dimensions.
   `%3A`, and in KVP a `+` that arrived as a space — because OpenSpace
   formats the time from a per-layer picture string the producer
   writes, `toISOString` and the ArcGIS SDK add milliseconds, and a
-  strict parser would turn every mismatch into a 404.
+  strict parser would turn every mismatch into a 404. It also accepts
+  ISO 8601's basic form (`20260516`, `20260516T120000Z`). D1 found that
+  QGIS sends a basic-form date when a capabilities document lists its
+  times with milliseconds (`delivery/D1_PROTOTYPES.md` §3.3), and that
+  CesiumJS sends the colon as `%3A` (§3.2).
 - **A reduced-precision time names an interval.** A date is that UTC
   day, and selects the first frame inside it; only when none does is
   §5.3's snap applied. Without the rule, daily frames stamped at 12:00Z
@@ -779,6 +783,9 @@ dimensions.
 - KVP `GetTile` and `GetCapabilities` requests are accepted and mapped
   onto the same handlers, since some clients only issue KVP, and both
   encodings are advertised in `OperationsMetadata` (`GetEncoding`).
+  QGIS 3.34 used KVP for every tile when both were advertised, never
+  the REST template, so KVP is the encoding QGIS users depend on (D1
+  §3.1).
   Extra query parameters on the REST capabilities address are ignored,
   since QGIS adds some and §9.14's `via` is one. Time must be in the
   *path* for OpenSpace regardless: GDAL's WMTS driver has no time
@@ -1895,6 +1902,7 @@ new §11 question instead.
 | Date | Evidence | Amendment | Where |
 |---|---|---|---|
 | 2026-11-08 | GDAL and QGIS each take the deepest matrix in a shared tile matrix set as the layer's, whatever its `TileMatrixSetLimits` say, and ask past its last level (D1 §3.1) | Each layer declares a tile matrix set per depth, GIBS's `_LevelN` pattern; CRS84 and the EPSG URN both confirmed, each with the corner in its own axis order | §5.1 |
+| 2026-11-08 | QGIS sends ISO 8601's basic form when listed times carry milliseconds, and uses KVP for every tile (D1 §3.1, §3.3) | The time parser also accepts the basic form; KVP is noted as the encoding QGIS depends on | §5.2 |
 
 ### 9.3 D1 — Prove it by hand
 
