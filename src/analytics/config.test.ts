@@ -8,6 +8,7 @@ import {
   setTier,
   generateSessionId,
   resolveConsoleMode,
+  TELEMETRY_CONSOLE_MODE,
 } from './config'
 
 describe('resolveConsoleMode', () => {
@@ -39,13 +40,14 @@ describe('resolveConsoleMode', () => {
     }
   })
 
-  it('is on in the vitest run only when the test env sets it', () => {
-    // The constant itself: vitest runs with mode `test` and no
-    // VITE_TELEMETRY_CONSOLE, so existing emitter tests still see
-    // the transport path.
-    expect(resolveConsoleMode(import.meta.env.VITE_TELEMETRY_CONSOLE, import.meta.env.MODE)).toBe(
-      import.meta.env.VITE_TELEMETRY_CONSOLE === 'true',
-    )
+  it('leaves the constant off under vitest unless the env says true', () => {
+    // The exported constant, not the function: vitest runs in mode
+    // `test`, so the constant is off unless VITE_TELEMETRY_CONSOLE is
+    // exactly 'true', and the emitter tests keep the transport path.
+    // A constant built from `import.meta.env.DEV` (true under vitest)
+    // or from the wrong variable fails here.
+    expect(import.meta.env.MODE).toBe('test')
+    expect(TELEMETRY_CONSOLE_MODE).toBe(import.meta.env.VITE_TELEMETRY_CONSOLE === 'true')
   })
 })
 

@@ -293,10 +293,14 @@ shifts every later position. Rules to keep dashboards stable:
   proxies `/api` to the production node, which accepts `localhost`
   origins and would store a contributor's session as a real visitor
   (#531). `VITE_TELEMETRY_CONSOLE=false` sends from the dev server to
-  test the transport; those sessions report `build_channel=internal`,
-  the dev server's default, so a query can tell them apart. No
-  dashboard filters on `build_channel` yet. `VITE_TELEMETRY_CONSOLE=true`
-  turns console mode on in a build.
+  test the transport. Those sessions report `build_channel=internal`,
+  the dev server's default, but only on `session_start`: separating
+  their other events takes a join on the session id (`index1`), the
+  D1 rollups drop the field, and the dashboards and rollups filter
+  only on the server's `internal` stamp, which a dev session doesn't
+  get. So `/publish/analytics` counts an opted-in dev session as a
+  visitor. `VITE_TELEMETRY_CONSOLE=true` turns console mode on in a
+  build.
 - **Disabled mode.** Set `VITE_TELEMETRY_ENABLED=false` to compile
   out the entire emitter (`TELEMETRY_BUILD_ENABLED` becomes a
   const `false` and the call sites tree-shake).
