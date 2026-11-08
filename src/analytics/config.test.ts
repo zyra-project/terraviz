@@ -7,7 +7,47 @@ import {
   saveConfig,
   setTier,
   generateSessionId,
+  resolveConsoleMode,
 } from './config'
+
+describe('resolveConsoleMode', () => {
+  it('is on under the dev server when nothing is set', () => {
+    expect(resolveConsoleMode(undefined, 'development')).toBe(true)
+  })
+
+  it('is off in a built bundle and under vitest when nothing is set', () => {
+    expect(resolveConsoleMode(undefined, 'production')).toBe(false)
+    expect(resolveConsoleMode(undefined, 'test')).toBe(false)
+    expect(resolveConsoleMode(undefined, undefined)).toBe(false)
+  })
+
+  it("honours an explicit 'false', so the dev server can test the real transport", () => {
+    expect(resolveConsoleMode('false', 'development')).toBe(false)
+  })
+
+  it("honours an explicit 'true' in any mode", () => {
+    expect(resolveConsoleMode('true', 'production')).toBe(true)
+    expect(resolveConsoleMode('true', 'test')).toBe(true)
+  })
+
+  it('falls back to the mode for any other value, as before for builds', () => {
+    // Only the exact strings decide; a typo neither turns sending on
+    // in dev nor turns it off in a build.
+    for (const raw of ['', 'TRUE', '1', '0', 'off', 'yes']) {
+      expect(resolveConsoleMode(raw, 'development')).toBe(true)
+      expect(resolveConsoleMode(raw, 'production')).toBe(false)
+    }
+  })
+
+  it('is on in the vitest run only when the test env sets it', () => {
+    // The constant itself: vitest runs with mode `test` and no
+    // VITE_TELEMETRY_CONSOLE, so existing emitter tests still see
+    // the transport path.
+    expect(resolveConsoleMode(import.meta.env.VITE_TELEMETRY_CONSOLE, import.meta.env.MODE)).toBe(
+      import.meta.env.VITE_TELEMETRY_CONSOLE === 'true',
+    )
+  })
+})
 
 describe('config — load / save / setTier', () => {
   beforeEach(() => {

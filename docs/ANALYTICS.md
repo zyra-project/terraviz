@@ -285,10 +285,18 @@ shifts every later position. Rules to keep dashboards stable:
 
 ## Local development
 
-- **Console mode.** Set `VITE_TELEMETRY_CONSOLE=true` (or pass the
-  same to `npm run dev`). Events are logged to the browser console
-  instead of POSTed; useful for verifying call-site behaviour
-  without standing up Cloudflare.
+- **Console mode.** On by default under the dev server (`npm run
+  dev`, `npm run dev:desktop`), off in a build. Events are logged to
+  the browser console (`console.debug`, so the Verbose level) instead
+  of POSTed; useful for verifying call-site behaviour without
+  standing up Cloudflare. The default matters because the dev server
+  proxies `/api` to the production node, which accepts `localhost`
+  origins and would store a contributor's session as a real visitor
+  (#531). `VITE_TELEMETRY_CONSOLE=false` sends from the dev server to
+  test the transport; those sessions report `build_channel=internal`,
+  the dev server's default, so a query can tell them apart. No
+  dashboard filters on `build_channel` yet. `VITE_TELEMETRY_CONSOLE=true`
+  turns console mode on in a build.
 - **Disabled mode.** Set `VITE_TELEMETRY_ENABLED=false` to compile
   out the entire emitter (`TELEMETRY_BUILD_ENABLED` becomes a
   const `false` and the call sites tree-shake).

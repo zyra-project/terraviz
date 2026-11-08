@@ -30,11 +30,33 @@ export const TELEMETRY_SCHEMA_VERSION = '1.0'
 export const TELEMETRY_BUILD_ENABLED: boolean =
   import.meta.env.VITE_TELEMETRY_ENABLED !== 'false'
 
-/** Dev convenience. When `VITE_TELEMETRY_CONSOLE=true`, the emitter
- * logs every flush to `console.debug` instead of sending. Defaults on
- * in `npm run dev`, off in `npm run build`. */
-export const TELEMETRY_CONSOLE_MODE: boolean =
-  import.meta.env.VITE_TELEMETRY_CONSOLE === 'true'
+/** Whether the emitter logs each flush to `console.debug` instead of
+ * sending it. `VITE_TELEMETRY_CONSOLE` decides when it is exactly
+ * `'true'` or `'false'`; otherwise console mode is on under the Vite
+ * dev server (`mode === 'development'`) and off everywhere else.
+ *
+ * The dev default is what keeps a contributor's own sessions out of
+ * production analytics: `npm run dev` proxies `/api` to the production
+ * node, which accepts `localhost` origins and would store those rows
+ * as real visitors (#531). A built bundle (`mode === 'production'`) and
+ * vitest (`mode === 'test'`) are unchanged: they send unless told
+ * `'true'`. Set `VITE_TELEMETRY_CONSOLE=false` to exercise the real
+ * transport from the dev server. */
+export function resolveConsoleMode(
+  raw: string | undefined,
+  mode: string | undefined,
+): boolean {
+  if (raw === 'true') return true
+  if (raw === 'false') return false
+  return mode === 'development'
+}
+
+/** Dev convenience: see {@link resolveConsoleMode}. On under
+ * `npm run dev` and `npm run dev:desktop`, off in `npm run build`. */
+export const TELEMETRY_CONSOLE_MODE: boolean = resolveConsoleMode(
+  import.meta.env.VITE_TELEMETRY_CONSOLE,
+  import.meta.env.MODE,
+)
 
 const DEFAULT_CONFIG: TelemetryConfig = {
   tier: 'essential',
