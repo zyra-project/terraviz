@@ -316,7 +316,7 @@ code{overflow-wrap:anywhere}
 <!--
   GENERATED FILE — do not edit.
 
-  Produced by scripts/build-setup-page.ts on 2026-11-05.
+  Produced by scripts/build-setup-page.ts on 2026-11-08.
   Prose lives in scripts/setup-page/content.ts; every binding,
   prerequisite and validator is imported from the modules the setup
   tool itself uses, so this page cannot disagree with `npm run setup`.
@@ -2126,8 +2126,8 @@ npm run terraviz -- import-snapshot \
   <h2 style="font:700 28px/1.2 var(--tv-font-sans);letter-spacing:-.01em;color:var(--tv-text);margin:0 0 20px">Five things worth doing in week one</h2>
   <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px">
     <div style="background:var(--tv-surface-2);border:1px solid var(--tv-border);border-radius:8px;padding:16px 18px">
-      <div style="font:500 14px/1.3 var(--tv-font-sans);color:var(--tv-text);margin:0 0 6px">Document who can flip the kill switches</div>
-      <p style="margin:0;font-size:13.5px;line-height:1.55;color:var(--tv-text-muted);text-wrap:pretty">You have two: a KV key that makes clients back off, and an environment variable. Write down who is allowed to use them.</p>
+      <div style="font:500 14px/1.3 var(--tv-font-sans);color:var(--tv-text);margin:0 0 6px">Document who can flip the kill switch</div>
+      <p style="margin:0;font-size:13.5px;line-height:1.55;color:var(--tv-text-muted);text-wrap:pretty">There is one: a KV key that makes clients stop sending for the rest of their session. Write down who is allowed to use it, and that the command needs `--remote` (the guide has the command and a check).</p>
     </div>
     <div style="background:var(--tv-surface-2);border:1px solid var(--tv-border);border-radius:8px;padding:16px 18px">
       <div style="font:500 14px/1.3 var(--tv-font-sans);color:var(--tv-text);margin:0 0 6px">Put token expiry in a calendar</div>

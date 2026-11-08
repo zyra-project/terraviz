@@ -2229,7 +2229,7 @@ through yesterday". Idempotent.
 
 ```bash
 # verify
-wrangler r2 object get terraviz-analytics/events/v1/2026/03/15.ndjson.gz --pipe | gunzip | head -3
+wrangler r2 object get terraviz-analytics/events/v1/2026/03/15.ndjson.gz --remote --pipe | gunzip | head -3
 wrangler d1 execute sphere-feedback --remote --config wrangler.toml \
   --command "SELECT day, COUNT(*) FROM analytics_daily GROUP BY day ORDER BY day"
 ```
@@ -2556,7 +2556,6 @@ is [`scripts/lib/expected-bindings.ts`](../scripts/lib/expected-bindings.ts).
 | `VOICE_STREAM_MODEL` | plaintext | 14.5 | STT model override |
 | `YOUTUBE_API_KEY` | secret | 14.5 | YouTube suggestions |
 | `KILL_VOICE` | plaintext | 14.5 | Stops the Cloud voice engine, not the browser's |
-| `KILL_TELEMETRY` | plaintext | — | Telemetry kill switch (410) |
 | `FEEDBACK_ADMIN_TOKEN` | secret | 6.4 | Bearer fallback for legacy admin routes |
 | `CATALOG_R2_BUCKET` | plaintext | — | Bucket-name override |
 
@@ -3002,6 +3001,12 @@ zip-download dialog on a CloudFront-served dataset.
 `--namespace-id` wants the raw 32-char hex ID, not the title.
 `wrangler kv namespace list` to confirm.
 
+### `wrangler kv key put` or `wrangler r2 object get` acts on nothing
+Wrangler 4 points `kv key` and `r2 object` commands at local storage
+by default and says so (`Resource location: local`): a write changes
+a file on your machine and a read reports a missing key. Add
+`--remote` to reach the deployed namespace or bucket.
+
 ### Grafana shows "Leanne Graham, Devops Engineer"
 The Infinity plugin is on its bundled demo URL because the
 datasource isn't configured. Panel targets use a relative `/sql`;
@@ -3023,10 +3028,26 @@ Tools → Privacy.
 
 ## After a successful launch
 
-- **Kill switches.** You have two: `wrangler kv key put
-  telemetry_enabled disabled --namespace-id=<W5>` (clients get 410
-  + `Retry-After: 300`; `wrangler kv key delete` to resume), and
-  the `KILL_TELEMETRY=1` env var. Document who can flip them.
+- **The telemetry kill switch.** There is one, and you should
+  document who can flip it.
+  - **Turn it on:** `wrangler kv key put telemetry_enabled disabled
+    --namespace-id=<W5> --remote`. `/api/ingest` then answers 410 with
+    `Retry-After: 300`, and clients stop sending for the rest of their
+    session.
+  - **Turn it off:** `wrangler kv key delete telemetry_enabled
+    --namespace-id=<W5> --remote`. This reaches new sessions only. A
+    client that got a 410 stays silent until it reloads or relaunches.
+  - **Keep `--remote`.** Without it, Wrangler 4 writes to local
+    storage and prints `Resource location: local`, and production
+    keeps ingesting.
+  - **Check that it took.** KV takes up to about a minute to reach
+    every location. While the switch is on, `curl -si -X POST -H
+    'Origin: https://<your-node>' https://<your-node>/api/ingest`
+    answers `410`. Anything else means the write didn't land, or the
+    Pages project has no `TELEMETRY_KILL_SWITCH` binding (Settings →
+    Bindings). Without the binding, the switch fails open.
+  - **No variable.** If you set a `KILL_TELEMETRY` variable earlier,
+    delete it. Nothing ever read it.
 - **Token expiry.** If `W11` or `ANALYTICS_SQL_TOKEN` has an expiry (a TTL),
   put the date in a calendar. A silently expired token is a
   silently broken dashboard.

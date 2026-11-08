@@ -712,8 +712,8 @@ export const TROUBLESHOOTING = [
 /** Week-one operational advice. */
 export const WEEK_ONE = [
   {
-    title: 'Document who can flip the kill switches',
-    body: 'You have two: a KV key that makes clients back off, and an environment variable. Write down who is allowed to use them.',
+    title: 'Document who can flip the kill switch',
+    body: 'There is one: a KV key that makes clients stop sending for the rest of their session. Write down who is allowed to use it, and that the command needs `--remote` (the guide has the command and a check).',
   },
   {
     title: 'Put token expiry in a calendar',

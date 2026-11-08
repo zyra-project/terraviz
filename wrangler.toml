@@ -103,10 +103,16 @@ dataset = "terraviz_events"
 # Operations:
 #   - Activate (clients receive 410):
 #       wrangler kv key put telemetry_enabled disabled \
-#         --namespace-id=9c022b1295314939b76a28769fef6195
+#         --binding=TELEMETRY_KILL_SWITCH --remote
 #   - Deactivate (back to normal):
 #       wrangler kv key delete telemetry_enabled \
-#         --namespace-id=9c022b1295314939b76a28769fef6195
+#         --binding=TELEMETRY_KILL_SWITCH --remote
+#   `--binding` reads the namespace id from this file, which
+#   `npm run setup` repoints on a fork, so a fork never flips this
+#   node's switch by pasting its id. Keep `--remote`: Wrangler 4
+#   writes to local storage without it ("Resource location: local")
+#   and production keeps ingesting. KV takes up to about a minute to
+#   reach every location; docs/SELF_HOSTING.md has a check.
 [[kv_namespaces]]
 binding = "TELEMETRY_KILL_SWITCH"
 id = "9c022b1295314939b76a28769fef6195"

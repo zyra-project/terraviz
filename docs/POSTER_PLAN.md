@@ -769,7 +769,7 @@ A short, honest section. Cover `src/analytics/`,
   - Lat/lon rounded to 3 decimals before emit.
   - Session id is in-memory, rotates every launch, never
     persisted.
-  - `KILL_TELEMETRY=1` returns 410, client cools down.
+  - An operator can turn telemetry off for everyone (HTTP 410); apps stop sending for the session.
 
 **Interactive elements:**
 
