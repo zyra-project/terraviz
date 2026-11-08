@@ -36,8 +36,11 @@ they contradicted or sharpened were amended and are logged in §9.2:
 that need a person, a place or Cloudflare credentials are kits or
 still to run.)
 
-**Decisions recorded:** thirty, all by the maintainer and logged
-in §9.2. Twenty-five were made on 2026-11-06: rasters for analysis carry the producer's own values on
+**Decisions recorded:** thirty-nine, all by the maintainer and logged
+in §9.2. The latest nine came on 2026-11-08 from an interview on D1's
+first results: q27 to q30, the RRFS zeros, Mercator's polar rows, the
+format for colour-mapped pictures, the SOS movie's rate, and merging
+D1 in two parts. Twenty-five were made on 2026-11-06: rasters for analysis carry the producer's own values on
 the producer's own grid, before any regridding (§9.11); use is measured
 per platform and per method (§9.14); five choices about how that
 measuring works (§11 q17–q21); the five D0 blockers (§11 q1, q4, q7,
@@ -57,7 +60,7 @@ domain (q25). On 2026-11-08, licensed or gated access by a node was
 put outside this plan's scope (§10, #528). Open: q2, q3, q10's date
 parsing and q11, tested in D1;
 and q23, now only for datasets whose known licence is No-Derivatives.
-D1 has added four: q27 to q30.
+D1 added four, q27 to q30, all decided the same day.
 
 **Revisit when any of the following becomes true:**
 
@@ -2044,6 +2047,7 @@ and a Second Life sphere. The maintainer can line up all four.
 | 2026-11-08 | The maintainer | Licensed or gated access by a node is out of this plan's scope and continues in #528; the delivery channels serve only datasets the node publishes, never rows mirrored from a peer; D3c's discovery field waits on one capabilities and extensions convention (#529) | §8, §9.9, §10 |
 | 2026-11-08 | The maintainer | A frame that represents a period (a day, a month) is advertised at that period's start, where the dataset's record says what it represents; otherwise as stamped | §5.3, q27 |
 | 2026-11-08 | The maintainer | Time dimensions stay a compact `start/end/period` interval past QGIS's 1,000-step limit; QGIS animates them through the server's snapping | §5.3, q29 |
+| 2026-11-08 | The maintainer | D1 merges its first results now and closes in a follow-up PR with the kits' and Cloudflare tests' results | §9.3 |
 | 2026-11-08 | The maintainer | The `sos-mpeg4` movie is made at the best quantiser and never padded to 25 Mbit/s; D1's SOS kit asks the SOS contact whether a lower rate is acceptable | §6.1, q9 |
 | 2026-11-08 | The maintainer | D3a takes each Mercator row from the coarsest lat/lon level whose rows are no taller than it, instead of the same-width level, so the poles are not blocky | §7.1 |
 | 2026-11-08 | The maintainer | The RRFS smoke rows' codes below `transparentRange` are real zeros, not absence; GSL not yet asked | §7.1, `delivery/D1_PROTOTYPES.md` §1.2 |
@@ -2115,7 +2119,10 @@ document records first (§1 there).
   redirect route and R2 upload time need the scratch Worker and
   bucket.
 
-D1's gate is its document merged, and these rows come back first.
+**Merged in two parts** (decided 2026-11-08 by the maintainer). The
+first results merge now, so the plan's corrections land. A follow-up
+PR closes D1 with the kits' and the Cloudflare tests' results, and D1's
+gate is met when that PR merges.
 
 ### 9.4 D2a — Video files
 
