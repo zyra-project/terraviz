@@ -1605,7 +1605,11 @@ Four rules apply whatever the method.
   codes 40, 40, 5, 5 under a cutoff of 12 would show 40 where its area
   mean is 22.5, and a thin plume would vanish. For a row with a
   `transparentRange` and no `dataMinLuma`, the producer records whether
-  the band means zero or absent before its tiles are cut. Whether the
+  the band means zero or absent before its tiles are cut. For the RRFS
+  smoke rows, the maintainer recorded **zero** on 2026-11-08: a column
+  mass near zero is a measurement of little or no smoke. GSL, the
+  producer, has not been asked (`delivery/D1_PROTOTYPES.md` §1.2).
+  Whether the
   output pixel is itself no-data depends on the method: under `mean`
   and `mode` when less than half the source area is valid, under `max`
   only when none of it is, because the point of `max` is that one fire
@@ -1664,14 +1668,19 @@ the source has no more rows; coarser, a finer lat/lon level does have
 them. Taking each Mercator row from the coarsest lat/lon level whose
 rows are no taller than it keeps the rule, with no averaging across
 rows in the warp, without the blocks. The cost is sampling columns
-from a level finer than the row's width. D3a chooses.
+from a level finer than the row's width. **Decided 2026-11-08 by the
+maintainer: D3a builds the alternative.** Each Mercator row is taken by
+nearest neighbour from the coarsest lat/lon level whose rows are no
+taller than it, so no row is blended with another and the poles keep
+the detail the pyramid already has.
 
 **Pictures with palette classes over imagery are common**, and D1
 measured one (§3.15). The drought frames are single-pixel class
 speckles over Blue Marble. At the native level, 4:2:0 JPEG at quality
 85 lost 36% of the speckle pixels by a colour threshold; 4:4:4 JPEG at
 the same quality kept all of them, at 1.6 times the size of 4:2:0 and
-a third of PNG's.
+a third of PNG's. That is now the default for `colour-mapped`
+pictures (§7.3).
 
 ### 7.2 Time: choosing samples
 
@@ -2032,6 +2041,8 @@ and a Second Life sphere. The maintainer can line up all four.
 | 2026-11-08 | The maintainer | Licensed or gated access by a node is out of this plan's scope and continues in #528; the delivery channels serve only datasets the node publishes, never rows mirrored from a peer; D3c's discovery field waits on one capabilities and extensions convention (#529) | §8, §9.9, §10 |
 | 2026-11-08 | The maintainer | A frame that represents a period (a day, a month) is advertised at that period's start, where the dataset's record says what it represents; otherwise as stamped | §5.3, q27 |
 | 2026-11-08 | The maintainer | Time dimensions stay a compact `start/end/period` interval past QGIS's 1,000-step limit; QGIS animates them through the server's snapping | §5.3, q29 |
+| 2026-11-08 | The maintainer | D3a takes each Mercator row from the coarsest lat/lon level whose rows are no taller than it, instead of the same-width level, so the poles are not blocky | §7.1 |
+| 2026-11-08 | The maintainer | The RRFS smoke rows' codes below `transparentRange` are real zeros, not absence; GSL not yet asked | §7.1, `delivery/D1_PROTOTYPES.md` §1.2 |
 | 2026-11-08 | The maintainer | For now, a data layer with no reserved code says in its abstract and colour map that index 0 outside its box is not a measurement | §7.3, q28 |
 | 2026-11-08 | The maintainer | `colour-mapped` pictures default to 4:4:4 JPEG at quality 85; PNG where exact colours or transparency are needed | §7.3 |
 | 2026-11-08 | The maintainer | A time-locked video shows the earlier frame between frames, as the tiles do: a regular series' bounds are its first frame and one period past its last; a monthly or yearly series goes to OpenSpace as frames or tiles, not as time-locked video | §6.3, q30 |
