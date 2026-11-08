@@ -861,7 +861,13 @@ pinned in `docs/protocol/` the way STAC's is (§8).
   as SOS 643's daily frames at 12:00Z. Stepping by day from midnight,
   QGIS gets the previous day's frame, and so does CesiumJS for any
   clock before noon, because it asks for an exact frame time (D1
-  §3.2). Only the advertised time can fix that (§11 q27).
+  §3.2). Only the advertised time can fix that. **Decided 2026-11-08 by
+  the maintainer (q27):** a frame that represents a period is advertised
+  at the start of that period, 00:00Z for a frame standing for a day.
+  This applies only where the dataset's record says what its frames
+  represent; a frame with no such record is advertised as stamped. The
+  record is the represented time Phase 0 of the metadata work persists
+  (`metadata/PHASE0_IMPLEMENTATION.md` step 2).
 - **This deliberately differs from `/frames?at=`**, which returns the
   *closest* frame. A closest-frame rule shows a frame up to half a
   period before its own time, which for a forecast is showing the
@@ -878,8 +884,10 @@ pinned in `docs/protocol/` the way STAC's is (§8).
   instants. At 1,001 it shows the layer as one undivided range with no
   frame list, though it still animates through the server's snapping;
   a list of values expands whatever its length (D1 §3.3). Clouds, at
-  4,314 ten-minute frames, would collapse. Interval or list past 1,000
-  steps is §11 q29.
+  4,314 ten-minute frames, would collapse. **Decided 2026-11-08 by the
+  maintainer (q29):** keep the compact interval past 1,000 steps. QGIS
+  still animates such a layer through the server's snapping, and the
+  capabilities documents stay small.
 - **Datasets with no real time axis** — a looping diagram animation, a
   "typical year" climatology — are not tiled in v1. Exposing a frame
   index as a non-time dimension is valid WMTS, but almost no client
@@ -2015,6 +2023,8 @@ and a Second Life sphere. The maintainer can line up all four.
 | 2026-11-07 | The maintainer | An unrecognised `Origin` domain is stored as `other-origin` with no hash; new sites are found through partner tags and the curated list | §9.14, q21b |
 | 2026-11-07 | The maintainer | A delivery request sending Global Privacy Control is counted with no country, version or domain | §9.14, q25 |
 | 2026-11-08 | The maintainer | Licensed or gated access by a node is out of this plan's scope and continues in #528; the delivery channels serve only datasets the node publishes, never rows mirrored from a peer; D3c's discovery field waits on one capabilities and extensions convention (#529) | §8, §9.9, §10 |
+| 2026-11-08 | The maintainer | A frame that represents a period (a day, a month) is advertised at that period's start, where the dataset's record says what it represents; otherwise as stamped | §5.3, q27 |
+| 2026-11-08 | The maintainer | Time dimensions stay a compact `start/end/period` interval past QGIS's 1,000-step limit; QGIS animates them through the server's snapping | §5.3, q29 |
 | 2026-11-08 | The maintainer | A time-locked video shows the earlier frame between frames, as the tiles do: a regular series' bounds are its first frame and one period past its last; a monthly or yearly series goes to OpenSpace as frames or tiles, not as time-locked video | §6.3, q30 |
 
 **Amended by D1's evidence.** Where a D1 measurement contradicted or
@@ -3106,8 +3116,11 @@ stays a draft for review.
     10 ms of CPU (§5.8, §8). Not chosen: `tiles` off on free plans,
     which would need setup to record the plan tier, since a Function
     cannot see it.
-27. **How is a frame stamped mid-period advertised?** *Raised by D1,
-    2026-11-08.* SOS 643's daily frames are stamped 12:00Z. QGIS,
+27. *Decided 2026-11-08 by the maintainer:* at the start of the
+    period it represents, where the dataset's record says what that is;
+    otherwise as stamped (§5.3). The SSP producers' answer is still to
+    be asked. The question, kept as the record: **How is a frame
+    stamped mid-period advertised?** *Raised by D1, 2026-11-08.* SOS 643's daily frames are stamped 12:00Z. QGIS,
     stepping by day from midnight, gets the previous day's frame, and
     so does CesiumJS for any clock before noon, because it asks for
     the exact time it was given (`delivery/D1_PROTOTYPES.md` §3.2). One
@@ -3127,7 +3140,9 @@ stays a draft for review.
     - serve a separate absence mask;
     - or state in the abstract and colour map that index 0 outside the
       box is not a measurement.
-29. **Interval or list past 1,000 steps?** *Raised by D1, 2026-11-08.*
+29. *Decided 2026-11-08 by the maintainer:* the compact interval,
+    whatever the length (§5.3). The question, kept as the record:
+    **Interval or list past 1,000 steps?** *Raised by D1, 2026-11-08.*
     QGIS 3.34 expands a `start/end/period` interval into at most 1,000
     instants and shows a longer one as a single range with no frame
     list; a list of values expands whatever its length (D1 §3.3). A
