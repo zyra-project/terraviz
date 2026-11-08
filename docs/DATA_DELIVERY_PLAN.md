@@ -1347,8 +1347,15 @@ group's own form is derived from it:
   period ahead, which §5.3 rejects for tiles. A regular period snaps
   down exactly with bounds on the first frame and one period past the
   last; only a calendar period needs the half step, and even then a
-  mid-month time shows the next month. Which to use is §11 q30, and the
-  OpenSpace kit records what the dome shows (D1 §3.9).
+  mid-month time shows the next month. **Decided 2026-11-08 by the
+  maintainer (q30): video follows the tiles' rule.** Between frames it
+  shows the earlier frame, never one ahead of its time. So a regular
+  series' bounds are its first frame and one period past its last
+  (start = t₀, end = t₍N−1₎ + P), which OpenSpace's floor turns into
+  an exact snap down. A monthly or yearly series, which no linear
+  mapping gets right, goes to OpenSpace as dated frames or as tiles,
+  not as a time-locked video. The OpenSpace kit's step 5 confirms the
+  floor on a dome (D1 §3.9).
 - **OpenSpace frames:** dated filenames, `<id>_YYYYmmdd_HHMMSS.png`, for
   `TemporalTileProvider`'s Folder mode, seconds included so that a
   sub-minute cadence does not collide. Its filename date parsing
@@ -2008,6 +2015,7 @@ and a Second Life sphere. The maintainer can line up all four.
 | 2026-11-07 | The maintainer | An unrecognised `Origin` domain is stored as `other-origin` with no hash; new sites are found through partner tags and the curated list | §9.14, q21b |
 | 2026-11-07 | The maintainer | A delivery request sending Global Privacy Control is counted with no country, version or domain | §9.14, q25 |
 | 2026-11-08 | The maintainer | Licensed or gated access by a node is out of this plan's scope and continues in #528; the delivery channels serve only datasets the node publishes, never rows mirrored from a peer; D3c's discovery field waits on one capabilities and extensions convention (#529) | §8, §9.9, §10 |
+| 2026-11-08 | The maintainer | A time-locked video shows the earlier frame between frames, as the tiles do: a regular series' bounds are its first frame and one period past its last; a monthly or yearly series goes to OpenSpace as frames or tiles, not as time-locked video | §6.3, q30 |
 
 **Amended by D1's evidence.** Where a D1 measurement contradicted or
 sharpened this plan, the section was amended and the change is logged
@@ -3125,7 +3133,12 @@ stays a draft for review.
     list; a list of values expands whatever its length (D1 §3.3). A
     list grows the capabilities document with the series; GIBS caps
     its lists at 100 and answers `DescribeDomains` for the rest.
-30. **Where do an OpenSpace video's bounds go?** *Raised by D1,
+30. *Decided 2026-11-08 by the maintainer:* the video follows the
+    tiles' rule and shows the earlier frame. A regular series' bounds
+    are its first frame and one period past its last; a monthly or
+    yearly series goes to OpenSpace as frames or tiles, not as a
+    time-locked video (§6.3). The question, kept as the record:
+    **Where do an OpenSpace video's bounds go?** *Raised by D1,
     2026-11-08.* §6.3 sets them half a mean step outside the first and
     last dates, so each date lands mid-frame under OpenSpace's floor.
     That makes the video show the **nearest** frame between frames, up
