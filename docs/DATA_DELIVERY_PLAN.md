@@ -27,7 +27,14 @@ Video Streaming Engineer §6, the Scientific Visualization Reviewer §7
 and the Privacy Engineer §9.14. Their findings are applied. They are
 AI review, not hands-on testing, and no person outside the drafting
 loop has reviewed the plan. On 2026-11-08 the scope was drawn against
-#528's licensed-access proposal: §8, §9.9 and §10.)
+#528's licensed-access proposal: §8, §9.9 and §10. Later that day
+Phase D1 began. Its machine-run rows (grids, client time, calendar
+snapping, regional frames, pyramid cost, video encodes) are recorded in
+[`delivery/D1_PROTOTYPES.md`](delivery/D1_PROTOTYPES.md). The sections
+they contradicted or sharpened were amended and are logged in §9.2:
+§5.1, §5.2, §5.3, §5.7, §5.8, §6.1, §6.3, §7.1, §7.3 and §11. Its rows
+that need a person, a place or Cloudflare credentials are kits or
+still to run.)
 
 **Decisions recorded:** thirty, all by the maintainer and logged
 in §9.2. Twenty-five were made on 2026-11-06: rasters for analysis carry the producer's own values on
@@ -50,6 +57,7 @@ domain (q25). On 2026-11-08, licensed or gated access by a node was
 put outside this plan's scope (§10, #528). Open: q2, q3, q10's date
 parsing and q11, tested in D1;
 and q23, now only for datasets whose known licence is No-Derivatives.
+D1 has added four: q27 to q30.
 
 **Revisit when any of the following becomes true:**
 
@@ -2049,6 +2057,23 @@ outputs to other organisations (§6.5).
 The output is `docs/delivery/D1_PROTOTYPES.md`: the measurements, the
 answers, and an amendment to every section of this plan they
 contradict.
+
+**Status, 2026-11-08.** D1 has started, on the datasets and terms its
+document records first (§1 there).
+
+- **Run here.** Everything a machine could do: the grids in GDAL,
+  QGIS, CesiumJS, MapLibre and Leaflet; what time each client sends;
+  calendar periods and dates; regional frames and palette
+  transparency; pyramid cost per frame; the video encodes. Their
+  amendments are in §9.2.
+- **Kits for people.** OpenSpace, ArcGIS (with Hub), an SOS site,
+  Second Life and the redirect session are each a kit with a one-page
+  checklist, for the maintainer to hand on.
+- **Waiting on credentials.** The `GetMap` cost on each plan tier, the
+  redirect route and R2 upload time need the scratch Worker and
+  bucket.
+
+D1's gate is its document merged, and these rows come back first.
 
 ### 9.4 D2a — Video files
 
