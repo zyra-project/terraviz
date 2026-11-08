@@ -1869,7 +1869,7 @@ and a Second Life sphere. The maintainer can line up all four.
 | 2026-11-07 | The maintainer | WMS gets its own switch, `wms`, off by default and failing to off, since a `GetMap` cannot fit the free plan's CPU limit and the free plan's daily request budget is account-wide; `SELF_HOSTING.md` says to turn it on only on a plan tier where D4's CPU gate passed; WMTS stays under `tiles`, on by default | §5.8, §8, q26 |
 | 2026-11-07 | The maintainer | An unrecognised `Origin` domain is stored as `other-origin` with no hash; new sites are found through partner tags and the curated list | §9.14, q21b |
 | 2026-11-07 | The maintainer | A delivery request sending Global Privacy Control is counted with no country, version or domain | §9.14, q25 |
-| 2026-11-08 | The maintainer | Licensed or gated access by a node is out of this plan's scope and continues in #528; the delivery channels serve only datasets the node publishes, never rows mirrored from a peer; D3c's discovery field waits on one capabilities and extensions convention | §8, §9.9, §10 |
+| 2026-11-08 | The maintainer | Licensed or gated access by a node is out of this plan's scope and continues in #528; the delivery channels serve only datasets the node publishes, never rows mirrored from a peer; D3c's discovery field waits on one capabilities and extensions convention (#529) | §8, §9.9, §10 |
 
 ### 9.3 D1 — Prove it by hand
 
@@ -2160,7 +2160,7 @@ Reviewer.
 gains an additive field naming the tile root, present only when
 `TILES_ENABLED` is set and the `tiles` switch is on. Its shape waits on
 one convention for capabilities and extensions in the discovery
-document, decided before D3c starts. Three designs want that slot: this
+document, decided before D3c starts (#529). Three designs want that slot: this
 field, the `capabilities` array `CATALOG_FEDERATION_PROTOCOL.md`
 documents but the code does not serve, and the discovery capability
 proposed in #528. Beside it, `docs/protocol/` gains the delivery
