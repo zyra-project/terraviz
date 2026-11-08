@@ -447,7 +447,89 @@ accepting basic-format times.
 
 ### 3.4 Do regional frames land in place, and does palette transparency survive?
 
-Pending.
+**Question.** Does a regional dataset land on its box in each client;
+does a pan across the antimeridian draw correctly; and does a palette
+PNG's transparency, including partial alpha, survive GDAL's expansion
+to four bands (§5.5, §7.3)?
+
+**Method.** Three tests:
+
+- **The regional box.** The RRFS frames, placed on the global grid by
+  §5.5's rules and drawn by QGIS at the native level. 4,000 random
+  points inside the box compared the colour and alpha drawn with the
+  LUT entry of the code the probe puts there.
+- **The antimeridian.** The test pattern's regional variant, a box
+  from 150°E to 150°W, read by GDAL and QGIS. The global pattern
+  panned across 180° in CesiumJS, MapLibre and Leaflet.
+- **Transparency.** RRFS tiles, whose LUT fades in alpha (0, 5, 10, …)
+  across its whole range, read by GDAL three ways: the PNG itself;
+  `gdal_translate -expand rgba`; and the GDAL WMS XML with
+  `BandsCount` 4, OpenSpace's path. Then QGIS's render.
+
+**What was measured.**
+
+- **The box lands in place.** In QGIS all 4,000 points match the LUT
+  colour and alpha of the right code, 97 of them by the neighbouring
+  source pixel. That is the native level's nearest-neighbour upsample
+  (10,800 to 16,384 effective columns), not a shift.
+- **A box that crosses the antimeridian is read as its complement.**
+  GDAL and QGIS both take a `WGS84BoundingBox` from 150 to −150 as the
+  300° from −150 to 150, and draw nothing right. GDAL's
+  `EXTENDBEYONDDATELINE` option did not help, because it applies only
+  to a `BoundingBox` in the set's own CRS. Declared from −180 to 180,
+  the same layer read right in both (6 of 6 points). QGIS then draws
+  the part east of 180° only in a view that includes −180, a property
+  of QGIS rather than of the layer.
+- **Panning across 180° works** in CesiumJS (187 of 187 sampled
+  pixels right, across a view from 172°W to 178°E), MapLibre, and
+  Leaflet, which asked for wrapped column indices 0–2 and 5–7 at zoom
+  3.
+- **GDAL's default `ZeroBlockHttpCodes` aborts a regional read.** With
+  the WMS driver's default of 204 alone, `gdal_translate` of the RRFS
+  layer failed at the first tile outside the box: `Unable to download
+  block`, 404. With `204,404` it read the whole globe. The WMTS driver
+  sets `204,404` for itself (`frmts/wmts/wmtsdataset.cpp`); the WMS and
+  TMS XML does not.
+- **Partial alpha survives.** GDAL reads the tile as one band with a
+  256-entry colour table carrying the alpha. `-expand rgba` and the
+  XML's `BandsCount` 4 both produced 48 distinct alpha values, equal to
+  the LUT's for every pixel. QGIS drew all 607 sampled partial-alpha
+  pixels at the LUT's alpha. Browsers decode `tRNS` natively and were
+  not tested separately.
+
+**One thing indexed PNG cannot say.** RRFS has no `dataMinLuma`, so
+all 256 codes are values and the palette has no index left over for
+"absent". Outside the model's box the prototype wrote index 0, which
+is transparent, so the picture is right. But a GDAL or QGIS user who
+reads the index, as §7.3 expects a careful client to, reads code 0
+there: zero smoke where the model never ran. MPAS reserves codes 0–7,
+so its index 0 is a true absence. A data-encoded row whose codes are
+all values needs one of four answers:
+- reserve a code when the frames are made;
+- tile it as grey plus alpha, which drops the palette;
+- serve absence as a separate mask;
+- or say in the abstract and colour map that index 0 outside the box
+  is not a measurement.
+
+**The answer.**
+
+- **Regional frames land in place** with §5.5's placement.
+- **Declare an antimeridian-crossing layer's `WGS84BoundingBox` as −180
+  to 180.** Its `TileMatrixSetLimits` and tiles still cover only the
+  box, and the abstract states the real bounds. §5.5 covers the
+  cutting; §5.7 should say this about the capabilities.
+- **The GDAL XML must carry `ZeroBlockHttpCodes` of `204,404`**,
+  confirmed: without it a regional layer cannot be read at all.
+- **§7.3's indexed PNG keeps partial alpha** through GDAL's expansion
+  and QGIS, confirmed.
+- **New:** a data-encoded row with no reserved code has no way to say
+  "absent" in an indexed tile; §7.3 should choose one of the four
+  answers above.
+
+**Settles.** §5.5 (placement confirmed), §5.7's `ZeroBlockHttpCodes`
+(confirmed), §7.3's palette transparency (confirmed for GDAL and
+QGIS). **New:** the antimeridian bounding box (§5.7) and absence in
+an indexed tile (§7.3). **Still open:** ArcGIS and OpenSpace (kits).
 
 ### 3.5 Does ArcGIS stretch past the deepest level or go blank? (q2)
 
