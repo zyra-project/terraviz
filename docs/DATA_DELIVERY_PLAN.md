@@ -2018,6 +2018,7 @@ new §11 question instead.
 | 2026-11-08 | `frameTimestamp` stamps a yearly frame in the previous calendar year; half-step video bounds give the nearest frame under OpenSpace's floor; Folder mode hands SPICE `tm_mday + 1` (D1 §3.3, §3.9, §3.10) | Notes on the manifest's dates, the video bounds and Folder mode; a new question on the bounds | §6.3, q30 |
 | 2026-11-08 | Mercator taken from the same-width lat/lon level repeats each row up to 11.5 times near the poles; 4:2:0 JPEG lost 36% of a picture's class speckles, 4:4:4 none (D1 §3.15) | A note on the Mercator rule, with an alternative for D3a; the speckle measurement | §7.1 |
 | 2026-11-08 | Partial palette alpha survives GDAL's expansion and QGIS exactly; a row with no reserved code has no index for absence (D1 §3.4) | Transparency confirmed; the gap noted, with a new question | §7.3, q28 |
+| 2026-11-08 | Five clients read 512; Esri's published GCS v2 tile info; OpenSpace's Folder-mode source (D1 §3.1, §3.6, §3.10) | Status notes on q1, q2, q3, q10 and q11; none closed, since ArcGIS and OpenSpace are in the kits | §11 |
 | 2026-11-08 | GDAL makes a Mercator layer bounded at ±90° 12 times too tall; GDAL and QGIS read an antimeridian-crossing box as its complement; Leaflet misplaces 512 tiles without `zoomOffset`; CesiumJS sends a literal `{Time}` outside its intervals; the GDAL XML aborts on 404 without `ZeroBlockHttpCodes` (D1 §3.1, §3.2, §3.4) | Two bounding-box rules for the capabilities; companion and documentation notes; `tileSize` and `ZeroBlockHttpCodes` confirmed | §5.7 |
 
 ### 9.3 D1 — Prove it by hand
@@ -2929,15 +2930,23 @@ stays a draft for review.
 
 1. *Decided provisionally 2026-11-06 by the maintainer:* 512 pixels for
    the lat/lon grid; D1 loads both 512 and 256 in every client and may
-   reverse it (§5.1).
+   reverse it (§5.1). *D1, 2026-11-08:* nothing to reverse it in GDAL,
+   QGIS, CesiumJS, MapLibre or Leaflet, each of which read 512
+   correctly when told the size; ArcGIS and OpenSpace are in D1's kits
+   (`delivery/D1_PROTOTYPES.md` §3.1).
 2. **Does ArcGIS stretch WMTS tiles past the deepest level, or go
    blank?** If blank, cut one or two upsampled levels in the Web
-   Mercator set only.
+   Mercator set only. *D1:* handed to the ArcGIS kit (D1 §3.5).
 3. **Is Esri's "WGS 1984 Version 2" scheme the same as the lat/lon
    layout?** It decides whether ArcGIS Scene Viewer can use the lat/lon
    pyramid. From memory it is two tiles of 0.703125° pixels from −180,
    90, which is WorldCRS84Quad; Esri states scales at 96 DPI, so D1
-   compares resolutions rather than scale denominators.
+   compares resolutions rather than scale denominators. *D1, 2026-11-08,
+   in part:* not quite from memory. Esri's published tile info for its
+   own basemap in that scheme has 512-pixel tiles from (−180, 90) at
+   0.703125° a pixel at level 0. So Esri's level *n* + 1 is our level
+   *n*, tile for tile, plus a 360°×360° level 0 we lack. Whether Scene
+   Viewer accepts the layer is in the ArcGIS kit (D1 §3.6).
 4. *Decided 2026-11-06 by the maintainer:* tiles snap to the containing
    period as GIBS does, `/frames?at=` keeps the closest frame, and the
    difference is documented on both routes (§5.3).
@@ -2960,10 +2969,12 @@ stays a draft for review.
 10. *Decided 2026-11-06 by the maintainer:* OpenSpace users download
     TerraViz assets from TerraViz rather than from OpenSpace's own
     library. Still open, and tested in D1: whether Folder mode's date
-    parsing is off by one day.
+    parsing is off by one day. *D1, 2026-11-08:* the source hands SPICE
+    `tm_mday + 1`, so the 31st becomes day 32; the dome test is in the
+    OpenSpace kit (D1 §3.10).
 11. **Does Hub's DCAT feed include WMS and WMTS items?** Tested in D1,
     in the maintainer's ArcGIS organisation, before promising data.gov
-    reach.
+    reach. *D1:* handed to the ArcGIS kit (D1 §3.14).
 12. *Decided 2026-11-06 by the maintainer:* no. Every tile goes through
     the Function, so every tile passes the same checks (§5.6).
 13. *Decided 2026-11-06 by the maintainer:* files (D2) before tiles
