@@ -809,7 +809,11 @@ pinned in `docs/protocol/` the way STAC's is (§8).
   `start/end/period` interval rather than listing every frame, with no
   milliseconds in any advertised time: QGIS's parser for listed values
   accepts `YYYY-MM-DDTHH:MM:SSZ`, a date or a year, and today's
-  `frameTimestamp` emits `.000Z`. **Irregular series are not tiled in
+  `frameTimestamp` emits `.000Z`. D1 narrowed the reason. QGIS 3.34's
+  interval and WMS-T parsers take milliseconds. Its WMTS parser loads a
+  millisecond list, then requests `Time=20260928`, a basic-form date
+  that a parser accepting only the extended form answers with a 404
+  (`delivery/D1_PROTOTYPES.md` §3.3; §5.2 now accepts it). **Irregular series are not tiled in
   v1**: frame times come only from start and period
   (`functions/api/v1/_lib/frames-manifest.ts`), so there is no source
   for a list.
@@ -823,7 +827,13 @@ pinned in `docs/protocol/` the way STAC's is (§8).
   declared `start/end/P1M` matches it, and D2a fixes `frameTimestamp`
   at the source (§6.3). GIBS's check here used a mid-month date, which
   is exactly the case that hides this; D1 requests the 1st of each
-  month.
+  month. D1 measured it with the repository's own `frameTimestamp`.
+  Floored on average durations, requests on the 1st are answered with
+  the wrong frame for 10 of SOS 491's 12 months and 116 of SOS 420's
+  175 years. A stamp can also fall in the previous calendar year
+  (2005's frame at `2004-12-31T23:16:48Z`). QGIS steps months on the
+  1st at 00:00Z, so calendar arithmetic is what makes it right (D1
+  §3.3).
 - **A requested time snaps down to the frame whose period contains
   it**, and a time outside the dataset's span is a 404. That is GIBS's
   behaviour, checked with live requests (a mid-June date returns the
@@ -834,7 +844,16 @@ pinned in `docs/protocol/` the way STAC's is (§8).
   time to a configured resolution — ask for times that are not frame
   times and must get the frame they are inside, not an error. D3a tests
   the round trip: for every advertised time tᵢ, the snap of tᵢ is frame
-  *i* and the snap of tᵢ less a millisecond is frame *i* − 1.
+  *i* and the snap of tᵢ less a millisecond is frame *i* − 1. D1
+  confirmed the clients' side. QGIS sends the start of its temporal
+  range verbatim, whatever interval-handling method is set; GDAL sends
+  the `Default`; CesiumJS asks for the start of the interval containing
+  its clock. Every off-frame request QGIS made was answered right by
+  this rule. One case it cannot fix is frames stamped mid-period, such
+  as SOS 643's daily frames at 12:00Z. Stepping by day from midnight,
+  QGIS gets the previous day's frame, and so does CesiumJS for any
+  clock before noon, because it asks for an exact frame time (D1
+  §3.2). Only the advertised time can fix that (§11 q27).
 - **This deliberately differs from `/frames?at=`**, which returns the
   *closest* frame. A closest-frame rule shows a frame up to half a
   period before its own time, which for a forecast is showing the
@@ -847,7 +866,12 @@ pinned in `docs/protocol/` the way STAC's is (§8).
   only the latest 100 periods per layer and answers a `DescribeDomains`
   request for the rest; its 4326 document is 5.3 MB for 1,332 layers.
   Regular series here declare one `start/end/period` interval and need
-  no cap.
+  no cap. But QGIS 3.34 expands an interval into at most 1,000
+  instants. At 1,001 it shows the layer as one undivided range with no
+  frame list, though it still animates through the server's snapping;
+  a list of values expands whatever its length (D1 §3.3). Clouds, at
+  4,314 ten-minute frames, would collapse. Interval or list past 1,000
+  steps is §11 q29.
 - **Datasets with no real time axis** — a looping diagram animation, a
   "typical year" climatology — are not tiled in v1. Exposing a frame
   index as a non-time dimension is valid WMTS, but almost no client
@@ -1903,6 +1927,7 @@ new §11 question instead.
 |---|---|---|---|
 | 2026-11-08 | GDAL and QGIS each take the deepest matrix in a shared tile matrix set as the layer's, whatever its `TileMatrixSetLimits` say, and ask past its last level (D1 §3.1) | Each layer declares a tile matrix set per depth, GIBS's `_LevelN` pattern; CRS84 and the EPSG URN both confirmed, each with the corner in its own axis order | §5.1 |
 | 2026-11-08 | QGIS sends ISO 8601's basic form when listed times carry milliseconds, and uses KVP for every tile (D1 §3.1, §3.3) | The time parser also accepts the basic form; KVP is noted as the encoding QGIS depends on | §5.2 |
+| 2026-11-08 | Calendar floors measured wrong on 10 of 12 months and 116 of 175 years; QGIS sends its range start; noon-stamped daily frames show the previous day in QGIS and CesiumJS; QGIS expands at most 1,000 instants (D1 §3.2, §3.3) | Measurements added to the calendar, snap, milliseconds and long-list rules; two new questions | §5.3, q27, q29 |
 
 ### 9.3 D1 — Prove it by hand
 
@@ -2946,6 +2971,42 @@ stays a draft for review.
     10 ms of CPU (§5.8, §8). Not chosen: `tiles` off on free plans,
     which would need setup to record the plan tier, since a Function
     cannot see it.
+27. **How is a frame stamped mid-period advertised?** *Raised by D1,
+    2026-11-08.* SOS 643's daily frames are stamped 12:00Z. QGIS,
+    stepping by day from midnight, gets the previous day's frame, and
+    so does CesiumJS for any clock before noon, because it asks for
+    the exact time it was given (`delivery/D1_PROTOTYPES.md` §3.2). One
+    option is to advertise each frame at the start of the period it
+    represents (00:00Z for a frame that stands for a day). That needs
+    the dataset's represented time, which legacy rows do not record
+    (`metadata/PHASE0_IMPLEMENTATION.md` step 2). A related question is
+    for the producer: whether the SSP rows' frames, stamped 31
+    December, represent that year or the next.
+28. **How does an indexed data tile say "absent" when every code is a
+    value?** *Raised by D1, 2026-11-08.* A data-encoded row with no
+    `dataMinLuma` has no index left over, so outside a regional box the
+    tile carries index 0, which a GDAL user reads as code 0, a
+    measurement of zero (D1 §3.4). The options:
+    - reserve a code when the frames are made;
+    - tile such rows as grey plus alpha, losing the palette;
+    - serve a separate absence mask;
+    - or state in the abstract and colour map that index 0 outside the
+      box is not a measurement.
+29. **Interval or list past 1,000 steps?** *Raised by D1, 2026-11-08.*
+    QGIS 3.34 expands a `start/end/period` interval into at most 1,000
+    instants and shows a longer one as a single range with no frame
+    list; a list of values expands whatever its length (D1 §3.3). A
+    list grows the capabilities document with the series; GIBS caps
+    its lists at 100 and answers `DescribeDomains` for the rest.
+30. **Where do an OpenSpace video's bounds go?** *Raised by D1,
+    2026-11-08.* §6.3 sets them half a mean step outside the first and
+    last dates, so each date lands mid-frame under OpenSpace's floor.
+    That makes the video show the **nearest** frame between frames, up
+    to half a period ahead, which is the behaviour §5.3 rejects for
+    tiles. For a regular period, bounds on the first frame and one
+    period past the last make the floor snap down exactly. For a
+    calendar period no linear mapping is exact, which argues for frames
+    or tiles there rather than video (D1 §3.9).
 
 ---
 
