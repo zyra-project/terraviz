@@ -1055,15 +1055,18 @@ WMTS capabilities:
 
 ### 5.8 Cost, roughly
 
-Order-of-magnitude only; Phase D1 replaces these with measurements.
+Measured in D1 (`delivery/D1_PROTOTYPES.md` §3.15) on a machine of a
+GitHub runner's shape, except where a row says otherwise. The first
+draft's estimates are kept in brackets where D1 changed them.
 
-| Quantity | Estimate |
+| Quantity | Measured |
 |---|---|
-| Tiles per 4096×2048 frame, WorldCRS84Quad layout at 512 px | 42 |
-| Tiles per frame, WebMercatorQuad at 256 px to level 4 | 341, about 2× the lat/lon set's pixels (level 4 is 4096×4096) and 8× its objects |
-| Bytes per frame, all levels | ~1.3× the frame itself per lat/lon grid; a few MB as JPEG, more as PNG |
-| Per 1,000 frames, both grids | 3–4× the lat/lon grid alone: tens of GB |
-| Runner time per frame | seconds; likely dominated by the 383 uploads per frame rather than PNG encoding, unless tiles are packed (§5.6) |
+| Tiles per 4096×2048 frame, WorldCRS84Quad layout at 512 px | 42 (as estimated) |
+| Tiles per frame, WebMercatorQuad at 256 px to level 4 | 341, 1.9× the lat/lon set's bytes and 8× its objects (as estimated) |
+| Bytes per frame, lat/lon grid at 512 | 1.8–2.0 MB for a 4096-wide picture as JPEG; 8.9 MB for the same as PNG; 21 MB for MPAS's 7200-wide data frame as indexed PNG; 0.6 MB for the RRFS regional frame. [Estimated ~1.3× the frame: true only of a source 1024 × 2ⁿ wide, since the cut to the native level multiplies by (native width ÷ effective source width)², 1.29× for 7200 → 8192 and 2.3× for RRFS's effective 10,800 → 16,384] |
+| Per 1,000 frames, both grids | 5.2 GB and 383,000 objects for a 4096-wide JPEG picture; 44 GB and 1.5 million objects for MPAS; 1.3 GB and 228,000 objects for RRFS. [Estimated "tens of GB": true of data, not of pictures] |
+| Cut time per frame, single core, all four tile sets | 1.5 s (RRFS), 5 s (4096-wide pictures), 10.5 s (MPAS); 167 frames in 173 s on four cores |
+| Upload time per frame, loose against packed | **Not yet measured**: needs the scratch R2 bucket. Object counts per frame are 383 loose against 2 packed (one per grid) |
 
 R2 charges for storage and operations but not for egress, so a popular
 layer costs requests and Function invocations, not bandwidth. The costs
@@ -1950,6 +1953,7 @@ new §11 question instead.
 | 2026-11-08 | GDAL and QGIS each take the deepest matrix in a shared tile matrix set as the layer's, whatever its `TileMatrixSetLimits` say, and ask past its last level (D1 §3.1) | Each layer declares a tile matrix set per depth, GIBS's `_LevelN` pattern; CRS84 and the EPSG URN both confirmed, each with the corner in its own axis order | §5.1 |
 | 2026-11-08 | QGIS sends ISO 8601's basic form when listed times carry milliseconds, and uses KVP for every tile (D1 §3.1, §3.3) | The time parser also accepts the basic form; KVP is noted as the encoding QGIS depends on | §5.2 |
 | 2026-11-08 | Calendar floors measured wrong on 10 of 12 months and 116 of 175 years; QGIS sends its range start; noon-stamped daily frames show the previous day in QGIS and CesiumJS; QGIS expands at most 1,000 instants (D1 §3.2, §3.3) | Measurements added to the calendar, snap, milliseconds and long-list rules; two new questions | §5.3, q27, q29 |
+| 2026-11-08 | Pyramids cut for 160 frames of four datasets on four tile sets (D1 §3.15) | The cost table's estimates replaced by measurements; the bytes estimate corrected for sources not 1024 × 2ⁿ wide; upload time still open | §5.8 |
 | 2026-11-08 | GDAL makes a Mercator layer bounded at ±90° 12 times too tall; GDAL and QGIS read an antimeridian-crossing box as its complement; Leaflet misplaces 512 tiles without `zoomOffset`; CesiumJS sends a literal `{Time}` outside its intervals; the GDAL XML aborts on 404 without `ZeroBlockHttpCodes` (D1 §3.1, §3.2, §3.4) | Two bounding-box rules for the capabilities; companion and documentation notes; `tileSize` and `ZeroBlockHttpCodes` confirmed | §5.7 |
 
 ### 9.3 D1 — Prove it by hand
