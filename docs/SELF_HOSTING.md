@@ -3028,23 +3028,26 @@ Tools → Privacy.
 
 ## After a successful launch
 
-- **The telemetry kill switch.** `wrangler kv key put
-  telemetry_enabled disabled --namespace-id=<W5> --remote` makes
-  `/api/ingest` answer 410 with `Retry-After: 300`, and clients stop
-  sending for the rest of their session; `wrangler kv key delete
-  telemetry_enabled --namespace-id=<W5> --remote` resumes for new
-  sessions (a client that got a 410 stays silent until it reloads or
-  relaunches). Keep
-  `--remote`: without it Wrangler 4 writes to local storage, prints
-  `Resource location: local`, and production keeps ingesting. It is
-  the only switch: if you set a `KILL_TELEMETRY` variable earlier,
-  delete it, because nothing ever read it. KV takes up
-  to about a minute to reach every location. Check that it took:
-  `curl -si -X POST -H 'Origin: https://<your-node>'
-  https://<your-node>/api/ingest` answers `410` while it is on.
-  Anything else means the write didn't land, or the Pages project has
-  no `TELEMETRY_KILL_SWITCH` binding (Settings → Bindings), in which
-  case the switch fails open. Document who can flip it.
+- **The telemetry kill switch.** There is one, and you should
+  document who can flip it.
+  - **Turn it on:** `wrangler kv key put telemetry_enabled disabled
+    --namespace-id=<W5> --remote`. `/api/ingest` then answers 410 with
+    `Retry-After: 300`, and clients stop sending for the rest of their
+    session.
+  - **Turn it off:** `wrangler kv key delete telemetry_enabled
+    --namespace-id=<W5> --remote`. This reaches new sessions only. A
+    client that got a 410 stays silent until it reloads or relaunches.
+  - **Keep `--remote`.** Without it, Wrangler 4 writes to local
+    storage and prints `Resource location: local`, and production
+    keeps ingesting.
+  - **Check that it took.** KV takes up to about a minute to reach
+    every location. While the switch is on, `curl -si -X POST -H
+    'Origin: https://<your-node>' https://<your-node>/api/ingest`
+    answers `410`. Anything else means the write didn't land, or the
+    Pages project has no `TELEMETRY_KILL_SWITCH` binding (Settings →
+    Bindings). Without the binding, the switch fails open.
+  - **No variable.** If you set a `KILL_TELEMETRY` variable earlier,
+    delete it. Nothing ever read it.
 - **Token expiry.** If `W11` or `ANALYTICS_SQL_TOKEN` has an expiry (a TTL),
   put the date in a calendar. A silently expired token is a
   silently broken dashboard.
