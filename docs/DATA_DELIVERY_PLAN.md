@@ -654,7 +654,10 @@ with a TopLeftCorner of `-180 90`, as GIBS's 4326 sets are. Not the
 EPSG URN, which requires `90 -180`: GDAL swaps the axes for an EPSG
 URN but not for the short form `EPSG:4326`, and QGIS swaps on the CRS's
 axis order, so the `epsg4326` path name invites exactly the wrong
-choice. Level *n*'s scale denominator is 139770566.00717944 / 2ⁿ, which
+choice. D1 confirmed it. GDAL and QGIS read both CRS84 with `-180 90`
+and the EPSG URN with `90 -180` correctly, and GDAL reads any
+mismatched corner wrong without an error
+(`delivery/D1_PROTOTYPES.md` §3.1). Level *n*'s scale denominator is 139770566.00717944 / 2ⁿ, which
 equals the registered 256-pixel set's at level *n* + 1, a useful clue if
 a client picks the wrong levels in D1. The set must not be named, or
 declare the well-known scale set, `GoogleCRS84Quad`, which GDAL
@@ -678,11 +681,19 @@ other widths — a 0.1° science grid is 3600 wide, a 0.25° one 1440 — are
 handled in §7.1, and a global frame that is not 2:1 (a 1440×721
 pixel-is-point grid, which would land half a cell off) is refused.
 
-**How deep each layer goes.** One shared tile matrix set id needs
-`TileMatrixSetLimits` per layer to say where its levels stop; GIBS
-instead declares an id per depth (`GoogleMapsCompatible_Level6` to
-`…_Level9`), a pattern ArcGIS reads. q2's answer may depend on which
-is declared, so D1 tries both.
+**How deep each layer goes: a set per depth** (amended from D1's
+evidence, 2026-11-08). GIBS declares a tile matrix set per depth
+(`GoogleMapsCompatible_Level6` to `…_Level9`), a pattern ArcGIS reads,
+and that is the form to use: each layer links to a set that ends at its
+own native level, `CRS84Quad512_Level2`, `CRS84Quad512_Level3` and so
+on, and `GoogleMapsCompatible_Level4` and so on for Mercator.
+`TileMatrixSetLimits` stay only to bound a regional layer's extent. D1
+tried the alternative, one shared set with limits saying where each
+layer's levels stop. GDAL's WMTS driver and QGIS both take the
+deepest matrix in the *set* as the layer's full resolution whatever the
+limits say, so they ask for tiles past the layer's last level and draw
+nothing (`delivery/D1_PROTOTYPES.md` §3.1). ArcGIS is still to be
+checked (q2).
 
 **Why 512 pixels.** A time step through tiles costs one request per
 tile on screen, and OpenSpace refetches every tile at every step with
@@ -694,7 +705,10 @@ scheme takes any tile width. It quarters the object count in R2 too.
 The cost is that a client hard-coded to the registered 256-pixel
 WorldCRS84Quad will not read it without the capabilities document.
 Decided provisionally (§11 q1): 512, with D1 loading both sizes in
-every client and free to reverse it.
+every client and free to reverse it. So far D1 has found nothing to
+reverse it. GDAL, QGIS, CesiumJS, MapLibre and Leaflet each read 512
+correctly and asked for a quarter as many tiles, though each must be
+told the size (§5.7). ArcGIS and OpenSpace are still to report.
 
 **Secondary: WebMercatorQuad** (declaring the `GoogleMapsCompatible`
 well-known scale set, the standard 256-pixel set; MapLibre's default
@@ -1870,6 +1884,17 @@ and a Second Life sphere. The maintainer can line up all four.
 | 2026-11-07 | The maintainer | An unrecognised `Origin` domain is stored as `other-origin` with no hash; new sites are found through partner tags and the curated list | §9.14, q21b |
 | 2026-11-07 | The maintainer | A delivery request sending Global Privacy Control is counted with no country, version or domain | §9.14, q25 |
 | 2026-11-08 | The maintainer | Licensed or gated access by a node is out of this plan's scope and continues in #528; the delivery channels serve only datasets the node publishes, never rows mirrored from a peer; D3c's discovery field waits on one capabilities and extensions convention (#529) | §8, §9.9, §10 |
+
+**Amended by D1's evidence.** Where a D1 measurement contradicted or
+sharpened this plan, the section was amended and the change is logged
+here, with the evidence in
+[`delivery/D1_PROTOTYPES.md`](delivery/D1_PROTOTYPES.md). These are not
+the maintainer's decisions. Where the evidence leaves a choice, it is a
+new §11 question instead.
+
+| Date | Evidence | Amendment | Where |
+|---|---|---|---|
+| 2026-11-08 | GDAL and QGIS each take the deepest matrix in a shared tile matrix set as the layer's, whatever its `TileMatrixSetLimits` say, and ask past its last level (D1 §3.1) | Each layer declares a tile matrix set per depth, GIBS's `_LevelN` pattern; CRS84 and the EPSG URN both confirmed, each with the corner in its own axis order | §5.1 |
 
 ### 9.3 D1 — Prove it by hand
 
