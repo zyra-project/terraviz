@@ -533,15 +533,69 @@ an indexed tile (§7.3). **Still open:** ArcGIS and OpenSpace (kits).
 
 ### 3.5 Does ArcGIS stretch past the deepest level or go blank? (q2)
 
-Pending.
+**Kit handed over** (§4, `arcgis/`, steps 2–4). Needs an ArcGIS
+organisation, which this session does not have. The kit loads the
+test pattern from the Mercator and lat/lon WMTS, in both the per-depth
+and the shared-set forms, and zooms past each layer's deepest level.
+For comparison, the other clients measured here behave this way at
+the deepest level:
+- QGIS, GDAL's TMS driver, CesiumJS, MapLibre (with `maxzoom` set) and
+  Leaflet (with `maxNativeZoom` set) all stretch it (§3.1).
+- QGIS and GDAL go blank under a shared set with limits.
+
+**Unblocks it:** the scratch Worker serving the kit's addresses, and a
+person in the test organisation.
 
 ### 3.6 Is Esri's "WGS 1984 Version 2" scheme the lat/lon layout? (q3)
 
-Pending.
+**Partly answered by machine; the rest is in the ArcGIS kit (step 5).**
+
+**Method.** The tile info Esri publishes for its own basemap in that
+scheme, `World_Basemap_GCS_v2/VectorTileServer?f=json` on
+`basemaps.arcgis.com`, read on 2026-11-08.
+
+**What was measured.** The scheme as Esri publishes it:
+- 512-pixel tiles, with the origin at (−180, 90) in `wkid` 4326;
+- level 0 at 0.703125° a pixel, halving at each level;
+- scales stated at 96 DPI: 295,828,763.80 at level 0.
+
+**The answer.** The grid is the same as the plan's lat/lon layout,
+one level apart. Esri's level *n* + 1 has our level *n*'s resolution,
+origin and tile size, so its tiles are ours, tile for tile. Esri adds
+a level 0 our layout lacks: one 512-pixel tile spanning 360°×360°,
+whose lower half lies off the Earth. The scale denominators differ by
+a constant 1.0583, the ratio of OGC's 0.28 mm pixel to Esri's 96 DPI,
+which is why q3 said to compare resolutions. Whether Scene Viewer
+matches a WMTS layer to that scheme with the levels shifted by one, or
+needs a level 0 to exist, is the kit's question. This was a vector
+tile service; a raster tile layer in the same scheme should be checked
+in the kit too.
+
+**Settles.** q3's arithmetic (yes, offset by one level); **still
+open:** whether Scene Viewer accepts the layer.
 
 ### 3.7 Is WMS axis order right?
 
-Pending.
+**Half run.** QGIS here; ArcGIS in the kit (§4, `arcgis/`, step 6).
+
+**Method.** A WMS 1.3.0 stub serving the test pattern, read by QGIS in
+`EPSG:4326` and `CRS:84` over an asymmetric box (120.4°W–60.2°W,
+10.6°N–50.3°N). The stub's log records the `BBOX` as sent, and the
+render was decoded at four points.
+
+**What was measured.** QGIS sent `BBOX=10.6,-120.4,50.3,-60.2` for
+`EPSG:4326` (latitude first) and `BBOX=-120.4,10.6,-60.2,50.3` for
+`CRS:84` (longitude first). A server reading each by WMS 1.3's rule
+drew every point right, four of four in both. QGIS used version 1.3.0
+because the server offered it.
+
+**The answer.** QGIS follows WMS 1.3's axis order exactly, so §5.9's
+rule is the one to implement: swap for `EPSG:4326` in 1.3, never for
+`CRS:84` or in 1.1.1. D4's test with a known asymmetric box is the
+right test; this one is it in miniature.
+
+**Settles.** §5.9's axis order, for QGIS. **Still open:** ArcGIS, and
+version 1.1.1 (GDAL's default), which needs the Worker's WMS.
 
 ### 3.8 What does a `GetMap` cost? (q26)
 
