@@ -1728,8 +1728,11 @@ clients that cache capabilities need to tolerate.
 ### 7.3 Bit depth and format
 
 - **JPEG** (quality around 85) for opaque natural pictures, as GIBS
-  does for its opaque layers; PNG or 4:4:4 JPEG for `colour-mapped`
-  ones (§7.1).
+  does for its opaque layers. **`colour-mapped` pictures default to
+  4:4:4 JPEG at the same quality** (decided 2026-11-08 by the
+  maintainer). D1 measured it keeping every class speckle that 4:2:0
+  lost 36% of, at 1.6 times 4:2:0's size and a third of PNG's (§7.1).
+  PNG stays for a picture that needs exact colours or transparency.
 - **Indexed PNG for data-encoded layers.** A data-encoded dataset's
   palette is exactly 256 entries (`buildColorScaleLut`), so a decimated
   value, re-quantised to the nearest of the dataset's 256 codes, can be
@@ -1752,7 +1755,11 @@ clients that cache capabilities need to tolerate.
   `BandsCount` 4 and QGIS's render all reproduced them exactly. It also
   found a gap: a row with no `dataMinLuma` uses every index for a
   value, so outside a regional box the tile can only write index 0,
-  which reads as a measured zero (§11 q28).
+  which reads as a measured zero. **Decided 2026-11-08 by the
+  maintainer (q28), for now:** such a layer's abstract and colour map
+  state that index 0 outside the dataset's box is not a measurement.
+  Reserving a code when frames are made remains the cleaner fix for new
+  datasets, if a GIS user is ever misled.
 - **Never JPEG for data.** JPEG ringing along palette boundaries invents
   colours the palette does not contain — the false-colour failure of
   averaging colours, arriving through compression instead.
@@ -2025,6 +2032,8 @@ and a Second Life sphere. The maintainer can line up all four.
 | 2026-11-08 | The maintainer | Licensed or gated access by a node is out of this plan's scope and continues in #528; the delivery channels serve only datasets the node publishes, never rows mirrored from a peer; D3c's discovery field waits on one capabilities and extensions convention (#529) | §8, §9.9, §10 |
 | 2026-11-08 | The maintainer | A frame that represents a period (a day, a month) is advertised at that period's start, where the dataset's record says what it represents; otherwise as stamped | §5.3, q27 |
 | 2026-11-08 | The maintainer | Time dimensions stay a compact `start/end/period` interval past QGIS's 1,000-step limit; QGIS animates them through the server's snapping | §5.3, q29 |
+| 2026-11-08 | The maintainer | For now, a data layer with no reserved code says in its abstract and colour map that index 0 outside its box is not a measurement | §7.3, q28 |
+| 2026-11-08 | The maintainer | `colour-mapped` pictures default to 4:4:4 JPEG at quality 85; PNG where exact colours or transparency are needed | §7.3 |
 | 2026-11-08 | The maintainer | A time-locked video shows the earlier frame between frames, as the tiles do: a regular series' bounds are its first frame and one period past its last; a monthly or yearly series goes to OpenSpace as frames or tiles, not as time-locked video | §6.3, q30 |
 
 **Amended by D1's evidence.** Where a D1 measurement contradicted or
@@ -3130,8 +3139,11 @@ stays a draft for review.
     (`metadata/PHASE0_IMPLEMENTATION.md` step 2). A related question is
     for the producer: whether the SSP rows' frames, stamped 31
     December, represent that year or the next.
-28. **How does an indexed data tile say "absent" when every code is a
-    value?** *Raised by D1, 2026-11-08.* A data-encoded row with no
+28. *Decided 2026-11-08 by the maintainer, for now:* the layer's
+    abstract and colour map say that index 0 outside the box is not a
+    measurement (§7.3). The question, kept as the record: **How does an
+    indexed data tile say "absent" when every code is a value?**
+    *Raised by D1, 2026-11-08.* A data-encoded row with no
     `dataMinLuma` has no index left over, so outside a regional box the
     tile carries index 0, which a GDAL user reads as code 0, a
     measurement of zero (D1 §3.4). The options:
