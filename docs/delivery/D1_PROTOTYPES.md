@@ -1,6 +1,8 @@
 # D1 — Prototypes by hand
 
-**Status: in progress, draft for review.** Phase D1 of
+**Status: first results, draft for review; D1 is still in progress.**
+These results merge first, and a follow-up closes D1 with the kits' and
+the Cloudflare tests' results (plan §9.3, decided 2026-11-08). Phase D1 of
 [`DATA_DELIVERY_PLAN.md`](../DATA_DELIVERY_PLAN.md) (§9.3): take real
 datasets through every format the plan proposes, measure, and write
 down what is true. No code entered the tree. Every script, pyramid and
@@ -123,9 +125,8 @@ graticule drawn over it, plus a regional variant whose box crosses
   asks the producer to record, before tiles are cut, whether the band
   below the cutoff means zero or absent. D1 treats it as **zero**: the
   field is a column mass of smoke, where a low code is a measurement of
-  little or none, not a gap. That is the maintainer's provisional
-  answer (2026-11-08), recorded here as an assumption for D1's
-  prototypes, not as the producer's decision.
+  little or none, not a gap. The maintainer confirmed zero on
+  2026-11-08 (plan §9.2). GSL, the producer, has not been asked.
 - **Two of the four are rolling windows.** `clouds-real-time` keeps
   about 30 days of 10-minute frames and was updated minutes before the
   snapshot; `drought-risk-weekly` was last updated 2026-11-06. Being
@@ -685,9 +686,9 @@ throughout, at a constant frame rate.
   cap. A dome file at the cap is what the catalog already ships; a
   higher-rate variant for domes is a choice, not a need D1 found.
 
-**Found on the way: §6.3's bounds give the nearest frame.** The kit's
-time-mapped assets follow §6.3: bounds half a mean step outside the
-first and last frames. Under OpenSpace's floor
+**Found on the way: §6.3's bounds give the nearest frame.** §6.3 set
+the bounds half a mean step outside the first and last frames. Under
+OpenSpace's floor
 (`modules/video/src/videoplayer.cpp`), the frame shown at clock *t* is
 ⌊(*t* − *t*₀ + P/2) ÷ P⌋. That is the **nearest** frame, which shows a
 frame up to half a period before its own time, the behaviour §5.3
@@ -695,12 +696,15 @@ rejects for tiles. For a regular period, bounds on the first frame and
 one period past the last give ⌊(*t* − *t*₀) ÷ P⌋, a snap down. For a
 calendar period no linear mapping is exact: the half step avoids
 showing the previous month on the 1st, but shows the next month from
-mid-month. The kit's step 5 checks this on a dome; the choice is §11
-q30.
+mid-month. **Decided 2026-11-08 (q30):** video follows the tiles' rule,
+with bounds on the first frame and one period past the last, and
+monthly or yearly series go to OpenSpace as frames or tiles. The kit's
+assets were rebuilt to those bounds, and its step 5 checks the floor on
+a dome.
 
-**Settles.** §6.1's keyframe rule (confirmed, with its cost) and its
-variant sizes. **Still open:** the time-step cost on OpenSpace's
-hardware decoder, and q30.
+**Settles.** §6.1's keyframe rule (confirmed, with its cost), its
+variant sizes, and q30 (decided). **Still open:** the time-step cost on
+OpenSpace's hardware decoder.
 
 ### 3.10 Does OpenSpace's Folder mode read the dates right? (q10)
 
@@ -779,9 +783,10 @@ unknown.
   ran at 58.5 Mbit/s, about 245 MB for 34 seconds. The floor gives the
   encoder's best quality; the bitrate it reaches is the content's. §6.1
   should say that 25 Mbit/s is SOS's guidance for difficult content,
-  not something a quantiser floor guarantees. The SOS contact is the
-  person to say whether a 17 Mbit/s movie at the encoder's best
-  quantiser is acceptable.
+  not something a quantiser floor guarantees. **Decided 2026-11-08:**
+  the movie is made at the best quantiser and never padded, and the SOS
+  kit's step 6 asks the SOS contact whether a 17 Mbit/s movie at that
+  setting is acceptable.
 
 ### 3.13 Does a plain MP4 play on a Second Life sphere?
 
@@ -918,3 +923,29 @@ Each kit's results come back as a short note: the version of the
 client, what was recorded at each step, and any error text verbatim.
 Each row above then moves from "kit handed over" to a result, and this
 document's `Last reviewed:` line with it.
+
+---
+
+## 5. Decisions taken on this evidence
+
+The maintainer was interviewed on these results on 2026-11-08, and
+decided the following. Each is logged with its reasoning in the
+plan's §9.2 and, where it answers one, in §11.
+
+| Question | Decision | Plan |
+|---|---|---|
+| q30: which frame a time-locked dome video shows between frames | The earlier, as tiles do. Bounds on the first frame and one period past the last; monthly and yearly series go to OpenSpace as frames or tiles | §6.3 |
+| q27: frames stamped mid-period (SOS 643's 12:00Z days) | Advertised at the start of the period they represent, where the record says what that is; otherwise as stamped | §5.3 |
+| q28: "absent" in an indexed data tile | For now, the abstract and colour map say index 0 outside the box is not a measurement | §7.3 |
+| q29: interval or list past QGIS's 1,000 steps | The compact interval | §5.3 |
+| RRFS's faint codes (§1.2) | Real zeros; GSL not yet asked | §7.1 |
+| Mercator's blocky poles (§3.15) | D3a takes each Mercator row from the coarsest lat/lon level whose rows are no taller | §7.1 |
+| Format for `colour-mapped` pictures | 4:4:4 JPEG at quality 85 by default | §7.3 |
+| The SOS movie's rate (§3.12) | Best quantiser, never padded; the SOS kit asks | §6.1 |
+| When D1 merges | In two parts: these first results now, the rest with the kits and Cloudflare tests | §9.3 |
+
+**Still for a person.** The MPAS catalog row's licence is wrong
+(§1.2), and only the portal can fix it. GSL can confirm the RRFS zeros,
+and the SSP rows' producers can say which year a frame stamped 31
+December stands for (q27). q23's No-Derivatives question is still for
+someone who advises on NOAA's licensing.
