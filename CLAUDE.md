@@ -1045,8 +1045,13 @@ or missing hashing/sanitization of free-text fields.
   `src/analytics/camera.ts` before emit.
 - Session id is in-memory only — rotates every launch, never
   persisted.
-- Server-side `KILL_TELEMETRY=1` env returns 410 → client cools
-  down for the rest of the session.
+- Server-side kill switch: the key `telemetry_enabled` set to
+  `disabled` (or `false` / `off` / `0`) in the `TELEMETRY_KILL_SWITCH`
+  KV namespace makes `/api/ingest` return 410, and the client cools
+  down for the rest of the session. Set it with `wrangler kv key put
+  telemetry_enabled disabled --namespace-id=<id> --remote`: Wrangler 4
+  writes to local storage without `--remote`. There is no
+  `KILL_TELEMETRY` variable.
 
 ### Local dev
 

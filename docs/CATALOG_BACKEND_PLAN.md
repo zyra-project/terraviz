@@ -2593,7 +2593,8 @@ specific to backend telemetry:
 Backend telemetry is **always-on operational metric**, not Tier
 A or Tier B. It's never gated by user consent because it
 doesn't observe users — it observes the node itself. The
-existing `KILL_TELEMETRY=1` server-side env still suppresses
+existing server-side kill switch (the `telemetry_enabled` key in
+the `TELEMETRY_KILL_SWITCH` KV namespace) still suppresses
 backend events alongside product events for kill-switch
 parity; the client-side tier setting has no effect on backend
 telemetry because clients don't see it.

@@ -586,7 +586,7 @@ recommendations elsewhere in this doc where they differ.
    opt-in "higher-quality voice."** Rationale: MeloTTS is ~10×
    cheaper — the right default for high-volume kiosk use. (§3, §7)
 4. **Cost guardrails are in scope.** Add a server **`KILL_VOICE`**
-   env (modeled on `KILL_TELEMETRY` → 410 + client cooldown) plus
+   env (modeled on the telemetry kill switch → 410 + client cooldown) plus
    **per-session usage caps**. These land **with Phase 2** (the
    first phase that incurs edge inference cost), not later.
    (§6, §10.6 cost model)

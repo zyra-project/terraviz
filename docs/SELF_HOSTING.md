@@ -2556,7 +2556,6 @@ is [`scripts/lib/expected-bindings.ts`](../scripts/lib/expected-bindings.ts).
 | `VOICE_STREAM_MODEL` | plaintext | 14.5 | STT model override |
 | `YOUTUBE_API_KEY` | secret | 14.5 | YouTube suggestions |
 | `KILL_VOICE` | plaintext | 14.5 | Stops the Cloud voice engine, not the browser's |
-| `KILL_TELEMETRY` | plaintext | — | Telemetry kill switch (410) |
 | `FEEDBACK_ADMIN_TOKEN` | secret | 6.4 | Bearer fallback for legacy admin routes |
 | `CATALOG_R2_BUCKET` | plaintext | — | Bucket-name override |
 
@@ -3002,6 +3001,11 @@ zip-download dialog on a CloudFront-served dataset.
 `--namespace-id` wants the raw 32-char hex ID, not the title.
 `wrangler kv namespace list` to confirm.
 
+### `wrangler kv key put` succeeds and nothing changes
+Wrangler 4 writes to local storage by default and says so
+(`Resource location: local`). Add `--remote` to reach the deployed
+namespace.
+
 ### Grafana shows "Leanne Graham, Devops Engineer"
 The Infinity plugin is on its bundled demo URL because the
 datasource isn't configured. Panel targets use a relative `/sql`;
@@ -3023,10 +3027,15 @@ Tools → Privacy.
 
 ## After a successful launch
 
-- **Kill switches.** You have two: `wrangler kv key put
-  telemetry_enabled disabled --namespace-id=<W5>` (clients get 410
-  + `Retry-After: 300`; `wrangler kv key delete` to resume), and
-  the `KILL_TELEMETRY=1` env var. Document who can flip them.
+- **The telemetry kill switch.** `wrangler kv key put
+  telemetry_enabled disabled --namespace-id=<W5> --remote` makes
+  `/api/ingest` answer 410 with `Retry-After: 300`, and clients stop
+  sending for the rest of their session; `wrangler kv key delete
+  telemetry_enabled --namespace-id=<W5> --remote` resumes. Keep
+  `--remote`: without it Wrangler 4 writes to local storage, prints
+  `Resource location: local`, and production keeps ingesting. It is
+  the only switch; there is no `KILL_TELEMETRY` variable. Document who
+  can flip it.
 - **Token expiry.** If `W11` or `ANALYTICS_SQL_TOKEN` has an expiry (a TTL),
   put the date in a calendar. A silently expired token is a
   silently broken dashboard.

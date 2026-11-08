@@ -148,9 +148,16 @@ or both:
 - **Session id is in-memory only.** Generated at boot, rotated every
   app launch, never persisted. Tier-A telemetry consent does not
   imply persistent identification.
-- **Kill switch.** `/api/ingest` honours a `KILL_TELEMETRY=1` env
-  var; the function returns 410 and the client cools down for the
-  rest of the session.
+- **Kill switch.** `/api/ingest` reads the key `telemetry_enabled`
+  in the `TELEMETRY_KILL_SWITCH` KV namespace on every request. Set
+  to `disabled`, `false`, `off` or `0`, the function returns 410 with
+  `Retry-After: 300` and the client cools down for the rest of the
+  session. Turn it on with `wrangler kv key put telemetry_enabled
+  disabled --namespace-id=<id> --remote` and off with `wrangler kv
+  key delete telemetry_enabled --namespace-id=<id> --remote`; Wrangler
+  4 writes to local storage unless told `--remote`. If the binding is
+  missing or the read fails, ingestion carries on (fails open). There
+  is no `KILL_TELEMETRY` environment variable; nothing reads one.
 - **Where a batch goes.** Relative `/api/ingest` on the web — the
   Pages Function answering it belongs to the deploy that served
   the page, so a fork reports to its own node with no

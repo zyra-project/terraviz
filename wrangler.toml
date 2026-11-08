@@ -103,10 +103,12 @@ dataset = "terraviz_events"
 # Operations:
 #   - Activate (clients receive 410):
 #       wrangler kv key put telemetry_enabled disabled \
-#         --namespace-id=9c022b1295314939b76a28769fef6195
+#         --namespace-id=9c022b1295314939b76a28769fef6195 --remote
 #   - Deactivate (back to normal):
 #       wrangler kv key delete telemetry_enabled \
-#         --namespace-id=9c022b1295314939b76a28769fef6195
+#         --namespace-id=9c022b1295314939b76a28769fef6195 --remote
+#   Keep `--remote`: Wrangler 4 writes to local storage without it
+#   ("Resource location: local") and production keeps ingesting.
 [[kv_namespaces]]
 binding = "TELEMETRY_KILL_SWITCH"
 id = "9c022b1295314939b76a28769fef6195"
