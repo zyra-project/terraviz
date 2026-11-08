@@ -195,7 +195,91 @@ Each subsection is filled as its results arrive. Until then it reads
 
 ### 3.1 Do the grids load, the right way up, at the right longitude?
 
-Pending.
+**Question.** Does each client read both grids correctly with the
+lat/lon CRS declared both ways (CRS84, and the EPSG URN), the depth
+declared both ways (one shared set with `TileMatrixSetLimits`, and a
+set per depth), and tiles of 512 and 256 pixels (§5.1, §11 q1)?
+
+**Method.** The geometry test pattern (§1.1), served in every variant
+of §2. Each client drew it, and the colour at known points was decoded
+back to a source texel and compared with the texel the repository's
+own probe, `latLonToTexelUv`, puts there. A point is right when the two
+agree to within the level's sampling (one source pixel at the native
+level).
+
+- **GDAL**: the WMTS driver opening each capabilities document, and the
+  GDAL WMS XML with the TMS service, which is the path OpenSpace takes
+  (§5.7).
+- **QGIS**: its own WMTS provider (not GDAL's), rendering at twice the
+  native resolution.
+- **CesiumJS**: `WebMapTileServiceImageryProvider` with a 2×1
+  `GeographicTilingScheme`, in 2D. It reads no capabilities document,
+  so the CRS and depth variants do not apply to it.
+- **MapLibre and Leaflet**: the Mercator grid through an XYZ template.
+
+Also tried, as deliberate mistakes: each CRS declaration with the
+other axis order's corner.
+
+**What was measured.**
+
+| Client | Declaration | Result |
+|---|---|---|
+| GDAL WMTS | CRS84, corner `-180 90` | Right (10 of 10 points) |
+| GDAL WMTS | EPSG URN, corner `90 -180` | Right |
+| GDAL WMTS | Short `EPSG:4326`, corner `-180 90` | Right: GDAL does not swap for the short form, as §5.1 says |
+| GDAL WMTS | Any of the three with the other corner | Wrong at every point, with no error or warning |
+| GDAL WMTS | One shared set with limits | Reads the deepest level of the **set** as full resolution, past the layer's last level, and gets 404s |
+| GDAL WMTS | A set per depth | Right |
+| GDAL TMS XML | 512 and 256 | Right |
+| QGIS 3.34 | CRS84 and EPSG URN, per-depth, 512 and 256 | Right (every point) |
+| QGIS 3.34 | One shared set with limits | Asks for the level that suits its view, past the layer's last level: 560 requests, all 404, for one 512-pixel render (1,872 at 256, 4,032 on Mercator). A blank map |
+| QGIS 3.34 | Mercator, per-depth | Right |
+| CesiumJS 1.146 | Lat/lon at 512 and 256 | Right (10 of 10) |
+| MapLibre 6.15 | Mercator 256 with `tileSize: 256` | Right, asks for zoom 3 at display zoom 2 |
+| MapLibre 6.15 | Mercator 256 with no `tileSize` | Right place, half the resolution: it assumes 512 and asks for zoom 2 |
+| MapLibre 6.15 | Mercator 512 with `tileSize: 512` | Right, 6 requests where 256 took 20 |
+| Leaflet 1.9.4 | Mercator 256 | Right |
+| Leaflet 1.9.4 | Mercator 512, `tileSize: 512` and `zoomOffset: -1` | Right |
+| Leaflet 1.9.4 | Mercator 512 without `zoomOffset` | Wrong: up to 2,044 source pixels out |
+
+Two more things the clients showed:
+
+- **GDAL makes a Mercator layer 12 times too tall** if its
+  `WGS84BoundingBox` runs to ±90°: 4096×49,577 pixels for a 4096-wide
+  pyramid, mostly empty. Clipped to ±85.0511°, it reads 4096×4096 and
+  right.
+- **QGIS used KVP `GetTile` for every request**, never the REST
+  template, because the capabilities advertised both (§5.2). The KVP
+  route is not optional.
+
+**The answer.**
+
+- **Declare a tile matrix set per depth, as GIBS does.** A shared set
+  with `TileMatrixSetLimits` fails in both GDAL and QGIS, the two
+  clients that read limits at all. Each takes the deepest matrix in
+  the *set* as the layer's, so it asks past the layer's last level and
+  draws nothing. §5.1 left this to D1; the per-depth form is the one
+  that works.
+- **Both CRS declarations work, provided the corner follows the CRS's
+  axis order.** The danger is the mismatch, which GDAL reads wrong
+  without complaint. §5.1's choice of CRS84 with `-180 90` stands; the
+  EPSG URN with `90 -180` is equally safe in GDAL and QGIS.
+- **512 pixels (q1) holds for every client tested here.** Each read
+  512 correctly when told, and asked for a quarter as many tiles (QGIS
+  32 against 96; CesiumJS 2 against 10; MapLibre 6 against 20). Each
+  also needs telling: CesiumJS `tileWidth`, MapLibre `tileSize`, and
+  Leaflet `tileSize` plus `zoomOffset: -1`, which the companions and
+  the docs must spell out. ArcGIS and OpenSpace, the two that decide
+  q1, are in the kits (§3.5, §4).
+- **Clip a Mercator layer's `WGS84BoundingBox` to ±85.0511°**, which
+  §5.7 does not say.
+
+**Settles.** §5.1's depth question (a set per depth) and its CRS
+declaration (confirmed); §5.2's KVP encoding (needed, for QGIS); §5.7's
+TileJSON `tileSize` (confirmed) and two additions: the Mercator bound
+and Leaflet's `zoomOffset`. q1 is confirmed for GDAL, QGIS, CesiumJS,
+MapLibre and Leaflet; **still open** for ArcGIS Map Viewer and
+OpenSpace.
 
 ### 3.2 Does each client snap time as §5.3 assumes?
 
