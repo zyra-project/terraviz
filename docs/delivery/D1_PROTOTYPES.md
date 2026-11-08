@@ -283,7 +283,63 @@ OpenSpace.
 
 ### 3.2 Does each client snap time as §5.3 assumes?
 
-Pending.
+**Question.** What time does each client put in a tile request, and
+does the server's snap-down rule (§5.3) give it the frame it means
+(§11 q4)?
+
+**Method.** Time-enabled layers on the prototype server, whose log
+records the time each request asked for and the frame it was given:
+the drought set (weekly at 00:00Z), and date-card layers on the time
+axes of §1.1. QGIS was driven through its temporal controller's map
+settings, with a fresh URL space for every request, because its tile
+cache is keyed by URL and otherwise hides repeated times. CesiumJS was
+given a `TimeIntervalCollection` built from the layer's
+`start/end/period`, the way its own GIBS example builds one, and its
+clock was set to times on and off the frames.
+
+**What was measured.**
+
+| Client | What it sends | Notes |
+|---|---|---|
+| GDAL WMTS | The dimension's `Default`, verbatim | No way to choose another time; `.000Z` passed through when the `Default` had it |
+| QGIS 3.34, WMTS | The **start** of the temporal range, verbatim, as KVP `Time=`, without milliseconds | The same whichever interval-handling method is set; a week starting 28 September asked for `2026-09-28T00:00:00Z` and the server snapped it to the frame of 24 September, correctly |
+| QGIS 3.34, WMS-T | The start of the range, as `TIME=` | Needs the layer built as QGIS's source dialog builds it (`type=wmst`) |
+| CesiumJS 1.146 | The **start of the interval containing its clock**, so it snaps for itself | The colon is sent as `%3A`; a clock outside every interval sends a literal `{Time}` |
+| MapLibre, Leaflet | Whatever is baked into the template | No time support |
+
+Every off-frame time QGIS sent was answered with the frame whose
+period contains it, as §5.3 intends.
+
+**One case the rule cannot fix: frames stamped mid-period.** SOS 643's
+daily frames are stamped 12:00Z.
+- QGIS stepping a day at a time sends midnight, which snaps down to
+  the *previous* day's noon frame: 2008-02-29 shows 28 February.
+- CesiumJS, with intervals that start at noon, does the same for any
+  clock before noon. It asks for the exact frame time, so no rule on
+  the server can change its choice.
+
+Only the advertised time can. If each frame were advertised at the
+start of the period it represents (00:00Z for a frame that stands for
+a day), both clients would land on the right day. That needs the
+dataset's represented time, which the catalog does not hold for
+legacy rows (`docs/metadata/PHASE0_IMPLEMENTATION.md` step 2,
+"represented time"), so it is a decision, not a fix.
+
+Prefetching of the next interval by CesiumJS, which §7.5 records, was
+not observed with its clock paused, and was not tested animating.
+
+**The answer.** §5.3's snap-down rule is needed, because QGIS sends
+the start of its range verbatim and that is rarely a frame time, and
+for every regular series tested it is enough. CesiumJS snaps for
+itself and needs nothing from the server but a correct time list.
+Daily frames stamped at noon are the exception: two of the three
+clients that animate show the wrong day for half of each day. That is
+§11's q4 decision holding, with one new question added in §3.3.
+
+**Settles.** q4 confirmed against QGIS, GDAL and CesiumJS, and §5.2's
+`%3A` case confirmed (CesiumJS). **New:** how a frame stamped
+mid-period is advertised (§3.3). **Still open:** ArcGIS's time slider
+over WMS (§3.5) and OpenSpace's step (§3.9), both kits.
 
 ### 3.3 Do calendar periods and dates snap right?
 
