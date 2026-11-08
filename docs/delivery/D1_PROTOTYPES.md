@@ -343,7 +343,107 @@ over WMS (§3.5) and OpenSpace's step (§3.9), both kits.
 
 ### 3.3 Do calendar periods and dates snap right?
 
-Pending.
+**Question.** Is a monthly or yearly series requested on the 1st
+answered with that month's or year's frame; are 12:00Z frames
+requested by date alone answered with that day's; and does QGIS refuse
+a capabilities document with milliseconds in its times (§5.2, §5.3,
+§6.3)?
+
+**Method.** Three passes:
+
+- **Arithmetic.** The repository's own `frameTimestamp` and
+  `findClosestFrameIndex` (`functions/api/v1/_lib/frames-manifest.ts`),
+  run from a scratch script against calendar arithmetic, over the time
+  axes of §1.1. Every frame's own date was requested at 00:00Z.
+- **Clients.** QGIS and CesiumJS against date-card layers on the same
+  axes.
+- **Milliseconds.** Capabilities with `.000Z` in their times, as an
+  interval and as a list of values, through QGIS's WMTS and WMS-T
+  parsers.
+
+**What was measured: arithmetic.** The number of requests, one on each
+frame's own date at 00:00Z, answered with the wrong frame:
+
+| Axis | Frames | Stamped on the wrong UTC date by `frameTimestamp` | Floor on average durations | Floor on calendar arithmetic (§5.3) | Date taken as an interval (§5.2) | Closest frame (`/frames?at=`) |
+|---|---|---|---|---|---|---|
+| SOS 491, `P1M` from 2009-01-01 | 12 | 7 (up to 45 h out) | **10 wrong** | 0 | 0 | 0 |
+| SOS 420, `P1Y` from 1850-01-01 | 175 | 62 (up to 26 h out) | **116 wrong** | 0 | 0 | 0 |
+| SSP rows, `P1Y` from 2015-12-31 | 86 | 85 (on 30 December, 33 h out by 2100) | 0 | 0 | 0 | 0 |
+| SOS 643, `P1D` from 2001-01-01T12Z | 5,449 | 0 | **all wrong** | **all wrong** | 0 | 0 |
+| Drought, `P7D` | 51 | 0 | 0 | 0 | 0 | 0 |
+
+The plan's yearly example is exact: a series starting 2001 answers 1
+January 2002, 2003 and 2004 with the previous year's frame. One case it
+does not mention is that a stamp can fall in the wrong calendar year.
+Frame 4, which is 2005, is stamped `2004-12-31T23:16:48Z`, so a
+`labels.txt` or a filename cut to the date would call it 2004.
+
+**What was measured: clients.**
+
+- **QGIS**, stepping by month from 1 January 2009, sent the 1st of each
+  month at 00:00Z and got frames 0 to 11 in order. Floored on average
+  months, ten of those twelve would have been wrong. Stepping by year
+  from 1851 it got the right year each time.
+- **CesiumJS** builds calendar intervals itself: a clock on 15 March
+  2009 asked for the 1 March frame.
+- **The prototype's parser** answered a bare date on the noon series
+  (`2001-01-05`) with that day's noon frame. The same day written as a
+  midnight date-time, in every spelling tried (`Z`, `%3A`, `.000Z`,
+  `+00:00`), snapped to the day before.
+- **Which year an SSP frame is.** On the SSP axis, `2050` selects the
+  frame stamped 31 December 2050, and `2050-01-01` the one stamped 31
+  December 2049.
+
+**What was measured: milliseconds.**
+
+| Parser | Times advertised | Result |
+|---|---|---|
+| QGIS WMTS | Interval, `start/end/period` with `.000Z` | Parsed (51 instants); requests carry no milliseconds |
+| QGIS WMTS | List of values with `.000Z` | The layer loads with all 51 instants, then requests `Time=20260928`: ISO 8601's basic date, which the prototype, accepting only the extended form, answered with a 404 |
+| QGIS WMTS | List of values without milliseconds | Parsed and requested correctly |
+| QGIS WMS-T | Interval or list, with or without `.000Z` | Parsed (85 instants); `TIME` sent without milliseconds |
+
+QGIS also turned out to **expand an interval into at most 1,000
+instants**. At 1,001 or more it shows the layer as one undivided range.
+Animating still works, because it sends a range start and the server
+snaps, but the user sees no frame list. A list of values expands
+whatever its length (5,449 for SOS 643). Clouds (4,314 frames) and SOS
+643 would both collapse.
+
+**The answer.**
+
+- **Calendar arithmetic is required**, as §5.3 and §6.3 say, for the
+  tile route and for `frameTimestamp`. The measured failure is worse
+  than the plan's example: 116 of SOS 420's 175 years and 10 of SOS
+  491's 12 months, every one on the 1st.
+- **§5.2's reduced-precision rule is required, and works, for a date.**
+  It does not help a client that sends a midnight date-time, which
+  QGIS does. That is §3.2's question, how a frame stamped mid-period is
+  advertised.
+- **No milliseconds in advertised times stands, for a narrower
+  reason.** QGIS's interval and WMS-T parsers take them. Its WMTS list
+  parser loads them and then sends a basic-format date. The parser
+  should also accept the basic format (`YYYYMMDD`, `YYYYMMDDTHHMMSSZ`),
+  which is ISO 8601 and costs nothing.
+- **An interval past 1,000 steps loses QGIS's frame list.** Advertising
+  a list instead keeps it, at the cost of a capabilities document that
+  grows with the series. That is GIBS's trade, which caps at 100 and
+  offers `DescribeDomains`. D3b should choose, knowing the threshold.
+
+**Found on the way, in the catalog.** SOS 420's `endTime`
+(2024-12-01) is not on its `P1Y` grid, SOS 491's (2009-12-31) is not on
+its `P1M` grid, and MPAS's is one period past its last frame. A route
+that derived a frame count from `endTime` would disagree with the
+frames. For uploaded frames the count is on record; for the legacy
+rows it is not, and D6 will need one.
+
+**Settles.** §5.3's calendar rule and §6.3's `frameTimestamp` defect
+(confirmed and measured), §5.2's reduced-precision rule (needed, and
+sufficient for dates), and the no-milliseconds rule (refined). **New
+questions:** how a frame stamped mid-period is advertised (§3.2);
+whether SSP frames stamped 31 December represent that year or the next,
+a question for their producer; interval or list past 1,000 steps;
+accepting basic-format times.
 
 ### 3.4 Do regional frames land in place, and does palette transparency survive?
 
