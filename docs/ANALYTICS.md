@@ -155,8 +155,10 @@ or both:
   session. Turn it on with `wrangler kv key put telemetry_enabled
   disabled --namespace-id=<id> --remote` and off with `wrangler kv
   key delete telemetry_enabled --namespace-id=<id> --remote`; Wrangler
-  4 writes to local storage unless told `--remote`. If the binding is
-  missing or the read fails, ingestion carries on (fails open). There
+  4 writes to local storage unless told `--remote`. It takes up to
+  about a minute to reach every location (`SELF_HOSTING.md` has a
+  check). If the binding is missing or the read fails, ingestion
+  carries on (fails open). There
   is no `KILL_TELEMETRY` environment variable; nothing reads one.
 - **Where a batch goes.** Relative `/api/ingest` on the web — the
   Pages Function answering it belongs to the deploy that served

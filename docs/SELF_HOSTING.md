@@ -3034,8 +3034,13 @@ Tools → Privacy.
   telemetry_enabled --namespace-id=<W5> --remote` resumes. Keep
   `--remote`: without it Wrangler 4 writes to local storage, prints
   `Resource location: local`, and production keeps ingesting. It is
-  the only switch; there is no `KILL_TELEMETRY` variable. Document who
-  can flip it.
+  the only switch; there is no `KILL_TELEMETRY` variable. KV takes up
+  to about a minute to reach every location. Check that it took:
+  `curl -si -X POST -H 'Origin: https://<your-node>'
+  https://<your-node>/api/ingest` answers `410` while it is on.
+  Anything else means the write didn't land, or the Pages project has
+  no `TELEMETRY_KILL_SWITCH` binding (Settings → Bindings), in which
+  case the switch fails open. Document who can flip it.
 - **Token expiry.** If `W11` or `ANALYTICS_SQL_TOKEN` has an expiry (a TTL),
   put the date in a calendar. A silently expired token is a
   silently broken dashboard.
