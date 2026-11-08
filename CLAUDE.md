@@ -1045,13 +1045,23 @@ or missing hashing/sanitization of free-text fields.
   `src/analytics/camera.ts` before emit.
 - Session id is in-memory only — rotates every launch, never
   persisted.
-- Server-side `KILL_TELEMETRY=1` env returns 410 → client cools
-  down for the rest of the session.
+- Server-side kill switch: the key `telemetry_enabled` set to
+  `disabled` (or `false` / `off` / `0`) in the `TELEMETRY_KILL_SWITCH`
+  KV namespace makes `/api/ingest` return 410, and the client cools
+  down for the rest of the session. Set it with `wrangler kv key put
+  telemetry_enabled disabled --namespace-id=<id> --remote`: Wrangler 4
+  writes to local storage without `--remote`. There is no
+  `KILL_TELEMETRY` variable.
 
 ### Local dev
 
-- `VITE_TELEMETRY_CONSOLE=true` — log batches to console instead
-  of POSTing.
+- Console mode is **on by default under the dev server**
+  (`npm run dev`, `npm run dev:desktop`): batches are logged to the
+  console, not POSTed, because the dev proxy would otherwise send them
+  to the production node as real visitors (#531). Set
+  `VITE_TELEMETRY_CONSOLE=false` to exercise the real transport, and
+  those sessions report `build_channel=internal`. A built bundle sends
+  unless `VITE_TELEMETRY_CONSOLE=true`.
 - `VITE_TELEMETRY_ENABLED=false` — compile out the emitter
   entirely (call sites tree-shake).
 

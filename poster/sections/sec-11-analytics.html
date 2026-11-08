@@ -94,7 +94,7 @@
           <li>Search queries hashed before emit (12-hex SHA-256 truncation).</li>
           <li>Error messages sanitized; only Tier-B carries (also sanitized) stack traces.</li>
           <li>Lat/lon rounded to 3 decimals (~111&nbsp;m) before emit.</li>
-          <li>Session id is in-memory only — rotates every launch, never persisted. Server-side <code>KILL_TELEMETRY=1</code> returns 410 and the client cools down for the rest of the session.</li>
+          <li>Session id is in-memory only — rotates every launch, never persisted. An operator can turn telemetry off for everyone (HTTP 410); apps stop sending for the session.</li>
         </ul>
 
         <h3 class="analytics__subhead">Where the events go</h3>

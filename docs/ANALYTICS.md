@@ -148,9 +148,19 @@ or both:
 - **Session id is in-memory only.** Generated at boot, rotated every
   app launch, never persisted. Tier-A telemetry consent does not
   imply persistent identification.
-- **Kill switch.** `/api/ingest` honours a `KILL_TELEMETRY=1` env
-  var; the function returns 410 and the client cools down for the
-  rest of the session.
+- **Kill switch.** `/api/ingest` reads the key `telemetry_enabled`
+  in the `TELEMETRY_KILL_SWITCH` KV namespace on every request. Set
+  to `disabled`, `false`, `off` or `0`, the function returns 410 with
+  `Retry-After: 300` and the client cools down for the rest of the
+  session; clearing the key reaches only new sessions, since a client
+  that got a 410 stays silent until it reloads. Turn it on with `wrangler kv key put telemetry_enabled
+  disabled --namespace-id=<id> --remote` and off with `wrangler kv
+  key delete telemetry_enabled --namespace-id=<id> --remote`; Wrangler
+  4 writes to local storage unless told `--remote`. It takes up to
+  about a minute to reach every location (`SELF_HOSTING.md` has a
+  check). If the binding is missing or the read fails, ingestion
+  carries on (fails open). There
+  is no `KILL_TELEMETRY` environment variable; nothing reads one.
 - **Where a batch goes.** Relative `/api/ingest` on the web — the
   Pages Function answering it belongs to the deploy that served
   the page, so a fork reports to its own node with no
@@ -275,10 +285,24 @@ shifts every later position. Rules to keep dashboards stable:
 
 ## Local development
 
-- **Console mode.** Set `VITE_TELEMETRY_CONSOLE=true` (or pass the
-  same to `npm run dev`). Events are logged to the browser console
-  instead of POSTed; useful for verifying call-site behaviour
-  without standing up Cloudflare.
+- **Console mode.** On by default under the dev server (`npm run
+  dev`, `npm run dev:desktop`), off in a build. Events are logged to
+  the browser console (`console.debug`, so the Verbose level) instead
+  of POSTed; useful for verifying call-site behaviour without
+  standing up Cloudflare. The default matters because the dev server
+  proxies `/api` to the production node, which accepts `localhost`
+  origins and would store a contributor's session as a real visitor
+  (#531). `VITE_TELEMETRY_CONSOLE=false` sends from the dev server to
+  test the transport. Those sessions report `build_channel=internal`,
+  the dev server's default, but only on `session_start`: separating
+  their other events takes a join on the session id (`index1`), the
+  D1 rollups drop the field, and the dashboards and rollups filter
+  only on the server's `internal` stamp, which a dev session doesn't
+  get. So `/publish/analytics` counts an opted-in dev session as a
+  visitor. `VITE_TELEMETRY_CONSOLE=true` turns console mode on in a
+  build. Both defaults key on Vite's mode, so a dev server started
+  with a custom one (`vite --mode staging`) counts as a build. It
+  sends, and reports `public`, unless you set both variables.
 - **Disabled mode.** Set `VITE_TELEMETRY_ENABLED=false` to compile
   out the entire emitter (`TELEMETRY_BUILD_ENABLED` becomes a
   const `false` and the call sites tree-shake).

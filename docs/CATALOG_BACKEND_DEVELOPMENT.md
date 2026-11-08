@@ -130,10 +130,16 @@ come from these sources:
 | `CF_IMAGES_RESIZE_BASE` | Origin used by the sphere-thumbnail pipeline to resize R2 image sources via Cloudflare Images URL transformations. When unset, the job falls back to fetching the source bytes directly. The publisher portal's "regenerate sphere thumbnail" button (Phase 3) lets a publisher provide a hand-cropped version manually. | Phase 1b |
 | `MOCK_VECTORIZE` | `.dev.vars.example` sets this to `true` by default. Swaps the Vectorize binding for an in-memory store keyed off the env object; the mock implements cosine similarity + the docent's filter operator subset (`$eq` / `$ne` / `$in` / `$nin`), so a multi-step "publish three datasets, search for the closest one" walk works without a real Vectorize index. Helpers raise `ConfigurationError` on a deploy with neither real binding nor mock flag. | Phase 1c |
 | `MOCK_AI` | `.dev.vars.example` sets this to `true` by default. The embedding helper returns a deterministic 768-dim feature-hashed vector instead of calling Workers AI; vocabulary overlap drives cosine similarity so the mock walks behave like real embeddings at a coarse level. Same fail-closed surface as `MOCK_VECTORIZE`. | Phase 1c |
-| `KILL_TELEMETRY` | Set `1` to disable analytics ingestion locally — almost always what you want during dev. | n/a |
 
-Phase-1a contributors realistically only need `NODE_ID_PRIVATE_KEY_PEM`,
-`DEV_BYPASS_ACCESS=true`, and `KILL_TELEMETRY=1`. Phase 1b adds
+Phase-1a contributors realistically only need `NODE_ID_PRIVATE_KEY_PEM`
+and `DEV_BYPASS_ACCESS=true`. Telemetry needs nothing: under
+`npm run dev` batches are logged to the console, not sent, because the
+dev server's proxy sends `/api/ingest` to the production node unless
+`VITE_DEV_API_TARGET` points elsewhere. To test the real transport, put
+`VITE_TELEMETRY_CONSOLE=false` in `.env.local` and restart; those
+sessions report `build_channel=internal`. There is no `KILL_TELEMETRY`
+variable; the production kill switch is a KV key
+(`docs/ANALYTICS.md`). Phase 1b adds
 `MOCK_STREAM=true` + `MOCK_R2=true` (both set by the example
 template), nothing else. Phase 1c adds `MOCK_VECTORIZE=true` +
 `MOCK_AI=true` (also set by the example template). The real

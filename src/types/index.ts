@@ -1268,9 +1268,11 @@ export interface SessionStartEvent extends TelemetryEventBase {
    * from viewport because a user on a 4K monitor may resize the
    * browser to a 1080p window. */
   screen_class: ScreenClass
-  /** Build audience — `'public'` unless the bundle was produced
+  /** Build audience — `'public'` for a build unless it was produced
    * with `VITE_BUILD_CHANNEL=internal` (staff dogfood) or
-   * `VITE_BUILD_CHANNEL=canary` (staged rollout). */
+   * `VITE_BUILD_CHANNEL=canary` (staged rollout). The Vite dev server
+   * defaults to `'internal'` (#531); see `resolveBuildChannel` in
+   * `scripts/lib/build-channel.ts`. */
   build_channel: BuildChannel
   vr_capable: VrCapability
   schema_version: string
