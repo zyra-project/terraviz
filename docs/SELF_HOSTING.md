@@ -2229,7 +2229,7 @@ through yesterday". Idempotent.
 
 ```bash
 # verify
-wrangler r2 object get terraviz-analytics/events/v1/2026/03/15.ndjson.gz --pipe | gunzip | head -3
+wrangler r2 object get terraviz-analytics/events/v1/2026/03/15.ndjson.gz --remote --pipe | gunzip | head -3
 wrangler d1 execute sphere-feedback --remote --config wrangler.toml \
   --command "SELECT day, COUNT(*) FROM analytics_daily GROUP BY day ORDER BY day"
 ```
@@ -3001,10 +3001,11 @@ zip-download dialog on a CloudFront-served dataset.
 `--namespace-id` wants the raw 32-char hex ID, not the title.
 `wrangler kv namespace list` to confirm.
 
-### `wrangler kv key put` succeeds and nothing changes
-Wrangler 4 writes to local storage by default and says so
-(`Resource location: local`). Add `--remote` to reach the deployed
-namespace.
+### `wrangler kv key put` or `wrangler r2 object get` acts on nothing
+Wrangler 4 points `kv key` and `r2 object` commands at local storage
+by default and says so (`Resource location: local`): a write changes
+a file on your machine and a read reports a missing key. Add
+`--remote` to reach the deployed namespace or bucket.
 
 ### Grafana shows "Leanne Graham, Devops Engineer"
 The Infinity plugin is on its bundled demo URL because the
@@ -3031,10 +3032,13 @@ Tools → Privacy.
   telemetry_enabled disabled --namespace-id=<W5> --remote` makes
   `/api/ingest` answer 410 with `Retry-After: 300`, and clients stop
   sending for the rest of their session; `wrangler kv key delete
-  telemetry_enabled --namespace-id=<W5> --remote` resumes. Keep
+  telemetry_enabled --namespace-id=<W5> --remote` resumes for new
+  sessions (a client that got a 410 stays silent until it reloads or
+  relaunches). Keep
   `--remote`: without it Wrangler 4 writes to local storage, prints
   `Resource location: local`, and production keeps ingesting. It is
-  the only switch; there is no `KILL_TELEMETRY` variable. KV takes up
+  the only switch: if you set a `KILL_TELEMETRY` variable earlier,
+  delete it, because nothing ever read it. KV takes up
   to about a minute to reach every location. Check that it took:
   `curl -si -X POST -H 'Origin: https://<your-node>'
   https://<your-node>/api/ingest` answers `410` while it is on.

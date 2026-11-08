@@ -152,7 +152,8 @@ or both:
   in the `TELEMETRY_KILL_SWITCH` KV namespace on every request. Set
   to `disabled`, `false`, `off` or `0`, the function returns 410 with
   `Retry-After: 300` and the client cools down for the rest of the
-  session. Turn it on with `wrangler kv key put telemetry_enabled
+  session; clearing the key reaches only new sessions, since a client
+  that got a 410 stays silent until it reloads. Turn it on with `wrangler kv key put telemetry_enabled
   disabled --namespace-id=<id> --remote` and off with `wrangler kv
   key delete telemetry_enabled --namespace-id=<id> --remote`; Wrangler
   4 writes to local storage unless told `--remote`. It takes up to

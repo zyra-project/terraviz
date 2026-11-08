@@ -133,14 +133,13 @@ come from these sources:
 
 Phase-1a contributors realistically only need `NODE_ID_PRIVATE_KEY_PEM`
 and `DEV_BYPASS_ACCESS=true`. To keep a local session out of the
-analytics, set `VITE_TELEMETRY_CONSOLE=true` (batches are logged, not
+analytics, put `VITE_TELEMETRY_CONSOLE=true` (batches are logged, not
 sent) or `VITE_TELEMETRY_ENABLED=false` (the emitter is compiled out)
-in the client's environment. That matters most under `npm run dev`,
-whose proxy sends `/api/ingest` to the production node unless
-`VITE_DEV_API_TARGET` points elsewhere. An earlier version of this
-table listed a `KILL_TELEMETRY` variable; nothing reads one, and the
-real switch is the production kill switch in the `TELEMETRY_KILL_SWITCH`
-KV namespace (`docs/ANALYTICS.md`). Phase 1b adds
+in `.env.local` and restart `npm run dev`. That matters because the
+dev server's proxy sends `/api/ingest` to the production node unless
+`VITE_DEV_API_TARGET` points elsewhere. There is no `KILL_TELEMETRY`
+variable; the production kill switch is a KV key
+(`docs/ANALYTICS.md`). Phase 1b adds
 `MOCK_STREAM=true` + `MOCK_R2=true` (both set by the example
 template), nothing else. Phase 1c adds `MOCK_VECTORIZE=true` +
 `MOCK_AI=true` (also set by the example template). The real
