@@ -2340,7 +2340,8 @@ need more than the usual `t()` keys.
   palette image's colours and picks the nearest entry, never the values
   the codes stand for, and knows nothing of the no-data band — then
   write indexed PNG for data-encoded layers, JPEG for natural pictures
-  and PNG for `colour-mapped` ones, under the key §5.6 lists. The
+  and PNG for `colour-mapped` ones, as one pack per frame per grid
+  under the key §5.6 lists (q31), whose format the cutter fixes. The
   indexed PNG's palette chunks are written directly: a general encoder
   in palette mode, libvips's included, re-quantises and reorders the
   palette, which would fail the byte-for-byte test below.
@@ -2354,7 +2355,7 @@ need more than the usual `t()` keys.
   whose index is arithmetic (§5.6).
 - **Sharding.** A long series is cut across several jobs by frame
   range, since a GitHub-hosted job stops at six hours.
-- **Clean-up.** A sweep that deletes the tiles of a dataset retracted,
+- **Clean-up.** A sweep that deletes the packs of a dataset retracted,
   unpublished or re-cut, which §5.6 relies on.
 - **The `tiles` switch** (§8): its key, its row in the Features card,
   and its check in the publish dispatch, so it is in place before any
@@ -2378,7 +2379,9 @@ palette is byte for byte the dataset's LUT, alpha ramp included;
 Mercator matches lat/lon under nearest neighbour. A ramp-and-edge frame
 (one stripe per code, a data/no-data edge, a diverging red|blue edge)
 is loaded in every client at native and zoomed in, and no colour off
-the palette appears at an edge.
+the palette appears at an edge. A pack's index lists every tile the
+cut produced and no other, and a range read at each entry returns
+exactly that tile's bytes.
 
 **Gate.** Those tests pass on D1's two datasets, and the longest series
 the catalog holds (3,650 frames, `docs/metadata/PHASE4_IMPLEMENTATION.md`)
