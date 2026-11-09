@@ -977,18 +977,22 @@ antimeridian-crossing one among the cases.
   anything. A re-published dataset re-cuts only what changed. Unlike
   the earlier draft, this does not promise that a frame shared by two
   datasets is cut once: `cli/lib/frame-store.ts` keys frames per
-  dataset (`videos/{datasetId}/frames/sha256/…`). An option D1 weighs:
-  one object per frame per grid with an offset index, read by R2 range
-  requests (the PMTiles-on-R2 pattern), which cuts the object count
-  about 380 times and makes clean-up trivial, since every tile passes
-  the Function anyway. D1 weighed it (`delivery/D1_PROTOTYPES.md`
-  §3.15). Packed, a frame uploaded 12 to 15 times faster, with 190 to
+  dataset (`videos/{datasetId}/frames/sha256/…`).
+- **One pack per frame per grid** (decided, q31): one object holding
+  the frame's tiles on that grid and an offset index, read by R2 range
+  requests (the PMTiles-on-R2 pattern). That cuts the object count about
+  380 times, and makes clean-up trivial, since every tile passes the
+  Function anyway. In D1 (`delivery/D1_PROTOTYPES.md` §3.15), a packed
+  frame uploaded 12 to 15 times faster than loose tiles, with 190 to
   770 times fewer billed writes. A scratch Worker served every tile from
-  packs by range request, reading each pack's index once per isolate.
-  Nothing against it turned up, but whether to adopt it is the
-  maintainer's call (q31).
+  packs, reading each pack's index once per isolate. The format is
+  D3a's to fix. D1's was an 8-byte header, a 16-byte index entry per
+  tile and the tiles concatenated. Nothing reads a pack but the
+  Function, so it need not be a published format. Not measured: a
+  tile's read time from a pack against a loose object.
 - **Served by a Pages Function** that resolves `{time}` to a frame,
-  reads the tile from R2, and caches at the edge. A Function in front
+  reads the tile from that frame's pack by a range request, and caches
+  at the edge. A Function in front
   (rather than a public bucket URL) is what makes time snapping, KVP
   requests, CORS and visibility checks possible. Its cost is one Worker
   invocation per tile request, which on a free-plan node is the binding
@@ -1000,6 +1004,8 @@ antimeridian-crossing one among the cases.
     lookup. An `ETag` and a finite max-age, a short one for `default`.
   - **The time-to-frame index** is computed arithmetically for a
     regular series, or memoised per isolate, not read from R2 per tile.
+    So is each pack's own index, which costs two small range reads the
+    first time an isolate meets the frame.
   - **CORS** is `Access-Control-Allow-Origin: *` on every response:
     tiles, 404s, a `403 feature_disabled`, capabilities, TileJSON and
     the GDAL XML, with `OPTIONS` answered, since `public/_headers`
@@ -1015,7 +1021,7 @@ antimeridian-crossing one among the cases.
   refuses rather than serves, because §8 relies on retraction to
   withdraw a dataset and to fail closed. A retraction removes the layer
   from the capabilities documents and stops its tiles at once; a
-  clean-up job, built in D3a, deletes the objects later.
+  clean-up job, built in D3a, deletes the packs later.
 
 ### 5.7 Capabilities and companions
 
@@ -2111,7 +2117,7 @@ new §11 question instead.
 | 2026-11-08 | Five clients read 512; Esri's published GCS v2 tile info; OpenSpace's Folder-mode source (D1 §3.1, §3.6, §3.10) | Status notes on q1, q2, q3, q10 and q11; none closed, since ArcGIS and OpenSpace are in the kits | §11 |
 | 2026-11-08 | GDAL makes a Mercator layer bounded at ±90° 12 times too tall; GDAL and QGIS read an antimeridian-crossing box as its complement; Leaflet misplaces 512 tiles without `zoomOffset`; CesiumJS sends a literal `{Time}` outside its intervals; the GDAL XML aborts on 404 without `ZeroBlockHttpCodes` (D1 §3.1, §3.2, §3.4) | Two bounding-box rules for the capabilities; companion and documentation notes; `tileSize` and `ZeroBlockHttpCodes` confirmed | §5.7 |
 | 2026-11-09 | The prototype `GetMap` passed on the paid plan with mozjpeg in WebAssembly and no PNG codec; nothing came near the free plan's 10 ms (D1 §3.8) | D4's CPU gate records D1's prototype result, narrows the codec to JPEG, and says D4 still measures its own route | §9.10, q15, q26 |
-| 2026-11-09 | Packed frames uploaded 12 to 15 times faster with 190 to 770 times fewer writes, and served every tile by range request (D1 §3.15) | The packing option records D1's weighing; whether to adopt it becomes a new question | §5.6, q31 |
+| 2026-11-09 | Packed frames uploaded 12 to 15 times faster with 190 to 770 times fewer writes, and served every tile by range request (D1 §3.15) | The packing option records D1's weighing; whether to adopt it became q31, decided the same day for packs, and §5.6 now stores tiles that way | §5.6, q31 |
 | 2026-11-09 | Upload to R2: 19.6 s loose against 1.3 s packed for a 4096-wide picture frame, 74 s against about 5.5 s for MPAS; `GetMap` CPU on the paid plan (D1 §3.8, §3.15) | Upload time, R2 writes and `GetMap` CPU rows added to the cost table; the free plan's cliff cites the measurement | §5.8 |
 | 2026-11-09 | `GetMap` on the paid plan: 1.8 s median and 3.6 s maximum CPU for the worst 2048×2048 request, none under 108 ms; a JavaScript JPEG decoder drew different colours from libjpeg, WebAssembly mozjpeg matched it; PNG decoded through the runtime's own streams; memory per request not reported, about 96 MB by arithmetic for the 256-tile map (D1 §3.8) | Measurements added to the bounds; one row of tiles at a time; a codecs rule; the data path's role corrected | §5.9 |
 
