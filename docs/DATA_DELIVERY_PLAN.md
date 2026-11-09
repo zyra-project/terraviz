@@ -1085,7 +1085,9 @@ draft's estimates are kept in brackets where D1 changed them.
 | Bytes per frame, lat/lon grid at 512 | 1.8–2.0 MB for a 4096-wide picture as JPEG; 8.9 MB for the same as PNG; 21 MB for MPAS's 7200-wide data frame as indexed PNG; 0.6 MB for the RRFS regional frame. [Estimated ~1.3× the frame: true only of a source 1024 × 2ⁿ wide, since the cut to the native level multiplies by (native width ÷ effective source width)², 1.29× for 7200 → 8192 and 2.3× for RRFS's effective 10,800 → 16,384] |
 | Per 1,000 frames, both grids | 5.2 GB and 383,000 objects for a 4096-wide JPEG picture; 44 GB and 1.5 million objects for MPAS; 1.3 GB and 228,000 objects for RRFS. [Estimated "tens of GB": true of data, not of pictures] |
 | Cut time per frame, single core, all four tile sets | 1.5 s (RRFS), 5 s (4096-wide pictures), 10.5 s (MPAS); 167 frames in 173 s on four cores |
-| Upload time per frame, loose against packed | **Not yet measured**: needs the scratch R2 bucket. Object counts per frame are 383 loose against 2 packed (one per grid) |
+| Upload time per frame to R2, loose against packed | 19.6 s loose (383 objects, eight at a time) against 1.3 s packed (2 objects) for a 4096-wide picture; 74 s against about 5.5 s for MPAS (1,535 objects). A loose tile costs about 0.2 s of R2's own time whatever its size. Per 1,000 frames: about 5.4 h against 22 min for pictures, and 21 h against 1.7 h for MPAS. Measured from a cloud container through a Worker, not from the runner (D1 §3.15) |
+| R2 writes per 1,000 frames | 383,000 loose against 2,000 packed for pictures, and 1.5 million against 2,000 for MPAS. Each is a Class A operation, $4.50 per million after the first million a month: $1.72 and $6.91 loose, under a cent packed |
+| `GetMap` CPU, paid plan | 0.25–1 s typical; 1.8 s median and 3.6 s at most for the worst request, a 2048×2048 Mercator picture from 256 tiles, against a 30 s default. None under 108 ms. 30 million CPU milliseconds a month are included, about 16,000 of the worst maps, then $0.02 per million (D1 §3.8) |
 
 R2 charges for storage and operations but not for egress, so a popular
 layer costs requests and Function invocations, not bandwidth. The costs
@@ -1100,7 +1102,8 @@ fail-open setup loses its API and a fail-closed one its whole site.
 One OpenSpace show, which refetches every tile on screen at every step,
 can spend tens of thousands of those in an evening. And a WMS `GetMap`
 cannot fit the free plan's 10 ms of CPU, against 30 s by default on a
-paid plan. So WMS has its own switch, `wms`, off by default (decided,
+paid plan: D1 measured none under 108 ms on the paid plan (§5.9). So
+WMS has its own switch, `wms`, off by default (decided,
 q26): `SELF_HOSTING.md` says to turn it on only on a plan tier where
 D4's CPU gate passed, and states the daily request budget the `tiles`
 switch's WMTS layers draw on. D4's gate names the plan it was measured
@@ -2096,6 +2099,7 @@ new §11 question instead.
 | 2026-11-08 | Partial palette alpha survives GDAL's expansion and QGIS exactly; a row with no reserved code has no index for absence (D1 §3.4) | Transparency confirmed; the gap noted, with a new question | §7.3, q28 |
 | 2026-11-08 | Five clients read 512; Esri's published GCS v2 tile info; OpenSpace's Folder-mode source (D1 §3.1, §3.6, §3.10) | Status notes on q1, q2, q3, q10 and q11; none closed, since ArcGIS and OpenSpace are in the kits | §11 |
 | 2026-11-08 | GDAL makes a Mercator layer bounded at ±90° 12 times too tall; GDAL and QGIS read an antimeridian-crossing box as its complement; Leaflet misplaces 512 tiles without `zoomOffset`; CesiumJS sends a literal `{Time}` outside its intervals; the GDAL XML aborts on 404 without `ZeroBlockHttpCodes` (D1 §3.1, §3.2, §3.4) | Two bounding-box rules for the capabilities; companion and documentation notes; `tileSize` and `ZeroBlockHttpCodes` confirmed | §5.7 |
+| 2026-11-09 | Upload to R2: 19.6 s loose against 1.3 s packed for a 4096-wide picture frame, 74 s against about 5.5 s for MPAS; `GetMap` CPU on the paid plan (D1 §3.8, §3.15) | Upload time, R2 writes and `GetMap` CPU rows added to the cost table; the free plan's cliff cites the measurement | §5.8 |
 | 2026-11-09 | `GetMap` on the paid plan: 1.8 s median and 3.6 s maximum CPU for the worst 2048×2048 request, none under 108 ms; a JavaScript JPEG decoder drew different colours from libjpeg, WebAssembly mozjpeg matched it; PNG decoded through the runtime's own streams; memory per request not reported, about 96 MB by arithmetic for the 256-tile map (D1 §3.8) | Measurements added to the bounds; one row of tiles at a time; a codecs rule; the data path's role corrected | §5.9 |
 
 ### 9.3 D1 — Prove it by hand
