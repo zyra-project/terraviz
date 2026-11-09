@@ -1014,8 +1014,35 @@ The pack adds 8 bytes plus 16 per tile: under 22 KB for MPAS's 1,365
 Mercator tiles, against 23 MB of tiles. A frame's upload count is its
 object count loose (383 for a 4096-wide frame on the two grids the
 plan serves, 1,535 for MPAS, 228 for RRFS) and one per grid packed.
-**Upload time to R2 was not measured**: that needs the scratch bucket,
-and is the first thing to run once credentials are set up (§3.8).
+
+**Upload time to R2**, measured 2026-11-09 against the scratch bucket
+(§2, §3.8). One frame of each kind, on the two grids the plan serves
+(`ll512` and `wm256`), was put into R2 twice: as loose tiles, and as
+two packs, one per grid. Each object went from the container through
+the scratch Worker's upload route, which writes it with the R2 binding
+and reports how long R2's own `put` took. The runner's real path would
+be R2's S3 API, which pays the same round trip per object.
+
+| Frame | Loose objects, bytes | Loose, 8 at a time | Loose, 1 at a time | Packed, 2 objects | R2 `put`, median per object |
+|---|---|---|---|---|---|
+| Drought, 4096-wide picture | 383, 4.6 MB | 19.6 s | 163.8 s | 1.2–1.3 s | 0.19–0.23 s loose; 0.30–0.36 s per 2.3 MB pack |
+| MPAS, 7200-wide data | 1,535, 43.8 MB | 74.4 s | not run | 5.3–6.0 s | 0.18 s loose; 1.8–1.9 s per 22 MB pack |
+
+A loose tile costs about 0.2 s of R2's own time whatever its size, so a
+loose frame's upload is set by its object count. Packed, the drought
+frame went up 15 times faster, and MPAS 12 times faster, bound by this
+container's bandwidth (44 MB in about 5.5 s) rather than by count. Per
+1,000 frames at eight at a time, that is about 5.4 h loose against
+22 min packed for the drought pictures, and 21 h against 1.7 h for
+MPAS. R2 charges each `put` as a Class A operation, $4.50 per million
+after the first million a month. That is $1.72 per 1,000 drought frames
+loose, and $6.91 for MPAS, against under a cent packed.
+
+Reading from packs worked everywhere it was used. Every tile behind
+§3.8's `GetMap` and the kits' WMTS is read by an R2 range request into
+its frame's pack. The pack's index, 16 bytes a tile, costs two small
+range reads per frame per isolate, and is then held in memory. Tile
+read times were not compared between loose and packed.
 
 Per 1,000 frames on the two grids the plan serves (`ll512` + `wm256`):
 5.2 GB and 383,000 objects for the drought pictures, 1.3 GB and 228,000
@@ -1050,6 +1077,11 @@ objects for RRFS, and 44 GB and 1.5 million objects for MPAS.
 - **`mean` and `max` cost about the same to cut.** Packed or loose is
   a question of object count and upload time, not of cut time; packing
   added under 0.1 s a frame here.
+- **Packing is an order of magnitude cheaper to upload.** Twelve to
+  fifteen times faster per frame, and 190 to 770 times fewer billed
+  writes, with nothing found against it in serving. §5.6 listed packing
+  as an option for D1 to weigh. The evidence favours it, and the choice
+  is the maintainer's, so it is a new question, q31.
 
 **A finding about §7.1's Mercator rule.** Taking Mercator level *z* by
 nearest neighbour from the lat/lon level of the same width, as §7.1
@@ -1068,8 +1100,8 @@ choice for D3a, recorded here so the rule is not built as written
 without it.
 
 **Settles.** §5.8's table (counts confirmed; the bytes row needs the
-native-level factor); D3a's sizing, except upload time. **Still open:**
-R2 upload time, loose against packed, with the scratch bucket.
+native-level factor; upload time measured); D3a's sizing. **Raises:**
+q31, loose tiles or one pack per frame per grid (§5.6).
 
 ---
 
