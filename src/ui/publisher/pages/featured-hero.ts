@@ -2,8 +2,8 @@
 // Copyright 2026 The Zyra Project
 
 /**
- * /publish/featured-hero — set the "Right now" hero override (Phase C
- * of `docs/HERO_ADMIN_SCOPING.md`).
+ * /publish/featured-hero — set the "Right now" hero override
+ * (`docs/CATALOG_PUBLISHING_TOOLS.md` §"Right now" hero override).
  *
  * The page fetches the caller's role (`/api/v1/publish/me`), the
  * catalog datasets for the picker (`/api/v1/publish/datasets`), and
@@ -51,7 +51,8 @@ interface HeroResponse {
 const ME_ENDPOINT = '/api/v1/publish/me'
 // Published only — pinning a draft/retracted dataset would never resolve
 // in the public catalog's dataset list, so the override would silently
-// fall through to auto-derive. Restrict the picker to what can actually
+// be skipped for the next source (the settings file, then an approved
+// event, then auto-derive). Restrict the picker to what can actually
 // surface as a hero.
 const DATASETS_ENDPOINT = '/api/v1/publish/datasets?limit=500&status=published'
 const HERO_PUBLIC_ENDPOINT = '/api/v1/featured-hero'

@@ -5,13 +5,15 @@
  * `hero_override` singleton row helpers.
  *
  * Backs the §9.1 "Right now" hero override (see
- * `docs/HERO_ADMIN_SCOPING.md` and `migrations/catalog/0017_hero_override.sql`).
+ * `docs/CATALOG_PUBLISHING_TOOLS.md` §"Right now" hero override and
+ * `migrations/catalog/0017_hero_override.sql`).
  * Sits between the publisher route (`PUT`/`DELETE
  * /api/v1/publish/featured-hero`, Phase B) + the public read
  * (`GET /api/v1/featured-hero`, Phase A) and the single-row table.
  *
  * Pure data access + body validation; authorisation lives in the
- * route handlers (privileged-only writes via `isPrivileged`). The
+ * route handlers (writes need the `hero.manage` capability: editor,
+ * admin or service). The
  * store persists the raw activation window — it does NOT decide
  * whether the override is currently active. That window evaluation
  * lives in the client (`heroService`), the single source of truth

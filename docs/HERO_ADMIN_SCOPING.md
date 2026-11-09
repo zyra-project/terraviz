@@ -1,10 +1,28 @@
 # Hero override admin — scoping
 
-**Status:** draft for review
-**Last reviewed:** 2026-06-04
+**Status:** superseded on 2026-11-08 by
+[`CATALOG_PUBLISHING_TOOLS.md` §"Right now" hero override](CATALOG_PUBLISHING_TOOLS.md#right-now-hero-override).
 **Owner:** catalog / publisher-portal track
-**Supersedes when:** the Phase A endpoints below ship and this doc's
-"resolved decisions" are folded into `CATALOG_PUBLISHING_TOOLS.md`.
+
+> **Superseded.** All three phases below shipped, and the decisions
+> as built now live in `CATALOG_PUBLISHING_TOOLS.md`. Read that
+> section for how the hero works today. This doc is kept as the
+> scoping record and is no longer maintained, so it carries no
+> review date.
+>
+> The code differs from this plan in several places, all listed
+> there:
+> - writes need the `hero.manage` capability (editor, admin, service),
+>   not `isPrivileged`;
+> - a bad body returns 400, not 422;
+> - an approved current event sits between the pin and the automatic
+>   pick;
+> - a `hero` switch on the Features card turns off the portal pin
+>   (not yet the homepage hero itself);
+> - a pin that is not showing no longer blocks the file.
+>
+> The page does not yet show who set the pin or whether it has
+> expired (§6). Both are listed there as follow-ups.
 
 A curator-facing UI for the §9.1 "Right now" hero panel, so the
 homepage pin can be set from the publisher portal instead of a

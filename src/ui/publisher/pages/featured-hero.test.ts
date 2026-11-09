@@ -54,7 +54,7 @@ describe('renderFeaturedHeroPage', () => {
     // The view-only notice + empty state render.
     expect(mount.querySelector('.publisher-hero-intro')?.textContent).toContain('view-only')
     expect(mount.querySelector('.publisher-hero-readonly-meta')?.textContent).toContain(
-      'No dataset is currently featured',
+      'Nothing is pinned here',
     )
   })
 
