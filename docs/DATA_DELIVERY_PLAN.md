@@ -1138,13 +1138,35 @@ built after the WMTS because it is served from the WMTS's pyramids.
   is per isolate and shared by concurrent requests and every route, so
   a `GetMap` that runs out of memory takes unrelated API calls with it,
   and R2 reads count toward six simultaneous connections, so 81 Mercator
-  tiles arrive in about 14 waves. D1 measures memory and CPU under
-  concurrency on both plan tiers, and a separate Worker for WMS is an
+  tiles arrive in about 14 waves. A separate Worker for WMS is an
   option.
+  - **Measured in D1** (`delivery/D1_PROTOTYPES.md` §3.8), on the paid
+    plan only, since no free-plan account was available. The worst
+    request a client may make is a 2048×2048 global Mercator picture,
+    which stitches 256 tiles. It needed 1.8 s of CPU at the median and
+    3.6 s at most, against the default 30 s. A 2048-pixel data map
+    needed about 1 s. No request needed less than 108 ms, against the
+    free plan's 10 ms. CPU per request barely changed at 30 concurrent
+    requests, and the 256-tile map took about 5 s elapsed, most of it
+    waiting on R2.
+  - **Memory, one row of tiles at a time.** Workers report memory per
+    isolate, not per request, so D1 could not measure it. By
+    arithmetic, holding every decoded tile until the stitch ends peaks
+    at about 96 MB for the 256-tile map, against 128 MB shared by
+    everything the isolate serves. D4 decodes and stitches one row of
+    tiles at a time, writing straight into the PNG's scanline buffer,
+    which brings that map's peak to about 20 MB.
+- **Codecs.** JPEG tiles are decoded by mozjpeg compiled to
+  WebAssembly (q15). In D1 a JavaScript decoder was slower, and it
+  drew different colours from libjpeg, by up to 70 levels on a quarter
+  of the pixels. PNG needs no codec. The runtime's own
+  `DecompressionStream` and `CompressionStream` handle its zlib
+  stream, and PNG's filters are a short loop.
 - **A cheap path for data layers.** Decode the indexed PNGs to their
   indices, scale by nearest neighbour, and re-encode with the same
-  palette chunks: one byte a pixel and no colour arithmetic, which may
-  decide the CPU gate.
+  palette chunks: one byte a pixel and no colour arithmetic. It did not
+  decide D1's CPU test: pictures passed on the paid plan through RGBA
+  too, so the cheap path is a saving rather than a condition.
 - **The final scale follows §7.1.** A data layer is scaled by nearest
   neighbour, because its pyramid level already carries the dataset's
   own decimation and interpolating between palette colours would undo
@@ -2074,6 +2096,7 @@ new §11 question instead.
 | 2026-11-08 | Partial palette alpha survives GDAL's expansion and QGIS exactly; a row with no reserved code has no index for absence (D1 §3.4) | Transparency confirmed; the gap noted, with a new question | §7.3, q28 |
 | 2026-11-08 | Five clients read 512; Esri's published GCS v2 tile info; OpenSpace's Folder-mode source (D1 §3.1, §3.6, §3.10) | Status notes on q1, q2, q3, q10 and q11; none closed, since ArcGIS and OpenSpace are in the kits | §11 |
 | 2026-11-08 | GDAL makes a Mercator layer bounded at ±90° 12 times too tall; GDAL and QGIS read an antimeridian-crossing box as its complement; Leaflet misplaces 512 tiles without `zoomOffset`; CesiumJS sends a literal `{Time}` outside its intervals; the GDAL XML aborts on 404 without `ZeroBlockHttpCodes` (D1 §3.1, §3.2, §3.4) | Two bounding-box rules for the capabilities; companion and documentation notes; `tileSize` and `ZeroBlockHttpCodes` confirmed | §5.7 |
+| 2026-11-09 | `GetMap` on the paid plan: 1.8 s median and 3.6 s maximum CPU for the worst 2048×2048 request, none under 108 ms; a JavaScript JPEG decoder drew different colours from libjpeg, WebAssembly mozjpeg matched it; PNG decoded through the runtime's own streams; memory per request not reported, about 96 MB by arithmetic for the 256-tile map (D1 §3.8) | Measurements added to the bounds; one row of tiles at a time; a codecs rule; the data path's role corrected | §5.9 |
 
 ### 9.3 D1 — Prove it by hand
 
