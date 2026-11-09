@@ -38,8 +38,9 @@ plan: `GetMap`'s CPU, the redirect route in a headless browser, and R2
 upload time. They amended §5.6, §5.8, §5.9, §9.10 and §11. The rows
 that need a person or a place are kits.)
 
-**Decisions recorded:** thirty-nine, all by the maintainer and logged
-in §9.2. The latest nine came on 2026-11-08 from an interview on D1's
+**Decisions recorded:** forty, all by the maintainer and logged in
+§9.2. The latest, on 2026-11-09, is q31: tiles are stored as one pack
+per frame per grid. Nine came on 2026-11-08 from an interview on D1's
 first results: q27 to q30, the RRFS zeros, Mercator's polar rows, the
 format for colour-mapped pictures, the SOS movie's rate, and merging
 D1 in two parts. Twenty-five were made on 2026-11-06: rasters for analysis carry the producer's own values on
@@ -63,7 +64,8 @@ put outside this plan's scope (§10, #528). Open: q2, q3, q10's date
 parsing and q11, tested in D1;
 and q23, now only for datasets whose known licence is No-Derivatives.
 D1 added four, q27 to q30, all decided the same day, and on
-2026-11-09 a fifth, q31 (loose tiles or packs), which is open.
+2026-11-09 a fifth, q31 (loose tiles or packs), decided the same day
+for packs.
 
 **Revisit when any of the following becomes true:**
 
@@ -2087,6 +2089,7 @@ and a Second Life sphere. The maintainer can line up all four.
 | 2026-11-08 | The maintainer | For now, a data layer with no reserved code says in its abstract and colour map that index 0 outside its box is not a measurement | §7.3, q28 |
 | 2026-11-08 | The maintainer | `colour-mapped` pictures default to 4:4:4 JPEG at quality 85; PNG where exact colours or transparency are needed | §7.3 |
 | 2026-11-08 | The maintainer | A time-locked video shows the earlier frame between frames, as the tiles do: a regular series' bounds are its first frame and one period past its last; a monthly or yearly series goes to OpenSpace as frames or tiles, not as time-locked video | §6.3, q30 |
+| 2026-11-09 | The maintainer | Tiles are stored as one pack per frame per grid, with an offset index, and served by R2 range requests, since D1 found packed frames uploaded 12 to 15 times faster with 190 to 770 times fewer billed writes and nothing against them | §5.6, §9.7, q31 |
 
 **Amended by D1's evidence.** Where a D1 measurement contradicted or
 sharpened this plan, the section was amended and the change is logged
@@ -3253,8 +3256,10 @@ stays a draft for review.
     period past the last make the floor snap down exactly. For a
     calendar period no linear mapping is exact, which argues for frames
     or tiles there rather than video (D1 §3.9).
-31. **Loose tiles, or one pack per frame per grid?** *Raised by D1,
-    2026-11-09.* §5.6 offered packing as an option for D1 to weigh, and
+31. *Decided 2026-11-09 by the maintainer:* one pack per frame per
+    grid, read by R2 range requests (§5.6, §9.7). The question, kept as
+    the record: **Loose tiles, or one pack per frame per grid?**
+    *Raised by D1, 2026-11-09.* §5.6 offered packing as an option for D1 to weigh, and
     D1 measured it (`delivery/D1_PROTOTYPES.md` §3.15).
     - **Upload.** A loose tile costs about 0.2 s of R2's own time
       whatever its size, so a 4096-wide picture frame took 19.6 s
@@ -3269,8 +3274,8 @@ stays a draft for review.
       object. A pack is also rewritten whole, which costs nothing
       extra, since a frame is cut whole anyway.
 
-    The evidence favours packs, and D3a would build the cutter's output
-    and the tile route around whichever is chosen.
+    The evidence favoured packs, and D3a builds the cutter's output and
+    the tile route around them.
 
 ---
 
