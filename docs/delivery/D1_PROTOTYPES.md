@@ -1081,8 +1081,8 @@ objects for RRFS, and 44 GB and 1.5 million objects for MPAS.
 - **Packing is an order of magnitude cheaper to upload.** Twelve to
   fifteen times faster per frame, and 190 to 770 times fewer billed
   writes, with nothing found against it in serving. §5.6 listed packing
-  as an option for D1 to weigh. The evidence favours it, and the choice
-  is the maintainer's, so it is a new question, q31.
+  as an option for D1 to weigh. The evidence favoured it, and the
+  maintainer chose packs on 2026-11-09 (q31).
 
 **A finding about §7.1's Mercator rule.** Taking Mercator level *z* by
 nearest neighbour from the lat/lon level of the same width, as §7.1
@@ -1101,8 +1101,8 @@ choice for D3a, recorded here so the rule is not built as written
 without it.
 
 **Settles.** §5.8's table (counts confirmed; the bytes row needs the
-native-level factor; upload time measured); D3a's sizing. **Raises:**
-q31, loose tiles or one pack per frame per grid (§5.6).
+native-level factor; upload time measured); D3a's sizing; q31, tiles
+stored as one pack per frame per grid (§5.6, §9.7).
 
 ---
 
@@ -1138,8 +1138,9 @@ document's `Last reviewed:` line with it.
 ## 5. Decisions taken on this evidence
 
 The maintainer was interviewed on these results on 2026-11-08, and
-decided the following. Each is logged with its reasoning in the
-plan's §9.2 and, where it answers one, in §11.
+decided the following, with q31 on 2026-11-09 after the Cloudflare
+tests. Each is logged with its reasoning in the plan's §9.2 and, where
+it answers one, in §11.
 
 | Question | Decision | Plan |
 |---|---|---|
@@ -1152,11 +1153,10 @@ plan's §9.2 and, where it answers one, in §11.
 | Format for `colour-mapped` pictures | 4:4:4 JPEG at quality 85 by default | §7.3 |
 | The SOS movie's rate (§3.12) | Best quantiser, never padded; the SOS kit asks | §6.1 |
 | When D1 merges | In two parts: these first results now, the rest with the kits and Cloudflare tests | §9.3 |
+| q31: loose tiles or one pack per frame per grid (§3.15) | One pack per frame per grid, read by R2 range requests | §5.6, §9.7 |
 
 **Still for a person.** The MPAS catalog row's licence is wrong
 (§1.2), and only the portal can fix it. GSL can confirm the RRFS zeros,
 and the SSP rows' producers can say which year a frame stamped 31
 December stands for (q27). q23's No-Derivatives question is still for
-someone who advises on NOAA's licensing. q31, loose tiles or one pack
-per frame (§3.15), was raised by the Cloudflare tests on 2026-11-09 and
-is the maintainer's to decide.
+someone who advises on NOAA's licensing.
