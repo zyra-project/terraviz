@@ -1003,7 +1003,7 @@ blocked the file whatever its window.
 
 The scoping doc promised three things the page does not do yet. The
 maintainer kept all three as future work on 2026-11-08. A fourth, a
-bug found in review the same day, needs a decision.
+bug found in review the same day, was decided on 2026-11-09.
 
 - **Show who set the pin and when.** The row and the audit log both
   record it, but the page reads the public endpoint, which leaves it
@@ -1019,13 +1019,17 @@ bug found in review the same day, needs a decision.
 - **Strip invisible control characters from the headline** on write.
   It is already capped and rendered as text, so this is extra care,
   not a fix.
-- **Decide what the `hero` switch turns off.** The Features card
-  describes it as "the 'Right now' hero spotlight", and
+- **Make the `hero` switch hide the panel.** The Features card
+  describes it as "the 'Right now' hero spotlight" and says an off
+  feature's public surfaces go quiet, and
   [`FEATURE_TOGGLES_PLAN.md`](FEATURE_TOGGLES_PLAN.md) expected a
   `{ hero: null }` read to hide the panel. It does not: the client
-  goes on to the file, the event and the automatic pick. Making the
-  switch hide the panel means the public app reading it, as it
-  already reads `orbit` (`src/services/nodeFeatures.ts`).
+  goes on to the file, the event and the automatic pick. The
+  maintainer decided on 2026-11-09 that off hides the panel
+  entirely, that a page already open picks it up on its next load
+  (no periodic re-read, unlike `orbit`), and that the fix lands in
+  its own change: the public app reads the switch from the node
+  profile it already fetches (`src/services/nodeFeatures.ts`).
 
 ## Other tools that round out the experience
 
