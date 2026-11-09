@@ -4,8 +4,9 @@
 /**
  * Reports planning docs whose `Last reviewed:` date has gone stale.
  *
- * Five docs carry the marker (federation-scoping, AGENT_SDK_EVALUATION,
- * HERO_ADMIN_SCOPING, PUBLISHER_ROLES_PLAN, WORDPRESS_INTEGRATION_PLAN),
+ * Planning docs across the repo carry the marker (federation-scoping,
+ * AGENT_SDK_EVALUATION, PUBLISHER_ROLES_PLAN, WORDPRESS_INTEGRATION_PLAN
+ * and the metadata phase docs among them; a superseded doc drops it),
  * and CLAUDE.md asks readers to verify freshness *before applying a
  * doc's directives* — "surface that to the user before proceeding rather
  * than silently applying potentially stale guidance". That instruction

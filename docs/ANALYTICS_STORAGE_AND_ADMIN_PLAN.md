@@ -23,9 +23,10 @@ tabs. Per-phase "Status: landed" notes mark what each delivered.
 >   the promotion path for the R2 archive, not the first step.
 > - [`CATALOG_PUBLISHING_TOOLS.md`](CATALOG_PUBLISHING_TOOLS.md) — the
 >   `/publish` portal architecture the new tabs slot into.
-> - [`HERO_ADMIN_SCOPING.md`](HERO_ADMIN_SCOPING.md) — the
->   featured-hero feature whose privilege-gating pattern both new tabs
->   reuse.
+> - [`CATALOG_PUBLISHING_TOOLS.md` §"Right now" hero override](CATALOG_PUBLISHING_TOOLS.md#right-now-hero-override)
+>   — the featured-hero feature whose privilege-gating pattern both new
+>   tabs reuse (first scoped in
+>   [`HERO_ADMIN_SCOPING.md`](HERO_ADMIN_SCOPING.md), now superseded).
 
 ---
 

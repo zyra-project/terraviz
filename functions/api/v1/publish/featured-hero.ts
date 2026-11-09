@@ -3,7 +3,7 @@
 
 /**
  * /api/v1/publish/featured-hero — the "Right now" hero admin write API
- * (Phase B of `docs/HERO_ADMIN_SCOPING.md`).
+ * (`docs/CATALOG_PUBLISHING_TOOLS.md` §"Right now" hero override).
  *
  * PUT    → Set (upsert) the singleton hero override. Body:
  *          `{ dataset_id, window: { start, end }, headline? }`. The
@@ -14,8 +14,8 @@
  * DELETE → Clear the hero override. Idempotent — 204 whether a pin
  *          was set or not.
  *
- * Both require a privileged caller (staff / admin / service token) —
- * community publishers cannot pin operator-wide homepage content.
+ * Both require the `hero.manage` capability (editor, admin or service
+ * role) — other publishers cannot pin operator-wide homepage content.
  * Reads `context.data.publisher` injected by the publish middleware.
  *
  * Every mutation writes an audit row (`hero.set` / `hero.clear`) and

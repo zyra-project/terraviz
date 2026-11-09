@@ -948,6 +948,89 @@ Phase 3 ships the per-dataset panel; Phase 6 adds the node-wide
 feed once there are non-staff actors generating events worth
 filtering across.
 
+## "Right now" hero override
+
+**Status: shipped.** This section replaced
+[`HERO_ADMIN_SCOPING.md`](HERO_ADMIN_SCOPING.md) on 2026-11-08. That
+doc is kept as the original scoping record; where the two differ,
+this section describes the code.
+
+The catalog homepage shows at most one "Right now" dataset. A curator
+pins it at `/publish/featured-hero`
+(`src/ui/publisher/pages/featured-hero.ts`) for a set window, with an
+optional headline. The static `public/featured-now.json` stays as the
+floor for deploys without the backend, and ships empty.
+
+### How the hero is chosen
+
+`heroService.getHeroCandidate` tries each source in order and takes
+the first that qualifies:
+
+1. A pin set in the portal, read from `GET /api/v1/featured-hero`.
+2. A pin in `public/featured-now.json`.
+3. The dataset linked to the freshest curator-approved current event
+   from the last 14 days, through a link that was also approved
+   (`GET /api/v1/featured-event`;
+   [`CURRENT_EVENTS_PLAN.md`](CURRENT_EVENTS_PLAN.md) §6.1).
+4. A dataset tagged `Real-Time` whose `endTime` is within the last
+   24 hours, the freshest first.
+5. Nothing, and the panel hides.
+
+**A pin counts only if it would show**: inside its window, and
+pointing at a dataset the catalog can show. Otherwise the next source
+is tried, so a lapsed pin nobody cleared does not hide the file, and a
+pin scheduled for later leaves the file showing until it starts. That
+was the maintainer's decision on 2026-11-08; until then a portal pin
+blocked the file whatever its window.
+
+### Decisions as built
+
+| Decision | As built | Where |
+|---|---|---|
+| Store | A single-row D1 table, `hero_override`, held to one row by `CHECK (id = 1)`. Set is an upsert, clear a delete. Deleting the pinned dataset clears the pin (`ON DELETE CASCADE`). | `migrations/catalog/0017_hero_override.sql` |
+| Window | Required at the schema (`NOT NULL`) and on write (both bounds, parseable, start before end). | `functions/api/v1/_lib/hero-override-store.ts` |
+| Who can set it | The `hero.manage` capability: editor, admin and service. Everyone else sees a read-only view of the current pin. The scoping doc proposed `isPrivileged`; the five-role matrix replaced it ([`PUBLISHER_ROLES_PLAN.md`](PUBLISHER_ROLES_PLAN.md) D3). | `functions/api/v1/publish/featured-hero.ts` |
+| Public read | Returns the raw pin. The client decides whether it is live, one rule for both sources. | `functions/api/v1/featured-hero.ts` |
+| Freshness | KV `hero:v1` for 60 s, cleared on every write. In the browser, 60 s in memory for the portal pin and 5 minutes for the file. The read also sends `Cache-Control: public, max-age=60`, which clearing KV cannot reach, so a visitor's change can take up to two minutes. | Both routes; `src/services/heroService.ts` |
+| Errors | `400 { errors }` for a bad field (the scoping doc said 422) and `400 invalid_json` for a body that is not JSON, `404` for an unknown dataset, `403 forbidden_role`. A read failure returns `{ hero: null }`, so visitors fall back cleanly; `503` only when `CATALOG_DB` is unbound. | Both routes |
+| Audit | `hero.set` and `hero.clear` rows in `audit_events`, plus `set_by` and `set_at` on the row. | `functions/api/v1/publish/featured-hero.ts` |
+| Switch | The `hero` toggle on the Features card. Off, the portal page and write API refuse, and the public read returns `{ hero: null }` uncached, so a portal pin is ignored. The homepage hero itself stays: the public app does not read this toggle, so a file pin, an approved event (gated by `events`) or a real-time dataset still shows. See the follow-ups. | `src/types/node-features.ts`, `functions/api/v1/featured-hero.ts` |
+| Headline | Optional, trimmed, at most 120 characters, rendered as text. | Store and page |
+| Preview | A lookalike of the homepage card built with the live `hero-panel.css`, not the `heroPanelUI` module the scoping doc recommended. | `src/ui/publisher/pages/featured-hero.ts` |
+| Scheduling | Falls out of the window's start. Since 2026-11-08 a scheduled pin leaves the file in place until it starts. | `src/services/heroService.ts` |
+
+### Follow-ups
+
+The scoping doc promised three things the page does not do yet. The
+maintainer kept all three as future work on 2026-11-08. A fourth, a
+bug found in review the same day, was decided on 2026-11-09.
+
+- **Show who set the pin and when.** The row and the audit log both
+  record it, but the page reads the public endpoint, which leaves it
+  out. It needs an authenticated read, such as a `GET` on
+  `/api/v1/publish/featured-hero`, that returns them with the
+  publisher's display name.
+- **Say whether the pin is live**: "expires in 3 days", "expired",
+  "starts Saturday". Today both views list the dates even after the
+  end has passed. The read-only view labels a lapsed or
+  not-yet-started pin "Currently featured", and the Overview's
+  newsroom pipeline counts it as live, while the homepage shows the
+  next source instead.
+- **Strip invisible control characters from the headline** on write.
+  It is already capped and rendered as text, so this is extra care,
+  not a fix.
+- **Make the `hero` switch hide the panel.** The Features card
+  describes it as "the 'Right now' hero spotlight" and says an off
+  feature's public surfaces go quiet, and
+  [`FEATURE_TOGGLES_PLAN.md`](FEATURE_TOGGLES_PLAN.md) expected a
+  `{ hero: null }` read to hide the panel. It does not: the client
+  goes on to the file, the event and the automatic pick. The
+  maintainer decided on 2026-11-09 that off hides the panel
+  entirely, that a page already open picks it up on its next load
+  (no periodic re-read, unlike `orbit`), and that the fix lands in
+  its own change: the public app reads the switch from the node
+  profile it already fetches (`src/services/nodeFeatures.ts`).
+
 ## Other tools that round out the experience
 
 The user asked what else makes Terraviz "complete." From the gaps

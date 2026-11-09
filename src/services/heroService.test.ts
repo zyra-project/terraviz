@@ -170,6 +170,11 @@ describe('getHeroCandidate — backend read-through', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn((url: unknown) => {
+        // The approved-event source is covered in its own describe;
+        // here it answers "none" rather than receiving the file body.
+        if (String(url).includes('featured-event')) {
+          return Promise.resolve({ ok: false, json: async () => ({}) })
+        }
         const isBackend = String(url).includes('featured-hero')
         const r = isBackend ? routes.backend : routes.file
         if (!r) return Promise.resolve({ ok: false, json: async () => ({}) })
@@ -207,13 +212,61 @@ describe('getHeroCandidate — backend read-through', () => {
     expect(res?.dataset.id).toBe('feat')
   })
 
-  it('an expired backend pin is authoritative — does not consult the file', async () => {
-    // Backend has a pin (expired); file has an active pin. Because the
-    // backend is authoritative when set, the expired pin falls through
-    // to auto-derive rather than to the file.
+  it('does not fetch the file when the backend pin shows', async () => {
+    stubRouted({
+      backend: { body: { hero: { datasetId: 'feat', window: activeWindow } } },
+      file: { body: { datasetId: 'other', window: activeWindow } },
+    })
+    await getHeroCandidate([ds('feat'), ds('other')], { now: NOW })
+    const urls = vi.mocked(fetch).mock.calls.map(c => String(c[0]))
+    expect(urls.some(u => u.includes('featured-hero'))).toBe(true)
+    expect(urls.some(u => u.includes('featured-now'))).toBe(false)
+  })
+
+  // A pin that would not show blocks nothing (maintainer's decision,
+  // 2026-11-08): the file is consulted next. Each case gives the file a
+  // different dataset from the backend, so the assertion proves which
+  // source won rather than that some override did.
+  it('an expired backend pin nobody cleared falls through to the file', async () => {
     stubRouted({
       backend: { body: { hero: { datasetId: 'feat', window: expiredWindow } } },
-      file: { body: { datasetId: 'feat', window: activeWindow } },
+      file: { body: { datasetId: 'other', window: activeWindow, headline: 'File' } },
+    })
+    const res = await getHeroCandidate([ds('feat'), ds('other'), realtime], { now: NOW })
+    expect(res).toMatchObject({ source: 'override', headline: 'File' })
+    expect(res?.dataset.id).toBe('other')
+  })
+
+  it('a backend pin scheduled for later leaves the file in place until it starts', async () => {
+    const laterWindow = { start: '2026-06-06', end: '2026-06-13' }
+    stubRouted({
+      backend: { body: { hero: { datasetId: 'feat', window: laterWindow } } },
+      file: { body: { datasetId: 'other', window: activeWindow } },
+    })
+    const before = await getHeroCandidate([ds('feat'), ds('other')], { now: NOW })
+    expect(before?.dataset.id).toBe('other')
+
+    // Once its window opens, the backend pin wins. The caches hold the
+    // payloads, so only the clock moves.
+    const during = await getHeroCandidate([ds('feat'), ds('other')], {
+      now: Date.parse('2026-06-07T12:00:00.000Z'),
+    })
+    expect(during?.dataset.id).toBe('feat')
+  })
+
+  it('a backend pin to a row the catalog cannot show falls through to the file', async () => {
+    stubRouted({
+      backend: { body: { hero: { datasetId: 'gone', window: activeWindow } } },
+      file: { body: { datasetId: 'other', window: activeWindow } },
+    })
+    const res = await getHeroCandidate([ds('gone', { isHidden: true }), ds('other')], { now: NOW })
+    expect(res?.dataset.id).toBe('other')
+  })
+
+  it('a lapsed backend pin and no file pin falls through to auto-derive', async () => {
+    stubRouted({
+      backend: { body: { hero: { datasetId: 'feat', window: expiredWindow } } },
+      file: { body: {} },
     })
     const res = await getHeroCandidate([ds('feat'), realtime], { now: NOW })
     expect(res?.source).toBe('auto')
@@ -247,6 +300,24 @@ describe('getHeroCandidate — approved event source', () => {
       }),
     )
   }
+
+  // A lapsed portal pin blocks nothing (2026-11-08): with a file pin
+  // the file beats the event, and without one the event shows.
+  const lapsedPin = { hero: { datasetId: 'pinned', window: { start: '2026-01-01T00:00:00.000Z', end: '2026-02-01T00:00:00.000Z' } } }
+
+  it('a lapsed portal pin lets a file pin beat the event', async () => {
+    stubHero({ hero: lapsedPin, file: { datasetId: 'filed', window: activeWindow }, event: eventBody })
+    const res = await getHeroCandidate([ds('pinned'), ds('filed'), ds('feat'), realtime], { now: NOW })
+    expect(res?.source).toBe('override')
+    expect(res?.dataset.id).toBe('filed')
+  })
+
+  it('a lapsed portal pin and no file pin lets the event show', async () => {
+    stubHero({ hero: lapsedPin, file: {}, event: eventBody })
+    const res = await getHeroCandidate([ds('pinned'), ds('feat'), realtime], { now: NOW })
+    expect(res?.source).toBe('event')
+    expect(res?.dataset.id).toBe('feat')
+  })
 
   it('surfaces an approved event when there is no curator pin', async () => {
     stubHero({ hero: { hero: null }, file: {}, event: eventBody })

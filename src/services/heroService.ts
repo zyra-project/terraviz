@@ -9,11 +9,11 @@
  * Selection pipeline, highest priority first:
  *
  *   1. Curator override — resolved BACKEND-FIRST: the operator-writable
- *      `/api/v1/featured-hero` endpoint is consulted first, and only
- *      when it has no pin (or is unreachable / not deployed) does the
- *      static `public/featured-now.json` file apply as the fallback
- *      floor for static-only deploys. The chosen override must be
- *      in-window and resolve to a visible catalog row.
+ *      `/api/v1/featured-hero` endpoint is consulted first, and the
+ *      static `public/featured-now.json` file applies when it has no
+ *      pin that would show (none set, unreachable, not deployed,
+ *      out of window, or unresolvable). Either source's override must
+ *      be in-window and resolve to a visible catalog row to count.
  *   2. Approved current event — `/api/v1/featured-event` returns the
  *      freshest curator-approved event with an approved link to a
  *      visible dataset (`docs/CURRENT_EVENTS_PLAN.md` §6.1). It carries
@@ -26,8 +26,9 @@
  * The override's `window: { start, end }` is MANDATORY for both
  * sources. An override with no window (or a malformed / expired /
  * not-yet-active window) is ignored and the pipeline falls through to
- * auto-derived. This is deliberate: operators must set an end date so
- * a pinned hero can't silently go stale.
+ * the next source: the file after the backend, then the approved
+ * event, then auto-derived. This is deliberate: operators must set an
+ * end date so a pinned hero can't silently go stale.
  *
  * Pure-ish module: no DOM, no analytics, no localStorage. The only
  * side effects are polite fetches of the backend endpoint (cached for
@@ -156,10 +157,14 @@ function featuredEventUrl(): string {
  *
  * Override resolution is **backend-first, static-file-fallback**: the
  * operator-writable `/api/v1/featured-hero` endpoint is consulted
- * first, and only when it has no override (or is unreachable / not
- * deployed) does the static `featured-now.json` apply. The endpoint is
- * authoritative when it has a pin — the file is a floor for
- * static-only deploys, not a second curation layer to merge.
+ * first, and the static `featured-now.json` applies only when the
+ * endpoint has no pin that would show — none set, unreachable, not
+ * deployed, outside its window, or pointing at a row the catalog
+ * cannot show. A pin that is not on screen blocks nothing, so a
+ * lapsed pin nobody cleared does not hide the file, and a pin
+ * scheduled for later leaves the file in place until it starts
+ * (the maintainer's decision, 2026-11-08). The two are never merged:
+ * the first pin that shows wins.
  *
  * Every fetch is best-effort — a missing/malformed source falls
  * through to the next, so a deploy without the backend (or without
@@ -172,19 +177,25 @@ export async function getHeroCandidate(
 ): Promise<HeroCandidate | null> {
   const now = opts.now ?? Date.now()
 
-  const override =
-    (await fetchBackendOverride(opts.signal)) ?? (await fetchOverride(opts.signal))
-  if (override) {
-    const inWindow = windowIsActive(override.window, now)
-    if (inWindow) {
-      const dataset = datasets.find(d => d.id === override.datasetId && !d.isHidden)
-      if (dataset) {
-        return { dataset, headline: override.headline, source: 'override' }
-      }
-      // A configured override that points at a missing/hidden row is a
-      // curator error — log it but don't let it suppress the auto pick.
-      logger.warn('[hero] featured-now override datasetId did not resolve:', override.datasetId)
+  // Backend first, then the file. A pin only counts if it would show:
+  // in its window and resolving to a visible row. A lapsed pin nobody
+  // cleared, one scheduled for later, or one pointing at a missing row
+  // blocks nothing, so the file is consulted next. The file is fetched
+  // only when the backend has no pin that shows.
+  const sources = [
+    ['portal', fetchBackendOverride],
+    ['featured-now.json', fetchOverride],
+  ] as const
+  for (const [label, fetchSource] of sources) {
+    const override = await fetchSource(opts.signal)
+    if (!override || !windowIsActive(override.window, now)) continue
+    const dataset = datasets.find(d => d.id === override.datasetId && !d.isHidden)
+    if (dataset) {
+      return { dataset, headline: override.headline, source: 'override' }
     }
+    // A configured override that points at a missing/hidden row is a
+    // curator error — log it but don't let it suppress the next source.
+    logger.warn(`[hero] ${label} override datasetId did not resolve:`, override.datasetId)
   }
 
   // A curator-approved current event headlines the hero next — between
