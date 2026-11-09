@@ -3,9 +3,10 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
-import { renderHeroPanel, destroyHeroPanel, resetHeroPanelForTests } from './heroPanelUI'
+import { renderHeroPanel, destroyHeroPanel, resetHeroPanelForTests, setHeroEnabled } from './heroPanelUI'
 import { resetHeroCacheForTests, REAL_TIME_TAG } from '../services/heroService'
 import type { Dataset } from '../types'
+import { until } from '../test-utils'
 
 function ds(id: string, opts: { tags?: string[]; endTime?: string; title?: string } = {}): Dataset {
   return {
@@ -129,5 +130,53 @@ describe('renderHeroPanel', () => {
     const link = host.querySelector('.hero-panel-source-link') as HTMLAnchorElement | null
     expect(link?.textContent).toBe('NOAA')
     expect(link?.getAttribute('href')).toBe('https://example.gov/storm')
+  })
+})
+
+// The node's `hero` switch hides the whole panel, not only a portal
+// pin (maintainer's decision, 2026-11-09). `realtime` qualifies on the
+// automatic path, so each "hidden" below is the switch, not a missing
+// candidate; the first test proves that baseline.
+describe('setHeroEnabled', () => {
+  it('shows the automatic pick while the switch is on (the baseline)', async () => {
+    setHeroEnabled(true)
+    await renderHeroPanel({ datasets: [realtime], onSelect: vi.fn(), isCatalogMode: true })
+    expect(document.getElementById('hero-panel')!.classList.contains('hidden')).toBe(false)
+  })
+
+  it('off: stays hidden and asks for no candidate at all', async () => {
+    setHeroEnabled(false)
+    await renderHeroPanel({ datasets: [realtime], onSelect: vi.fn(), isCatalogMode: true })
+    expect(document.getElementById('hero-panel')!.classList.contains('hidden')).toBe(true)
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled()
+  })
+
+  it('off after a render hides the panel already showing', async () => {
+    await renderHeroPanel({ datasets: [realtime], onSelect: vi.fn(), isCatalogMode: true })
+    const host = document.getElementById('hero-panel')!
+    expect(host.classList.contains('hidden')).toBe(false)
+    setHeroEnabled(false)
+    expect(host.classList.contains('hidden')).toBe(true)
+    expect(host.getAttribute('aria-hidden')).toBe('true')
+    expect(host.innerHTML).toBe('')
+  })
+
+  it('off while a candidate is resolving drops the late result', async () => {
+    // Fetches hang until released and ignore the abort, so the
+    // resolution completes with a qualifying candidate after the
+    // switch went off: only the panel's own guard can drop it.
+    const empty = { ok: true, json: async () => ({}) }
+    const waiting: Array<(v: unknown) => void> = []
+    let released = false
+    vi.stubGlobal('fetch', vi.fn(() =>
+      released ? Promise.resolve(empty) : new Promise(r => { waiting.push(r) }),
+    ))
+    const pending = renderHeroPanel({ datasets: [realtime], onSelect: vi.fn(), isCatalogMode: true })
+    await until(() => waiting.length > 0, 'the first candidate fetch')
+    setHeroEnabled(false)
+    released = true
+    for (const r of waiting) r(empty)
+    await pending
+    expect(document.getElementById('hero-panel')!.classList.contains('hidden')).toBe(true)
   })
 })

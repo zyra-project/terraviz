@@ -23,6 +23,7 @@ import type { AppState, VideoTextureHandle, TourFile, Dataset } from './types'
 
 // Extracted modules
 import { showBrowseUI, hideBrowseUI, collapseBrowseUI, notifyBrowseOpened, refreshBrowseNewSinceBadge } from './ui/browseUI'
+import { setHeroEnabled } from './ui/heroPanelUI'
 import { initDownloadUI } from './ui/downloadUI'
 import { initDownloadDialogUI } from './ui/downloadDialogUI'
 import { initPlaylistUI } from './ui/playlistUI'
@@ -718,8 +719,13 @@ class InteractiveSphere {
 
       // Initialize digital docent chat (available on all views) —
       // unless this node turned Orbit off, decided here, before
-      // anything below can show the trigger or open the panel.
-      this.initChat((await nodeFeatures.settle()).orbit)
+      // anything below can show the trigger or open the panel. The
+      // "Right now" hero's switch is applied at the same point, for
+      // the same reason: every path below may show the browse panel,
+      // which renders the hero.
+      const features = await nodeFeatures.settle()
+      setHeroEnabled(features.hero)
+      this.initChat(features.orbit)
 
       // Tour-authoring dock — mounts only when the URL carries
       // `?tourEdit=<id>`. Phase 3pt/A. Idempotent; the dock owns
@@ -909,10 +915,13 @@ class InteractiveSphere {
       this.setError(error instanceof Error ? error.message : 'Unknown error')
     }
 
-    // A boot that failed before `initChat` still owes the Orbit
-    // decision: the deep links below can open the panel or show the
-    // trigger. Idempotent when `initChat` already applied it.
-    if (!(await nodeFeatures.settle()).orbit) setOrbitAvailable(false)
+    // A boot that failed before `initChat` still owes the Orbit and
+    // hero decisions: the deep links below can open the panel, show
+    // the trigger or reveal the browse panel. Idempotent when the
+    // try block already applied them.
+    const settledFeatures = await nodeFeatures.settle()
+    setHeroEnabled(settledFeatures.hero)
+    if (!settledFeatures.orbit) setOrbitAvailable(false)
 
     // Phase 5: listen for deep links unconditionally so the app can
     // load a dataset when opened from an external URL at any time,

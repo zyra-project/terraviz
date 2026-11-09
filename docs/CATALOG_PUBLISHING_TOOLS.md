@@ -963,6 +963,8 @@ floor for deploys without the backend, and ships empty.
 
 ### How the hero is chosen
 
+When the node's `hero` switch is off, there is no panel at all and
+nothing below is fetched (see the Switch row). Otherwise
 `heroService.getHeroCandidate` tries each source in order and takes
 the first that qualifies:
 
@@ -994,7 +996,7 @@ blocked the file whatever its window.
 | Freshness | KV `hero:v1` for 60 s, cleared on every write. In the browser, 60 s in memory for the portal pin and 5 minutes for the file. The read also sends `Cache-Control: public, max-age=60`, which clearing KV cannot reach, so a visitor's change can take up to two minutes. | Both routes; `src/services/heroService.ts` |
 | Errors | `400 { errors }` for a bad field (the scoping doc said 422) and `400 invalid_json` for a body that is not JSON, `404` for an unknown dataset, `403 forbidden_role`. A read failure returns `{ hero: null }`, so visitors fall back cleanly; `503` only when `CATALOG_DB` is unbound. | Both routes |
 | Audit | `hero.set` and `hero.clear` rows in `audit_events`, plus `set_by` and `set_at` on the row. | `functions/api/v1/publish/featured-hero.ts` |
-| Switch | The `hero` toggle on the Features card. Off, the portal page and write API refuse, and the public read returns `{ hero: null }` uncached, so a portal pin is ignored. The homepage hero itself stays: the public app does not read this toggle, so a file pin, an approved event (gated by `events`) or a real-time dataset still shows. See the follow-ups. | `src/types/node-features.ts`, `functions/api/v1/featured-hero.ts` |
+| Switch | The `hero` toggle on the Features card. Off hides the homepage panel entirely and fetches no candidate: `main.ts` reads the switch from the node profile it already fetches for `orbit` and hands it to `heroPanelUI.setHeroEnabled`. The portal page and write API refuse, and the public read returns `{ hero: null }` uncached. Read once per page load, so a page already open picks up a change on its next load (no periodic re-read, unlike `orbit`), and it fails open like every switch. Until 2026-11-09 off only dropped the portal pin, and a file pin, an approved event or a real-time dataset still showed. | `src/ui/heroPanelUI.ts`, `src/main.ts`, `functions/api/v1/featured-hero.ts` |
 | Headline | Optional, trimmed, at most 120 characters, rendered as text. | Store and page |
 | Preview | A lookalike of the homepage card built with the live `hero-panel.css`, not the `heroPanelUI` module the scoping doc recommended. | `src/ui/publisher/pages/featured-hero.ts` |
 | Scheduling | Falls out of the window's start. Since 2026-11-08 a scheduled pin leaves the file in place until it starts. | `src/services/heroService.ts` |
@@ -1003,7 +1005,8 @@ blocked the file whatever its window.
 
 The scoping doc promised three things the page does not do yet. The
 maintainer kept all three as future work on 2026-11-08. A fourth, a
-bug found in review the same day, was decided on 2026-11-09.
+bug found in review the same day (the switch did not hide the panel),
+was decided on 2026-11-09 and is fixed: see the Switch row.
 
 - **Show who set the pin and when.** The row and the audit log both
   record it, but the page reads the public endpoint, which leaves it
@@ -1019,17 +1022,6 @@ bug found in review the same day, was decided on 2026-11-09.
 - **Strip invisible control characters from the headline** on write.
   It is already capped and rendered as text, so this is extra care,
   not a fix.
-- **Make the `hero` switch hide the panel.** The Features card
-  describes it as "the 'Right now' hero spotlight" and says an off
-  feature's public surfaces go quiet, and
-  [`FEATURE_TOGGLES_PLAN.md`](FEATURE_TOGGLES_PLAN.md) expected a
-  `{ hero: null }` read to hide the panel. It does not: the client
-  goes on to the file, the event and the automatic pick. The
-  maintainer decided on 2026-11-09 that off hides the panel
-  entirely, that a page already open picks it up on its next load
-  (no periodic re-read, unlike `orbit`), and that the fix lands in
-  its own change: the public app reads the switch from the node
-  profile it already fetches (`src/services/nodeFeatures.ts`).
 
 ## Other tools that round out the experience
 
