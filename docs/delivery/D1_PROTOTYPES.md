@@ -1,8 +1,9 @@
 # D1 — Prototypes by hand
 
-**Status: first results, draft for review; D1 is still in progress.**
-These results merge first, and a follow-up closes D1 with the kits' and
-the Cloudflare tests' results (plan §9.3, decided 2026-11-08). Phase D1 of
+**Status: draft for review; D1 is still in progress.** D1 merges in
+two parts (plan §9.3, decided 2026-11-08). The Cloudflare tests have run
+since the first part (§3.8, §3.11, §3.15), and D1 closes when the kits'
+results come back (§4). Phase D1 of
 [`DATA_DELIVERY_PLAN.md`](../DATA_DELIVERY_PLAN.md) (§9.3): take real
 datasets through every format the plan proposes, measure, and write
 down what is true. No code entered the tree. Every script, pyramid and
@@ -10,7 +11,7 @@ encode lives outside the repository, in a scratch directory or a
 throwaway Worker project. The only repository changes are this
 document and the plan amendments it records in §9.2.
 
-**Last reviewed:** 2026-11-08 (started the same day).
+**Last reviewed:** 2026-11-09 (started 2026-11-08; the Cloudflare tests added).
 
 **Revisit when any of the following becomes true:**
 
@@ -1110,11 +1111,14 @@ q31, loose tiles or one pack per frame per grid (§5.6).
 Each kit is a folder with a one-page checklist: what to load, the
 exact steps, what to record, and what counts as a pass. They sit
 outside the repository with the rest of D1's scratch, and the
-maintainer hands them on; this phase sends nothing to anyone. Every
-address in them reads `{{NODE}}` until the scratch Worker is deployed
-(§3.8); a script replaces it, and the Worker serves the files and logs
-every request, so a result can be matched to what the client actually
-asked for.
+maintainer hands them on; this phase sends nothing to anyone. Since
+2026-11-09 every address in them points at the scratch Worker (§2,
+§3.8), which serves the tiles, the WMS and the kits' files from its
+bucket. It logs each request, so a result can be matched to what the
+client actually asked for. Every address was checked to answer before
+the kits were packed. The kits work until D1 closes, when the Worker
+and bucket are deleted. They name the account's `workers.dev`
+subdomain, which is the maintainer's to decide whether to share.
 
 | Kit | Who runs it | What it carries | Rows |
 |---|---|---|---|
@@ -1153,4 +1157,6 @@ plan's §9.2 and, where it answers one, in §11.
 (§1.2), and only the portal can fix it. GSL can confirm the RRFS zeros,
 and the SSP rows' producers can say which year a frame stamped 31
 December stands for (q27). q23's No-Derivatives question is still for
-someone who advises on NOAA's licensing.
+someone who advises on NOAA's licensing. q31, loose tiles or one pack
+per frame (§3.15), was raised by the Cloudflare tests on 2026-11-09 and
+is the maintainer's to decide.
