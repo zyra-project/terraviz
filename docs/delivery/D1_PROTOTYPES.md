@@ -1,9 +1,9 @@
 # D1 — Prototypes by hand
 
 **Status: draft for review; D1 is still in progress.** D1 merges in
-two parts (plan §9.3, decided 2026-11-08). The Cloudflare tests have run
-since the first part (§3.8, §3.11, §3.15), and D1 closes when the kits'
-results come back (§4). Phase D1 of
+two parts (plan §9.3, decided 2026-11-08). The Cloudflare tests ran on
+2026-11-09 (§3.8, §3.11, §3.15), and D1 closes when the kits' results
+come back (§4). Phase D1 of
 [`DATA_DELIVERY_PLAN.md`](../DATA_DELIVERY_PLAN.md) (§9.3): take real
 datasets through every format the plan proposes, measure, and write
 down what is true. No code entered the tree. Every script, pyramid and

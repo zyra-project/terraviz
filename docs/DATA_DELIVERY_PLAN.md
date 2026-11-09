@@ -2163,8 +2163,9 @@ document records first (§1 there).
 **Merged in two parts** (decided 2026-11-08 by the maintainer). The
 first results merge now, so the plan's corrections land. A follow-up
 PR closes D1 with the kits' and the Cloudflare tests' results, and D1's
-gate is met when that PR merges. The Cloudflare tests are done. What
-D1 waits on now is the kits.
+gate is met when that PR merges. The Cloudflare tests ran before the
+first part merged, so they joined it, and what D1 waits on now is the
+kits.
 
 ### 9.4 D2a — Video files
 
