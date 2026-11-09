@@ -143,8 +143,8 @@ graticule drawn over it, plus a regional variant whose box crosses
 
 ## 2. Environment
 
-Everything in §3 that is not a kit ran in one Claude Code cloud
-container on 2026-11-08: Ubuntu 24.04, 4 vCPU, 16 GB of memory, the
+Everything in §3 that is not a kit or a Cloudflare test ran in one
+Claude Code cloud container on 2026-11-08: Ubuntu 24.04, 4 vCPU, 16 GB of memory, the
 same shape as a GitHub `ubuntu-latest` runner. Cut times are therefore
 a fair proxy for the runner the plan names (§5.6), not a measurement on
 one. The scratch directory held about 7 GB of frames, tiles and
@@ -160,6 +160,16 @@ encodes, none of it in the repository.
 | MapLibre GL JS | 6.15.0 | Mercator at 512 and 256 |
 | Leaflet | 1.9.4 | Mercator at 256 and 512 |
 | numpy 1.26, scipy 1.11, Pillow 10.2 | Ubuntu packages | The scratch cutter |
+| Wrangler | 4.153.0, the repository's minimum | The scratch Worker, its R2 bucket and its invocation log |
+| Cloudflare Workers Paid | Standard usage model, the maintainer's account | §3.8, §3.11, §3.15's upload time |
+
+**The Cloudflare tests** ran on 2026-11-09 against a throwaway Worker
+and R2 bucket, both named `terraviz-d1-scratch`, in the maintainer's
+account. Nothing else in the account was read or changed, and both are
+deleted when D1 closes. The Worker serves the tiles, the WMS, the kits'
+files and the redirect route of §3.11 from the bucket, and logs each
+request's path, range and status, but no IP address or full user agent.
+Requests came from the container above, through its proxy.
 
 **The scratch cutter.** The pyramids were cut by a short numpy script
 rather than `gdal2tiles`, because `gdal2tiles` builds each level from
@@ -600,17 +610,141 @@ version 1.1.1 (GDAL's default), which needs the Worker's WMS.
 
 ### 3.8 What does a `GetMap` cost? (q26)
 
-**Not run yet: needs Cloudflare credentials.** The test is a
-throwaway Worker that stitches and scales tiles from the cut pyramids
-in R2, measured alone and under concurrency, reading Cloudflare's CPU
-time and memory rather than elapsed time, on a free and a paid plan.
-The pyramids it needs are cut (§3.15), and so is the WMS logic,
-prototyped and checked against QGIS (§3.7). What it needs is a scratch
-R2 bucket and the right to deploy a Worker on each plan tier. The same
-Worker serves the kits' addresses, the redirect route of §3.11, and the
-R2 upload timing §3.15 leaves open.
+**Run on the paid plan, 2026-11-09. The free plan was not measured.**
+The maintainer's account is on Workers Paid, and there is no free-plan
+account to test on (decided 2026-11-08). The free plan's figure is
+therefore Cloudflare's documented limit of 10 ms of CPU per request,
+not a measurement. No request below used less than 108 ms.
 
-**One hypothesis already checked without credentials.** The brief
+**Method.** A throwaway Worker, `terraviz-d1-scratch`, on the
+maintainer's account, with an R2 bucket of the same name. Both are
+deleted when D1 closes, and nothing else in the account was touched. It
+is a standalone Worker rather than a Pages Function: the same runtime
+and limits, in the shape of §5.9's "separate Worker for WMS" option.
+The bucket holds §3.15's pyramids for every frame, one pack per frame
+per tile set. The Worker serves §5.9's `GetMap` as written:
+
+- WMS 1.3.0 and 1.1.1.
+- `CRS:84`, `EPSG:4326` with 1.3's axis swap, and `EPSG:3857` with its
+  two aliases.
+- The pyramid level at or finer than the request.
+- Each tile read by an R2 range request into its pack, then stitched,
+  scaled by nearest neighbour and encoded as PNG.
+- Data layers take §5.9's cheap path: indices in, indices out, with the
+  dataset's palette and `tRNS` copied across. Pictures go through RGBA.
+
+There were nine requests, from a 602×397 test pattern up to the largest
+size a client may ask for, 2048 on a side. Each was sent eight times in
+a row. The four 2048-pixel cases were also sent 20 times at 10
+concurrent and 60 times at 30 concurrent. The CPU time and outcome of
+each request come from Workers' own invocation log (`wrangler tail`'s
+`cpuTime` and `outcome`), not from elapsed time.
+
+The same requests ran through three versions of the image code, which
+draw the same maps:
+
+| Version | PNG in and out | JPEG in | Stitch |
+|---|---|---|---|
+| `js` | `fast-png` 6.2 and `pako` 2.2, all JavaScript | `jpeg-js` 0.4.4, JavaScript | A string key built and looked up for every output pixel |
+| `fast` | The runtime's own `DecompressionStream` and `CompressionStream` for the zlib stream; PNG's filters undone in JavaScript | mozjpeg's decoder compiled to WebAssembly (`@jsquash/jpeg` 1.6.0, Apache-2.0, 166 KB) | As `js` |
+| `lean` | As `fast` | As `fast` | Each row's tiles looked up once |
+
+**What was measured.** Medians of CPU time in milliseconds, with the
+95th percentile after the slash. Each case's first request met a cold
+isolate, so it is left out of the medians and given in its own column.
+
+| Request | Tiles read | `js` | `fast` | `lean` | `lean`, first request | `lean`, elapsed |
+|---|---|---|---|---|---|---|
+| Test pattern, `EPSG:4326`, 602×397 | 4 | 280 / 677 | 198 / 250 | 183 / 344 | 183 | 358 |
+| Drought picture, `CRS:84`, global, 1024×512 | 2 | 543 / 806 | 250 / 372 | 239 / 497 | 256 | 432 |
+| The same, 2048×1024 | 8 | 1,828 / 2,237 | 1,109 / 1,518 | 784 / 969 | 1,316 | 938 |
+| Drought picture, `EPSG:3857`, 1024×768 | 48 | 925 / 1,883 | 823 / 1,174 | 443 / 750 | 412 | 1,456 |
+| The same, global, 2048×2048 | 256 | 5,187 / 7,017 | 2,304 / 3,434 | 1,835 / 2,162 | 2,594 | 4,868 |
+| RRFS smoke, `CRS:84`, its box, 1024×437 | 12 | 363 / 642 | 259 / 449 | 249 / 492 | 180 | 542 |
+| The same, 2048×874 | 28 | 915 / 1,301 | 558 / 925 | 796 / 992 | 521 | 1,216 |
+| MPAS, `CRS:84`, global, 2048×1024 | 8 | 1,138 / 1,526 | 714 / 1,358 | 576 / 821 | 590 | 827 |
+| MPAS at its native level, 90° × 90°, 2048×2048 | 25 | 1,846 / 2,994 | 1,360 / 1,794 | 1,071 / 1,319 | 1,358 | 1,288 |
+
+Under concurrency, `lean`, median / 95th percentile / maximum:
+
+| Request | 10 at once | 30 at once |
+|---|---|---|
+| Drought, `CRS:84`, 2048×1024 | 682 / 992 / 1,113 | 627 / 1,102 / 1,260 |
+| Drought, `EPSG:3857`, 2048×2048 | 1,770 / 2,911 / 2,941 | 1,923 / 2,529 / 3,556 |
+| RRFS, 2048×874 | 572 / 971 / 1,041 | 528 / 834 / 979 |
+| MPAS native, 2048×2048 | 848 / 1,500 / 1,582 | 936 / 1,350 / 1,463 |
+
+All 1,176 requests (392 per version) returned 200. The 1,172 that
+reached the log all had outcome `ok`, and none hit `exceededCpu` or
+`exceededMemory`. The highest single request was 10.1 s, under `js` at
+30 concurrent.
+
+Comparing the versions' maps found two more things:
+
+- **The JavaScript JPEG decoder draws different colours.** `fast` and
+  `lean` drew identical pixels in every case, and their JPEG decode
+  matched libjpeg (through Pillow) exactly. `jpeg-js` did not. On the
+  drought tiles it differed by up to 70 levels on 23% of the pixels,
+  because it upsamples the chroma planes differently.
+- **The first version dropped `tRNS`.** A bug in the prototype left the
+  data palettes' `tRNS` chunk out of `js`'s PNGs. That costs nothing
+  measurable, and it was fixed in the other two versions.
+
+**The answer.**
+
+- **No `GetMap` fits the free plan.** A typical request needs 0.25 s to
+  1 s of CPU, and none needed less than 108 ms: 11 to 350 times the
+  free plan's 10 ms. q26's switch, off by default, now stands on a
+  measurement rather than an estimate.
+- **Every case fits the paid plan.** The worst request a client may
+  make is a global Mercator picture at 2048×2048, which stitches 256
+  tiles. It needs 1.8 s of CPU at the median and 3.6 s at most, against
+  a default limit of 30 s. The worst data request, MPAS at 2048×2048,
+  needs about 1 s.
+- **Concurrency costs elapsed time, not CPU.** CPU per request barely
+  changes between one at a time and 30 at once. Elapsed time grows
+  with the tile count: the 256-tile map takes about 5 s, most of it
+  waiting for R2 reads six at a time, as §5.9 predicted.
+- **q15's WebAssembly codec is needed for JPEG, for correctness as much
+  as for speed.** The JavaScript decoder was slower, and it drew
+  colours no other client would. PNG needs no codec: the runtime's own
+  decompression streams handle the zlib stream, and undoing PNG's
+  filters is a short loop.
+- **Decoding is not the whole cost.** The `lean` stitch saved up to a
+  third over `fast`, and what remains was not profiled. The output PNG
+  and the filter loop are the likely remainder.
+- **Memory was not measured, and needs a rule.** Workers report memory
+  per isolate, not per request, so the log says only that no request
+  failed for memory. The prototype holds every decoded tile until the
+  stitch ends. For the 256-tile map that is 64 MB of tiles plus 32 MB
+  of output and filter buffer, about 96 MB, by arithmetic. An isolate
+  has 128 MB, shared by every request it is serving. Thirty requests at
+  once succeeded, which says Cloudflare placed them in separate
+  isolates, not that two could share one. Decoding and stitching one
+  row of tiles at a time brings the same map's peak to about 20 MB.
+- **What it costs on the paid plan.** The plan includes 30 million CPU
+  milliseconds a month, then charges $0.02 per million. At the medians
+  above, that covers about 16,000 of the worst Mercator maps a month,
+  or about 43,000 lat/lon picture maps at 2048×1024, before anything is
+  charged. Beyond that, it is about $0.04 per thousand two-second maps.
+  Each tile read is an R2 Class B operation, $0.36 per million after 10
+  million a month: about $0.09 per thousand 256-tile maps.
+
+**Settles.**
+
+- q26's premise, now measured (§5.8, §8).
+- D4's CPU gate passes on the paid plan, in prototype. D4 still
+  measures its own route on a preview deployment before it lands
+  (§9.10).
+- q15's codec: one WebAssembly JPEG decoder, and nothing for PNG (§5.9,
+  §9.10).
+- §5.9 gains a memory rule: one row of tiles at a time.
+
+**Still open.** The free plan, which cannot be tested from this
+account and which q26 already turns off. Memory per request, which the
+platform does not report.
+
+**Also checked: Wrangler's local default.** The brief
 listed Wrangler 4 writing KV to local storage unless told `--remote`.
 That is confirmed for Wrangler 4.153.0, the repository's minimum:
 `wrangler kv key put --binding …` and `wrangler r2 object put …`, run
@@ -618,9 +752,6 @@ without `--remote`, printed `Resource location: local` and wrote to
 `.wrangler/state/v3/` (Miniflare's store), touching nothing in the
 account. Any D2–D4 runbook that seeds KV or R2 from the command line
 must pass `--remote`.
-
-**Unblocks it:** credentials for the scratch account(s), through the
-session's credential flow.
 
 ### 3.9 What does a time step cost OpenSpace? Video variants and keyframes
 
