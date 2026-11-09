@@ -2104,6 +2104,7 @@ new §11 question instead.
 | 2026-11-08 | Partial palette alpha survives GDAL's expansion and QGIS exactly; a row with no reserved code has no index for absence (D1 §3.4) | Transparency confirmed; the gap noted, with a new question | §7.3, q28 |
 | 2026-11-08 | Five clients read 512; Esri's published GCS v2 tile info; OpenSpace's Folder-mode source (D1 §3.1, §3.6, §3.10) | Status notes on q1, q2, q3, q10 and q11; none closed, since ArcGIS and OpenSpace are in the kits | §11 |
 | 2026-11-08 | GDAL makes a Mercator layer bounded at ±90° 12 times too tall; GDAL and QGIS read an antimeridian-crossing box as its complement; Leaflet misplaces 512 tiles without `zoomOffset`; CesiumJS sends a literal `{Time}` outside its intervals; the GDAL XML aborts on 404 without `ZeroBlockHttpCodes` (D1 §3.1, §3.2, §3.4) | Two bounding-box rules for the capabilities; companion and documentation notes; `tileSize` and `ZeroBlockHttpCodes` confirmed | §5.7 |
+| 2026-11-09 | The prototype `GetMap` passed on the paid plan with mozjpeg in WebAssembly and no PNG codec; nothing came near the free plan's 10 ms (D1 §3.8) | D4's CPU gate records D1's prototype result, narrows the codec to JPEG, and says D4 still measures its own route | §9.10, q15, q26 |
 | 2026-11-09 | Packed frames uploaded 12 to 15 times faster with 190 to 770 times fewer writes, and served every tile by range request (D1 §3.15) | The packing option records D1's weighing; whether to adopt it becomes a new question | §5.6, q31 |
 | 2026-11-09 | Upload to R2: 19.6 s loose against 1.3 s packed for a 4096-wide picture frame, 74 s against about 5.5 s for MPAS; `GetMap` CPU on the paid plan (D1 §3.8, §3.15) | Upload time, R2 writes and `GetMap` CPU rows added to the cost table; the free plan's cliff cites the measurement | §5.8 |
 | 2026-11-09 | `GetMap` on the paid plan: 1.8 s median and 3.6 s maximum CPU for the worst 2048×2048 request, none under 108 ms; a JavaScript JPEG decoder drew different colours from libjpeg, WebAssembly mozjpeg matched it; PNG decoded through the runtime's own streams; memory per request not reported, about 96 MB by arithmetic for the 256-tile map (D1 §3.8) | Measurements added to the bounds; one row of tiles at a time; a codecs rule; the data path's role corrected | §5.9 |
@@ -2453,10 +2454,16 @@ is measured on an isolated preview deployment against its CPU limit,
 with memory under concurrent requests, since every Pages Function
 shares one Worker's isolates, and on both a free and a paid plan,
 by the protocol the STAC rollout gate uses
-(`docs/metadata/PHASE4_IMPLEMENTATION.md` §Rollout Gate). Decoding and
-encoding images inside a Worker means a WebAssembly codec, which is a
-new dependency, accepted if the CPU test passes (decided, §11 q15). If
-the measurement
+(`docs/metadata/PHASE4_IMPLEMENTATION.md` §Rollout Gate). Decoding JPEG
+tiles inside a Worker means a WebAssembly codec, which is a new
+dependency, accepted if the CPU test passes (decided, §11 q15). PNG
+needs none, since the runtime's own streams handle its zlib stream.
+D1 ran this test in prototype on the paid plan
+(`delivery/D1_PROTOTYPES.md` §3.8), and it passed: 3.6 s at most
+against 30 s, with mozjpeg in WebAssembly. The free plan could not be
+measured, and no request came near its 10 ms. D1's numbers are not
+D4's gate. D4 measures its own route, stitching one row of tiles at a
+time (§5.9), before it lands. If the measurement
 fails, D4 stops there: ArcGIS users get one XYZ item per frame, the
 time in its path, with time-based visibility (§2.1), which works for
 short series and not for long ones, and the plan says so. A WMTS layer
@@ -3090,7 +3097,12 @@ stays a draft for review.
     in this repository and run by each organisation with its own
     credentials and credits (§9.12).
 15. *Decided 2026-11-06 by the maintainer:* a WebAssembly image codec
-    may be added for D4 if the CPU test passes (§9.10).
+    may be added for D4 if the CPU test passes (§9.10). *D1,
+    2026-11-09:* the codec is needed for JPEG only, and passed in
+    prototype on the paid plan. A JavaScript decoder drew different
+    colours from libjpeg, while mozjpeg compiled to WebAssembly
+    (`@jsquash/jpeg`, Apache-2.0, 166 KB) matched it. PNG needs no
+    codec (`delivery/D1_PROTOTYPES.md` §3.8).
 16. *Decided 2026-11-06 by the maintainer:* D5a's COGs carry the
     producer's own values on its own grid, taken before any regridding
     (§9.11). Kept here so the numbering of the others holds.
@@ -3179,7 +3191,10 @@ stays a draft for review.
     spend tens of thousands, and a `GetMap` cannot fit the free plan's
     10 ms of CPU (§5.8, §8). Not chosen: `tiles` off on free plans,
     which would need setup to record the plan tier, since a Function
-    cannot see it.
+    cannot see it. *D1, 2026-11-09:* the premise is measured. On the
+    paid plan no `GetMap` used less than 108 ms of CPU, and the worst
+    used 3.6 s. The free plan itself could not be tested
+    (`delivery/D1_PROTOTYPES.md` §3.8).
 27. *Decided 2026-11-08 by the maintainer:* at the start of the
     period it represents, where the dataset's record says what that is;
     otherwise as stamped (§5.3). The SSP producers' answer is still to
