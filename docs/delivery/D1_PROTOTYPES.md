@@ -873,11 +873,53 @@ something for a person to send, and this phase sends nothing.
 
 ### 3.11 Do redirects survive a real session?
 
-**Not run yet: needs the scratch Worker.** The kit is written (§4,
-`redirect/`): a stable address that answers with a 302 to a
-digest-named path on the same route, cacheable for 60 seconds, played
-in a browser globe, Second Life and OpenSpace for longer than that,
-with a loop, a seek, a reconnect and a `HEAD`.
+**Half run.** The route and a headless browser were checked here on
+2026-11-09. A real browser, Second Life and OpenSpace are in the kit
+(§4, `redirect/`).
+
+**Method.** The scratch Worker (§3.8) serves a files route shaped like
+§6.5's. The stable address
+`/api/v1/datasets/d1-clouds/files/h264-1024.mp4` (and `h264-4096.mp4`)
+answers with a 302 to `/api/v1/datasets/d1-clouds/files/sha256/<digest>.mp4`
+on the same origin, with a relative `Location` and
+`Cache-Control: public, max-age=60`. The digest path is served from R2
+with `Range`, `ETag`, `Accept-Ranges`, `HEAD` and an immutable cache
+lifetime. The two files are the clouds slice's `h264-1024` (8.6 MB)
+and `h264-4096` (107 MB) encodes from §3.9. `curl` checked the
+headers. Then headless Chromium (Playwright) played the kit's three.js
+globe page, whose material is the video at the stable address. It ran
+for 80 s, more than one cache lifetime and two loops, then seeked three
+times, went offline for 30 s, came back, and seeked again. The page's
+own request log recorded each request's range and status.
+
+**What was measured.**
+
+- **`curl`.** `curl -I` on the stable address gets the 302, with
+  `Content-Type: video/mp4` and the 60-second cache.
+  `curl -IL` follows it to a 200 with `Accept-Ranges: bytes`, the
+  length and an `ETag`. A range request through the redirect gets its
+  206.
+- **The 8.6 MB file.** Chromium asked the stable address once with
+  `Range: bytes=0-`, followed the 302, and took the whole file in that
+  one response. It made no other request in 150 s, so this run tested
+  nothing past the first.
+- **The 107 MB file.** Chromium asked the stable address once, at
+  1.1 s, and never again. Every later request went to the digest path:
+  21 ranges answered 206 over 150 s. They spanned loops (five), seeks
+  and the reconnect, and they ran long past the 302's 60-second
+  lifetime. Offline, playback stalled (`readyState` 2) and the
+  element retried its range about every second. It resumed playing
+  within 20 s of the network returning, with no error.
+
+**The answer, so far.** In Chromium, the stable address is resolved
+once per load, and everything after that goes to the immutable digest
+path. That is the behaviour §6.5 relies on: the cache lifetime of the
+redirect does not matter to a playing element, and a reconnect resumes
+on the digest path.
+
+**Still open, in the kit:** a real browser on another network, Second
+Life's media plugin, and OpenSpace's `UrlSynchronization`, which may
+store the stable address and fetch it again on restart.
 
 **Found on the way.** The node's existing `/frames/{index}` route is a
 live example of the pattern the plan rejects for files. It answers with
