@@ -14,7 +14,7 @@ desk research (vendor documentation, source code and release notes,
 cited in the sources section), not hands-on testing, except where a
 sibling document already records a test.
 
-**Last reviewed:** 2026-11-08 (first draft 2026-11-06, from desk
+**Last reviewed:** 2026-11-09 (first draft 2026-11-06, from desk
 research on each consumer; §9's phased implementation and §9.14's usage
 metrics added the same day. On 2026-11-07 the four follow-ups this
 plan spun off were merged and are marked done: the ArcGIS wildcard
@@ -32,9 +32,11 @@ Phase D1 began. Its machine-run rows (grids, client time, calendar
 snapping, regional frames, pyramid cost, video encodes) are recorded in
 [`delivery/D1_PROTOTYPES.md`](delivery/D1_PROTOTYPES.md). The sections
 they contradicted or sharpened were amended and are logged in §9.2:
-§5.1, §5.2, §5.3, §5.7, §5.8, §6.1, §6.3, §7.1, §7.3 and §11. Its rows
-that need a person, a place or Cloudflare credentials are kits or
-still to run.)
+§5.1, §5.2, §5.3, §5.7, §5.8, §6.1, §6.3, §7.1, §7.3 and §11. On
+2026-11-09 the Cloudflare tests ran on a scratch Worker on the paid
+plan: `GetMap`'s CPU, the redirect route in a headless browser, and R2
+upload time. They amended §5.6, §5.8, §5.9, §9.10 and §11. The rows
+that need a person or a place are kits.)
 
 **Decisions recorded:** thirty-nine, all by the maintainer and logged
 in §9.2. The latest nine came on 2026-11-08 from an interview on D1's
@@ -60,7 +62,8 @@ domain (q25). On 2026-11-08, licensed or gated access by a node was
 put outside this plan's scope (§10, #528). Open: q2, q3, q10's date
 parsing and q11, tested in D1;
 and q23, now only for datasets whose known licence is No-Derivatives.
-D1 added four, q27 to q30, all decided the same day.
+D1 added four, q27 to q30, all decided the same day, and on
+2026-11-09 a fifth, q31 (loose tiles or packs), which is open.
 
 **Revisit when any of the following becomes true:**
 
@@ -2138,7 +2141,7 @@ The output is `docs/delivery/D1_PROTOTYPES.md`: the measurements, the
 answers, and an amendment to every section of this plan they
 contradict.
 
-**Status, 2026-11-08.** D1 has started, on the datasets and terms its
+**Status, 2026-11-09.** D1 has started, on the datasets and terms its
 document records first (§1 there).
 
 - **Run here.** Everything a machine could do: the grids in GDAL,
@@ -2149,14 +2152,19 @@ document records first (§1 there).
 - **Kits for people.** OpenSpace, ArcGIS (with Hub), an SOS site,
   Second Life and the redirect session are each a kit with a one-page
   checklist, for the maintainer to hand on.
-- **Waiting on credentials.** The `GetMap` cost on each plan tier, the
-  redirect route and R2 upload time need the scratch Worker and
-  bucket.
+- **Run on Cloudflare, 2026-11-09.** A scratch Worker and R2 bucket on
+  the maintainer's paid-plan account. They measured `GetMap`'s CPU
+  (§5.9), the redirect route in a headless browser (§6.5's premise
+  held), and R2 upload time, loose against packed (§5.8, q31). The free
+  plan could not be measured: there is no free-plan account to test on.
+  The kits now point at the Worker, which logs what each client asks
+  for. The Worker and bucket are deleted when D1 closes.
 
 **Merged in two parts** (decided 2026-11-08 by the maintainer). The
 first results merge now, so the plan's corrections land. A follow-up
 PR closes D1 with the kits' and the Cloudflare tests' results, and D1's
-gate is met when that PR merges.
+gate is met when that PR merges. The Cloudflare tests are done. What
+D1 waits on now is the kits.
 
 ### 9.4 D2a — Video files
 
