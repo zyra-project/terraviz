@@ -976,7 +976,12 @@ antimeridian-crossing one among the cases.
   one object per frame per grid with an offset index, read by R2 range
   requests (the PMTiles-on-R2 pattern), which cuts the object count
   about 380 times and makes clean-up trivial, since every tile passes
-  the Function anyway.
+  the Function anyway. D1 weighed it (`delivery/D1_PROTOTYPES.md`
+  §3.15). Packed, a frame uploaded 12 to 15 times faster, with 190 to
+  770 times fewer billed writes. A scratch Worker served every tile from
+  packs by range request, reading each pack's index once per isolate.
+  Nothing against it turned up, but whether to adopt it is the
+  maintainer's call (q31).
 - **Served by a Pages Function** that resolves `{time}` to a frame,
   reads the tile from R2, and caches at the edge. A Function in front
   (rather than a public bucket URL) is what makes time snapping, KVP
@@ -2099,6 +2104,7 @@ new §11 question instead.
 | 2026-11-08 | Partial palette alpha survives GDAL's expansion and QGIS exactly; a row with no reserved code has no index for absence (D1 §3.4) | Transparency confirmed; the gap noted, with a new question | §7.3, q28 |
 | 2026-11-08 | Five clients read 512; Esri's published GCS v2 tile info; OpenSpace's Folder-mode source (D1 §3.1, §3.6, §3.10) | Status notes on q1, q2, q3, q10 and q11; none closed, since ArcGIS and OpenSpace are in the kits | §11 |
 | 2026-11-08 | GDAL makes a Mercator layer bounded at ±90° 12 times too tall; GDAL and QGIS read an antimeridian-crossing box as its complement; Leaflet misplaces 512 tiles without `zoomOffset`; CesiumJS sends a literal `{Time}` outside its intervals; the GDAL XML aborts on 404 without `ZeroBlockHttpCodes` (D1 §3.1, §3.2, §3.4) | Two bounding-box rules for the capabilities; companion and documentation notes; `tileSize` and `ZeroBlockHttpCodes` confirmed | §5.7 |
+| 2026-11-09 | Packed frames uploaded 12 to 15 times faster with 190 to 770 times fewer writes, and served every tile by range request (D1 §3.15) | The packing option records D1's weighing; whether to adopt it becomes a new question | §5.6, q31 |
 | 2026-11-09 | Upload to R2: 19.6 s loose against 1.3 s packed for a 4096-wide picture frame, 74 s against about 5.5 s for MPAS; `GetMap` CPU on the paid plan (D1 §3.8, §3.15) | Upload time, R2 writes and `GetMap` CPU rows added to the cost table; the free plan's cliff cites the measurement | §5.8 |
 | 2026-11-09 | `GetMap` on the paid plan: 1.8 s median and 3.6 s maximum CPU for the worst 2048×2048 request, none under 108 ms; a JavaScript JPEG decoder drew different colours from libjpeg, WebAssembly mozjpeg matched it; PNG decoded through the runtime's own streams; memory per request not reported, about 96 MB by arithmetic for the 256-tile map (D1 §3.8) | Measurements added to the bounds; one row of tiles at a time; a codecs rule; the data path's role corrected | §5.9 |
 
@@ -3223,6 +3229,24 @@ stays a draft for review.
     period past the last make the floor snap down exactly. For a
     calendar period no linear mapping is exact, which argues for frames
     or tiles there rather than video (D1 §3.9).
+31. **Loose tiles, or one pack per frame per grid?** *Raised by D1,
+    2026-11-09.* §5.6 offered packing as an option for D1 to weigh, and
+    D1 measured it (`delivery/D1_PROTOTYPES.md` §3.15).
+    - **Upload.** A loose tile costs about 0.2 s of R2's own time
+      whatever its size, so a 4096-wide picture frame took 19.6 s
+      loose (383 objects, eight at a time) and 1.3 s packed. MPAS took
+      74 s against about 5.5 s.
+    - **Writes.** Packed bills 190 to 770 times fewer Class A
+      operations.
+    - **Serving.** A scratch Worker served every tile from packs by
+      range request, reading each pack's index (16 bytes a tile) once
+      per isolate.
+    - **Against it.** Not measured: tile read time against a loose
+      object. A pack is also rewritten whole, which costs nothing
+      extra, since a frame is cut whole anyway.
+
+    The evidence favours packs, and D3a would build the cutter's output
+    and the tile route around whichever is chosen.
 
 ---
 
