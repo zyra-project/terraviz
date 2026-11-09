@@ -129,7 +129,8 @@ Gated response: `403 { error: 'feature_disabled', feature: '<key>', message: ...
 ### Public SPA
 
 - **Blog** (`src/ui/blog/index.ts`): boot already fetches `/api/v1/node-profile`; when `features.blog === false` render the existing not-found/empty state for both `/blog` and `/blog/:slug` (server 404 is the backstop).
-- Hero panel, events overlays, "In the news", docent events: no changes — `null`/empty responses already hide/degrade them.
+- Events overlays, "In the news", docent events: no changes — `null`/empty responses already hide/degrade them.
+- Hero panel: **corrected 2026-11-09.** The line above once covered it too, and was wrong for it: a `{ hero: null }` read only removed the portal pin, and the client went on to `featured-now.json`, the approved event (gated by `events`) and the automatic real-time pick, so turning `hero` off left the panel up. The maintainer decided off hides the panel entirely, picked up on the next page load. `main.ts` passes `features.hero` from the node-profile read it already makes for `orbit` to `heroPanelUI.setHeroEnabled`, and the panel then fetches nothing.
 
 ## Files (summary)
 

@@ -18,7 +18,12 @@
  * degrades on its own. `orbit` is the exception, because hiding Orbit
  * means not drawing the trigger and not starting the chat — including
  * the hands-free wake word, which opens the microphone — and the only
- * way to know that before drawing is to ask.
+ * way to know that before drawing is to ask. `hero` is the other: the
+ * panel falls back to sources no endpoint gates (the static file, an
+ * approved event, the real-time pick), so an empty portal pin did not
+ * hide it, and `main.ts` applies `features.hero` through
+ * `heroPanelUI.setHeroEnabled`. Unlike `orbit` it is not re-read, so
+ * an open page picks a change up on its next load.
  *
  * **Fail-open, and bounded.** Every failure answers all-enabled: a
  * network error, a non-2xx, a body that is not the expected JSON, and

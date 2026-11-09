@@ -18,6 +18,14 @@
  * dismiss button hides the panel for the rest of the session
  * (per-session, not persisted — it reappears next launch).
  *
+ * The node's `hero` feature switch turns the whole panel off
+ * (`setHeroEnabled`, decided by the maintainer on 2026-11-09): not
+ * only a portal pin but the file, the approved event and the
+ * automatic pick, since the Features card promises an off feature's
+ * public surfaces go quiet. `main.ts` sets it once the node profile
+ * read settles, which happens before any path shows the browse
+ * panel; a page already open picks a change up on its next load.
+ *
  * Lifecycle mirrors the floating-panel idioms used elsewhere
  * (`playlistUI`, `downloadDialogUI`): an AbortController guards the
  * async candidate resolution so closing/leaving the catalog mid-fetch
@@ -44,6 +52,21 @@ export interface HeroPanelOptions {
  *  reappears on the next launch. */
 let dismissed = false
 
+/** The node's `hero` feature switch. On until told otherwise, as
+ *  every feature is (fail-open, `normalizeFeatures`). */
+let heroEnabled = true
+
+/**
+ * Apply the node's `hero` feature switch. Off hides the panel and
+ * stops any resolution in flight; every later render returns before
+ * fetching a candidate. Set once per page load from the node profile
+ * (`nodeFeatures.settle()`), so no re-read happens here.
+ */
+export function setHeroEnabled(enabled: boolean): void {
+  heroEnabled = enabled
+  if (!enabled) destroyHeroPanel()
+}
+
 /** Guards the async candidate resolution against a render that's been
  *  superseded (or a catalog close) mid-fetch. */
 let activeController: AbortController | null = null
@@ -59,9 +82,9 @@ function hide(host: HTMLElement): void {
 }
 
 /**
- * Resolve and render the hero. No-ops to hidden when not in catalog
- * mode, when the user has dismissed it this session, or when no
- * candidate qualifies. Safe to call repeatedly — each call aborts the
+ * Resolve and render the hero. No-ops to hidden when the node turned
+ * the hero off, when not in catalog mode, when the user has dismissed
+ * it this session, or when no candidate qualifies. Safe to call repeatedly — each call aborts the
  * previous in-flight resolution.
  */
 export async function renderHeroPanel(opts: HeroPanelOptions): Promise<void> {
@@ -71,7 +94,7 @@ export async function renderHeroPanel(opts: HeroPanelOptions): Promise<void> {
   // Abort any prior in-flight resolution before starting a new one.
   activeController?.abort()
 
-  if (!opts.isCatalogMode || dismissed) {
+  if (!heroEnabled || !opts.isCatalogMode || dismissed) {
     activeController = null
     hide(host)
     return
@@ -160,11 +183,13 @@ export function destroyHeroPanel(): void {
   if (host) hide(host)
 }
 
-/** Test-only — reset the session dismiss flag + in-flight controller.
+/** Test-only — reset the session dismiss flag, the feature switch and
+ *  the in-flight controller.
  *  Aborts any in-flight fetch first so a late resolution can't render
  *  into the DOM after a test has moved on. */
 export function resetHeroPanelForTests(): void {
   dismissed = false
+  heroEnabled = true
   activeController?.abort()
   activeController = null
 }
