@@ -23,8 +23,11 @@
  * only a portal pin but the file, the approved event and the
  * automatic pick, since the Features card promises an off feature's
  * public surfaces go quiet. `main.ts` sets it once the node profile
- * read settles, which happens before any path shows the browse
- * panel; a page already open picks a change up on its next load.
+ * read settles, which happens before boot shows the browse panel;
+ * a render a user starts earlier (the Tools menu or Home behind the
+ * loading screen) is torn down by the setter when it lands, so the
+ * worst case is a brief flash. A page already open picks a change up
+ * on its next load.
  *
  * Lifecycle mirrors the floating-panel idioms used elsewhere
  * (`playlistUI`, `downloadDialogUI`): an AbortController guards the
@@ -84,8 +87,8 @@ function hide(host: HTMLElement): void {
 /**
  * Resolve and render the hero. No-ops to hidden when the node turned
  * the hero off, when not in catalog mode, when the user has dismissed
- * it this session, or when no candidate qualifies. Safe to call repeatedly — each call aborts the
- * previous in-flight resolution.
+ * it this session, or when no candidate qualifies. Safe to call
+ * repeatedly — each call aborts the previous in-flight resolution.
  */
 export async function renderHeroPanel(opts: HeroPanelOptions): Promise<void> {
   const host = hostEl()

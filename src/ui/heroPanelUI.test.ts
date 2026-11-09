@@ -157,6 +157,7 @@ describe('setHeroEnabled', () => {
     expect(host.classList.contains('hidden')).toBe(false)
     setHeroEnabled(false)
     expect(host.classList.contains('hidden')).toBe(true)
+    expect(host.getAttribute('aria-hidden')).toBe('true')
     expect(host.innerHTML).toBe('')
   })
 
