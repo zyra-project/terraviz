@@ -15,8 +15,13 @@ const VALID_KEY = 'ed25519:' + Buffer.alloc(32, 7).toString('base64')
 
 function freshDb() {
   const db = new Database(':memory:')
-  // Mirror migrations 0001 + 0016 (the singleton guard).
+  // Mirror migrations 0001 + 0016 (the singleton guard), and 0062,
+  // which the PUT's catalog-snapshot invalidation writes to.
   db.exec(`
+    CREATE TABLE catalog_snapshot_generation (
+      id         INTEGER PRIMARY KEY CHECK (id = 1),
+      generation TEXT NOT NULL
+    );
     CREATE TABLE node_identity (
       node_id       TEXT PRIMARY KEY,
       display_name  TEXT NOT NULL,

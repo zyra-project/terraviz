@@ -1897,6 +1897,38 @@ audit_events rows."
   endpoint can't satisfy the request), Stream signed-URL
   signing-key rotation in flight, or a D1 prepared-statement
   cache eviction storm (rare; recovers on its own).
+- **A withheld dataset is still in the public catalog.** A
+  retracted, hidden or unpublished dataset still appears in
+  `GET /api/v1/catalog`, or Workers Logs show
+  `[catalog] snapshot invalidation failed` or
+  `[catalog] snapshot generation write failed`. The cached catalog
+  is served only under the snapshot generation in D1
+  (`functions/api/v1/_lib/snapshot.ts`), so replacing it retires
+  every cached copy at once, in every deployment and isolate that
+  shares the D1:
+  ```
+  npx wrangler d1 execute CATALOG_DB --remote --command "UPDATE catalog_snapshot_generation SET generation = lower(hex(randomblob(16))) WHERE id = 1"
+  ```
+  Then delete the KV entry as well, so that nothing can serve it
+  unverified if D1 becomes unreadable. Take the namespace id from
+  the Pages project's `CATALOG_KV` binding in the dashboard; the id
+  in `wrangler.toml` is a placeholder:
+  ```
+  npx wrangler kv key delete catalog:snapshot:v1 --namespace-id=<id> --remote
+  ```
+  If the log names `no such table: catalog_snapshot_generation`,
+  migration 0062 has not been applied: the first command fails
+  until `npx wrangler d1 migrations apply CATALOG_DB --remote` has
+  run, and until then the KV delete is the fix. Run both commands
+  after any hand-run SQL that changes what is public, too. Such a
+  write never calls `invalidateSnapshot`, so nothing else retires
+  the cached catalog before its 6-hour TTL. Three copies are out of
+  reach of either command. Browsers and intermediaries may keep a
+  catalog body for up to six minutes (`max-age=60,
+  stale-while-revalidate=300`). An open SPA tab keeps its catalog
+  in memory for up to an hour. And retraction leaves the dataset's
+  R2 assets in place, so their public URLs keep working for anyone
+  who already has them.
 - **An integrity-failure event surfaces in the publisher
   portal.** The `audit_events` row carries
   `(peer_id, dataset_id, expected_digest, actual_digest)` in

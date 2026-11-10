@@ -178,7 +178,7 @@ CREATE TABLE catalog_snapshot_generation (
   id         INTEGER PRIMARY KEY CHECK (id = 1),  -- singleton row
   -- No trailing comment here: SQLite's ALTER ... ADD COLUMN splices
   -- new columns onto the last column-def line (see 0028's note).
-  generation INTEGER NOT NULL DEFAULT 0
+  generation TEXT NOT NULL
 );
 
 CREATE TABLE current_events (

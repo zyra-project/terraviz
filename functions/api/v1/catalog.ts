@@ -22,13 +22,18 @@
  *   - Cache-Control: `public, max-age=60, stale-while-revalidate=300`
  *     on the response so the Cloudflare edge can serve from its
  *     own cache for a minute and revalidate for five.
- *   - Snapshot is rebuilt whenever a publisher write path issues
- *     `invalidateSnapshot(env)` (Commits F+).
- *   - A cached body is served only when the snapshot generation it
- *     was rendered under is still D1's current one (one single-row
- *     D1 read per request; `lookupSnapshot` in `_lib/snapshot.ts`).
+ *   - Snapshot is rebuilt after a publisher write path issues
+ *     `invalidateSnapshot(env)` (Commits F+), when its 6-hour KV TTL
+ *     runs out, and whenever the cached body's generation is not
+ *     D1's current one.
+ *   - A cached body, from KV or from the copy this isolate last
+ *     rendered, is served only when the snapshot generation it was
+ *     rendered under is still D1's current one (one single-row D1
+ *     read per request; `lookupSnapshot` in `_lib/snapshot.ts`).
  *     That is what keeps a retracted or hidden dataset off the wire
  *     when an invalidation's KV delete failed, or a render raced it.
+ *     The cases that check cannot cover are listed, with their
+ *     bound, in `_lib/snapshot.ts`.
  *   - A KV read that fails is a miss: the response is rendered from
  *     D1, byte-for-byte what a miss serves, so a broken binding costs
  *     D1 reads rather than the public catalog.

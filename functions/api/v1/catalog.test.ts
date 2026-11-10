@@ -19,12 +19,16 @@
  *     cache-miss response, and 304s still work.
  *   - A dataset withheld while the snapshot was stale: a retraction
  *     whose KV delete failed in an outage is not served once KV
- *     recovers, not even as a 304 to the pre-outage ETag; a render
- *     that raced a retraction is not served after it; an entry from
- *     before the generation check is re-rendered. When D1 cannot be
- *     read the cached snapshot is served unverified, logged, under the
- *     TTL every put carries; a deploy ahead of migration 0062 keeps
- *     caching and re-renders once the migration applies.
+ *     recovers, by the isolate that saw the outage or a fresh one, and
+ *     not even as a 304 to the pre-outage ETag; a render that read D1
+ *     before a retraction, whether its put or its data read straddles
+ *     the retraction, is not served after it; an entry from before the
+ *     generation check is re-rendered, and never served unverified.
+ *     When D1 cannot be read a cached snapshot this code wrote is
+ *     served unverified, logged, under the TTL every put carries; a
+ *     deploy ahead of migration 0062 keeps caching and re-renders once
+ *     the migration applies; a failing KV put costs one render per
+ *     isolate per generation, not one per request.
  *   - `?since=` cursor filter: only rows updated after the cursor
  *     come back; cursor stamp updates accordingly.
  */
@@ -45,6 +49,7 @@ import {
 } from './_lib/test-helpers'
 import { invalidateSnapshot, SNAPSHOT_KEY, SNAPSHOT_TTL_SECONDS } from './_lib/snapshot'
 import { retractDataset } from './_lib/dataset-mutations'
+import { PUBLIC_DATASET_PREDICATE } from './_lib/catalog-store'
 
 interface CatalogBody {
   schema_version: number
@@ -184,9 +189,14 @@ describe('GET /api/v1/catalog', () => {
     afterEach(() => warn.mockRestore())
 
     it('renders from D1 with the same response as a cache miss', async () => {
-      const db = asD1(seedFixtures({ count: 2 }))
-      const miss = await onRequestGet(makeCtx({ env: { CATALOG_DB: db, CATALOG_KV: makeKV() } }))
-      const failed = await onRequestGet(makeCtx({ env: { CATALOG_DB: db, CATALOG_KV: makeFailingKV() } }))
+      // Two databases with the same rows, so the second request renders
+      // rather than hitting the copy the first left in this isolate.
+      const miss = await onRequestGet(
+        makeCtx({ env: { CATALOG_DB: asD1(seedFixtures({ count: 2 })), CATALOG_KV: makeKV() } }),
+      )
+      const failed = await onRequestGet(
+        makeCtx({ env: { CATALOG_DB: asD1(seedFixtures({ count: 2 })), CATALOG_KV: makeFailingKV() } }),
+      )
 
       expect(failed.status).toBe(200)
       await expectSameResponse(failed, miss)
@@ -267,20 +277,25 @@ describe('GET /api/v1/catalog', () => {
       expect(kv._store.get(SNAPSHOT_KEY)).toContain(TARGET)
 
       // KV recovers. A client revalidating the pre-outage body is not
-      // told it is current, and gets a body without TARGET.
+      // told it is current, and gets a body without TARGET. This
+      // isolate rendered during the outage, so it answers from that.
       const revalidated = await onRequestGet(
         makeCtx({ env: healthy, headers: { 'if-none-match': staleEtag } }),
       )
       expect(revalidated.status).toBe(200)
       expect(revalidated.headers.get('etag')).not.toBe(staleEtag)
       expect(await idsOf(revalidated)).not.toContain(TARGET)
-      // The rebuild replaced the stale entry, so later reads hit it.
-      expect(kv._store.get(SNAPSHOT_KEY)).not.toContain(TARGET)
-      expect(await idsOf(await onRequestGet(makeCtx({ env: healthy })))).not.toContain(TARGET)
 
-      // The failed delete was logged. The bump landed, so it exposed
-      // nothing: a warning, not an error.
-      expect(logged(warn)).toMatch(/KV snapshot delete failed — the generation bump landed/)
+      // An isolate that never rendered finds the pre-outage entry in KV,
+      // does not serve it, and replaces it.
+      vi.resetModules()
+      const fresh = (await import('./catalog')).onRequestGet
+      expect(await idsOf(await fresh(makeCtx({ env: healthy })))).not.toContain(TARGET)
+      expect(kv._store.get(SNAPSHOT_KEY)).not.toContain(TARGET)
+
+      // The failed delete was logged. The generation write landed, so it
+      // exposed nothing: a warning, not an error.
+      expect(logged(warn)).toMatch(/KV snapshot delete failed — the generation write landed/)
       expect(error).not.toHaveBeenCalled()
     })
 
@@ -293,24 +308,51 @@ describe('GET /api/v1/catalog', () => {
       // and its put: a request that read D1 just before the retraction
       // committed and wrote KV just after its delete.
       const put = kv.put
-      let raced = false
+      let retraction: Awaited<ReturnType<typeof retractDataset>> | null = null
       ;(kv as { put: KVNamespace['put'] }).put = vi.fn(async (...args: Parameters<KVNamespace['put']>) => {
-        if (!raced) {
-          raced = true
-          expect((await retractDataset(env, TARGET)).ok).toBe(true)
-        }
+        retraction ??= await retractDataset(env, TARGET)
         return put(...args)
       })
 
       // That request read D1 first, so it answers with TARGET, and it
       // cached that body after the retraction's delete.
       expect(await idsOf(await onRequestGet(makeCtx({ env })))).toContain(TARGET)
-      expect(raced).toBe(true)
+      expect(retraction).toMatchObject({ ok: true })
       expect(kv._store.get(SNAPSHOT_KEY)).toContain(TARGET)
 
       // The next request does not serve it.
       expect(await idsOf(await onRequestGet(makeCtx({ env })))).not.toContain(TARGET)
       expect(kv._store.get(SNAPSHOT_KEY)).not.toContain(TARGET)
+    })
+
+    it('is not served from a render whose data read straddles the retraction', async () => {
+      // Land the retraction inside the render, just after it read the
+      // public rows. The generation must already have been read by then;
+      // read afterwards, it would stamp the retracted row as current.
+      const db = asD1(seedFixtures({ count: 3 }))
+      const env = { CATALOG_DB: db, CATALOG_KV: makeKV() }
+      const prepare = db.prepare.bind(db)
+      let retraction: Awaited<ReturnType<typeof retractDataset>> | null = null
+      ;(db as { prepare: D1Database['prepare'] }).prepare = (sql: string) => {
+        const stmt = prepare(sql)
+        if (retraction || !sql.includes(PUBLIC_DATASET_PREDICATE)) return stmt
+        const bind = stmt.bind.bind(stmt)
+        stmt.bind = (...values: unknown[]) => {
+          const bound = bind(...values)
+          const all = bound.all.bind(bound)
+          bound.all = (async () => {
+            const rows = await all()
+            retraction = await retractDataset(env, TARGET)
+            return rows
+          }) as typeof bound.all
+          return bound
+        }
+        return stmt
+      }
+
+      expect(await idsOf(await onRequestGet(makeCtx({ env })))).toContain(TARGET)
+      expect(retraction).toMatchObject({ ok: true })
+      expect(await idsOf(await onRequestGet(makeCtx({ env })))).not.toContain(TARGET)
     })
 
     it('re-renders over an entry written before the generation check existed', async () => {
@@ -338,6 +380,59 @@ describe('GET /api/v1/catalog', () => {
       expect(logged(error)).toMatch(/generation read failed — serving the cached snapshot unverified/)
     })
 
+    it('never serves an entry from before the check unverified, since it has no TTL', async () => {
+      const legacy = JSON.stringify({
+        etag: '"old"', generatedAt: '2026-11-01T00:00:00.000Z', body: '{"stale":true}', contentType: 'application/json',
+      })
+
+      // D1 works but migration 0062 has not been applied: render, and
+      // replace the entry with one that carries a TTL.
+      const sqlite = seedFixtures({ count: 2 })
+      sqlite.prepare('DROP TABLE catalog_snapshot_generation').run()
+      const kv = makeKV()
+      kv._store.set(SNAPSHOT_KEY, legacy)
+      const res = await onRequestGet(makeCtx({ env: { CATALOG_DB: asD1(sqlite), CATALOG_KV: kv } }))
+      expect(await idsOf(res)).toHaveLength(2)
+      expect(kv.put).toHaveBeenCalledWith(SNAPSHOT_KEY, expect.any(String), {
+        expirationTtl: SNAPSHOT_TTL_SECONDS,
+      })
+
+      // D1 down: there is nothing safe to serve, so the request fails.
+      const down = makeKV()
+      down._store.set(SNAPSHOT_KEY, legacy)
+      await expect(onRequestGet(makeCtx({ env: { CATALOG_DB: makeFailingD1(), CATALOG_KV: down } }))).rejects.toThrow(
+        /database unavailable/,
+      )
+    })
+
+    it('renders once per generation, not per request, when KV puts fail', async () => {
+      // The free tier's 1k daily KV writes can be spent by other caches;
+      // every put then fails, and each request would otherwise render.
+      const sqlite = seedFixtures({ count: 2 })
+      const kv = makeKV()
+      ;(kv as { put: KVNamespace['put'] }).put = vi.fn(async () => {
+        throw new Error('KV put limit exceeded')
+      })
+      const env = { CATALOG_DB: asD1(sqlite), CATALOG_KV: kv }
+      expect(await idsOf(await onRequestGet(makeCtx({ env })))).toHaveLength(2)
+
+      // A row added without an invalidation is not seen: no re-render.
+      sqlite
+        .prepare(
+          `INSERT INTO datasets (id, slug, origin_node, title, format, data_ref, weight, visibility,
+             schema_version, created_at, updated_at, published_at)
+           VALUES ('DS998AAAAAAAAAAAAAAAAAAAAA', 'unseen', 'NODE000', 'Unseen', 'video/mp4', 'vimeo:998', 0,
+             'public', 1, '2026-02-01T00:00:00.000Z', '2026-02-01T00:00:00.000Z', '2026-02-01T00:00:00.000Z')`,
+        )
+        .run()
+      expect(await idsOf(await onRequestGet(makeCtx({ env })))).toHaveLength(2)
+
+      // A new generation is.
+      await invalidateSnapshot(env)
+      expect(await idsOf(await onRequestGet(makeCtx({ env })))).toHaveLength(3)
+      expect(logged(warn)).toMatch(/KV snapshot write failed — not cached.*KV put limit exceeded/)
+    })
+
     it('keeps caching on a deploy ahead of migration 0062, and re-renders once it applies', async () => {
       const sqlite = seedFixtures({ count: 2 })
       sqlite.prepare('DROP TABLE catalog_snapshot_generation').run()
@@ -353,7 +448,7 @@ describe('GET /api/v1/catalog', () => {
       sqlite.exec(readFileSync(join(MIGRATIONS_DIR, '0062_catalog_snapshot_generation.sql'), 'utf8'))
       await onRequestGet(makeCtx({ env }))
       expect(kv.put).toHaveBeenCalledTimes(2)
-      expect(stamp()).toBe(0)
+      expect(stamp()).toMatch(/^[0-9a-f]{32}$/)
     })
   })
 
