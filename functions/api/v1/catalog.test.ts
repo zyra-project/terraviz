@@ -31,7 +31,7 @@ import {
   makeKV,
   seedFixtures,
 } from './_lib/test-helpers'
-import { invalidateSnapshot } from './_lib/snapshot'
+import { invalidateSnapshot, SNAPSHOT_KEY } from './_lib/snapshot'
 
 interface CatalogBody {
   schema_version: number
@@ -178,6 +178,30 @@ describe('GET /api/v1/catalog', () => {
       expect(failed.status).toBe(200)
       await expectSameResponse(failed, miss)
       expect(warn.mock.calls.map(c => c.join(' ')).join('\n')).toMatch(/\[catalog\] KV snapshot read failed/)
+    })
+
+    it('answers 304 to an ETag a KV hit served, once KV starts failing', async () => {
+      const db = asD1(seedFixtures({ count: 2 }))
+      const kv = makeKV()
+      await onRequestGet(makeCtx({ env: { CATALOG_DB: db, CATALOG_KV: kv } }))
+      const hit = await onRequestGet(makeCtx({ env: { CATALOG_DB: db, CATALOG_KV: kv } }))
+      expect(kv.get).toHaveBeenCalledTimes(2)
+      const etag = hit.headers.get('etag')!
+
+      const after = await onRequestGet(
+        makeCtx({ env: { CATALOG_DB: db, CATALOG_KV: makeFailingKV() }, headers: { 'if-none-match': etag } }),
+      )
+      expect(after.status).toBe(304)
+      expect(after.headers.get('etag')).toBe(etag)
+    })
+
+    it('rebuilds over a snapshot entry that is not valid JSON', async () => {
+      const kv = makeKV()
+      kv._store.set(SNAPSHOT_KEY, '{not json')
+      const res = await onRequestGet(makeCtx({ env: { CATALOG_DB: asD1(seedFixtures({ count: 2 })), CATALOG_KV: kv } }))
+      expect(res.status).toBe(200)
+      const stored = JSON.parse(kv._store.get(SNAPSHOT_KEY)!) as { etag: string }
+      expect(stored.etag).toBe(res.headers.get('etag'))
     })
 
     it('still answers 304 to a matching If-None-Match', async () => {
