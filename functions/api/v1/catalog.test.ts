@@ -177,7 +177,7 @@ describe('GET /api/v1/catalog', () => {
 
       expect(failed.status).toBe(200)
       await expectSameResponse(failed, miss)
-      expect(warn).toHaveBeenCalled()
+      expect(warn.mock.calls.map(c => c.join(' ')).join('\n')).toMatch(/\[catalog\] KV snapshot read failed/)
     })
 
     it('still answers 304 to a matching If-None-Match', async () => {
