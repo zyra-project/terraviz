@@ -24,6 +24,11 @@
  *     own cache for a minute and revalidate for five.
  *   - Snapshot is rebuilt whenever a publisher write path issues
  *     `invalidateSnapshot(env)` (Commits F+).
+ *   - A cached body is served only when the snapshot generation it
+ *     was rendered under is still D1's current one (one single-row
+ *     D1 read per request; `lookupSnapshot` in `_lib/snapshot.ts`).
+ *     That is what keeps a retracted or hidden dataset off the wire
+ *     when an invalidation's KV delete failed, or a render raced it.
  *   - A KV read that fails is a miss: the response is rendered from
  *     D1, byte-for-byte what a miss serves, so a broken binding costs
  *     D1 reads rather than the public catalog.
@@ -51,7 +56,7 @@ import { buildFramesRedirectTemplate, resolveAssetRefStrict } from './_lib/r2-pu
 import {
   buildAndCacheSnapshot,
   computeEtag,
-  readSnapshot,
+  lookupSnapshot,
 } from './_lib/snapshot'
 
 const CACHE_CONTROL = 'public, max-age=60, stale-while-revalidate=300'
@@ -221,8 +226,9 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
     })
   }
 
-  const cached = await readSnapshot(context.env)
-  if (cached) {
+  const lookup = await lookupSnapshot(context.env)
+  if (lookup.hit) {
+    const cached = lookup.payload
     if (ifNoneMatch(context.request) === cached.etag) return notModified(cached.etag)
     return new Response(cached.body, {
       status: 200,
@@ -234,7 +240,9 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
     })
   }
 
-  const fresh = await buildAndCacheSnapshot(context.env, () => renderCatalog(context.env))
+  const fresh = await buildAndCacheSnapshot(context.env, lookup.generation, () =>
+    renderCatalog(context.env),
+  )
   if (ifNoneMatch(context.request) === fresh.etag) return notModified(fresh.etag)
   return new Response(fresh.body, {
     status: 200,

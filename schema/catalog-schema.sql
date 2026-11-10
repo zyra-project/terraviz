@@ -174,6 +174,13 @@ CREATE TABLE blog_posts (
   FOREIGN KEY (event_id)  REFERENCES current_events(id) ON DELETE SET NULL
 );
 
+CREATE TABLE catalog_snapshot_generation (
+  id         INTEGER PRIMARY KEY CHECK (id = 1),  -- singleton row
+  -- No trailing comment here: SQLite's ALTER ... ADD COLUMN splices
+  -- new columns onto the last column-def line (see 0028's note).
+  generation INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE current_events (
   id             TEXT PRIMARY KEY,              -- ULID (newUlid)
   origin_node    TEXT NOT NULL,                 -- node_id, denormalized (federation-ready)

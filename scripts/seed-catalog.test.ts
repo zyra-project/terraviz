@@ -44,6 +44,7 @@ const EXPECTED_TABLES = [
   'asset_uploads',
   'audit_events',
   'blog_posts',
+  'catalog_snapshot_generation',
   'current_events',
   'dataset_categories',
   'dataset_developers',

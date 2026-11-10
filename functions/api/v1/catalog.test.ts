@@ -17,21 +17,34 @@
  *   - ETag-driven 304 with `If-None-Match`.
  *   - A KV read that rejects: rendered from D1, byte-for-byte the
  *     cache-miss response, and 304s still work.
+ *   - A dataset withheld while the snapshot was stale: a retraction
+ *     whose KV delete failed in an outage is not served once KV
+ *     recovers, not even as a 304 to the pre-outage ETag; a render
+ *     that raced a retraction is not served after it; an entry from
+ *     before the generation check is re-rendered. When D1 cannot be
+ *     read the cached snapshot is served unverified, logged, under the
+ *     TTL every put carries; a deploy ahead of migration 0062 keeps
+ *     caching and re-renders once the migration applies.
  *   - `?since=` cursor filter: only rows updated after the cursor
  *     come back; cursor stamp updates accordingly.
  */
 
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, it, expect, vi, type MockInstance } from 'vitest'
+import { MIGRATIONS_DIR } from '../../../scripts/lib/catalog-migrations'
 import { onRequestGet, renderCatalog } from './catalog'
 import {
   asD1,
   expectSameResponse,
   makeCtx,
+  makeFailingD1,
   makeFailingKV,
   makeKV,
   seedFixtures,
 } from './_lib/test-helpers'
-import { invalidateSnapshot, SNAPSHOT_KEY } from './_lib/snapshot'
+import { invalidateSnapshot, SNAPSHOT_KEY, SNAPSHOT_TTL_SECONDS } from './_lib/snapshot'
+import { retractDataset } from './_lib/dataset-mutations'
 
 interface CatalogBody {
   schema_version: number
@@ -211,6 +224,136 @@ describe('GET /api/v1/catalog', () => {
       const second = await onRequestGet(makeCtx({ env, headers: { 'if-none-match': etag } }))
       expect(second.status).toBe(304)
       expect(second.headers.get('etag')).toBe(etag)
+    })
+  })
+
+  describe('a dataset withheld while the cached snapshot still lists it', () => {
+    // The KV snapshot has no say in what is public: D1 does. These pin
+    // that a body listing a retracted row is never served once D1 has
+    // the retraction, however the KV delete that should have retired
+    // the body went (`_lib/snapshot.ts`, "Invalidation").
+    const TARGET = 'DS001' + 'A'.repeat(21)
+    let warn: MockInstance<typeof console.warn>
+    let error: MockInstance<typeof console.error>
+    beforeEach(() => {
+      warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    })
+    afterEach(() => {
+      warn.mockRestore()
+      error.mockRestore()
+    })
+
+    const logged = (spy: MockInstance<typeof console.warn>) =>
+      spy.mock.calls.map(c => c.join(' ')).join('\n')
+    const idsOf = async (res: Response) => (await readJson<CatalogBody>(res)).datasets.map(d => d.id)
+
+    it('is not served once KV recovers from an outage that failed the retraction\'s delete', async () => {
+      const db = asD1(seedFixtures({ count: 3 }))
+      const kv = makeKV()
+      const healthy = { CATALOG_DB: db, CATALOG_KV: kv }
+
+      // Before the outage: the snapshot is cached, and lists TARGET.
+      const before = await onRequestGet(makeCtx({ env: healthy }))
+      const staleEtag = before.headers.get('etag')!
+      expect(await idsOf(before)).toContain(TARGET)
+
+      // The outage: the namespace is intact but every KV call rejects.
+      // The retraction lands in D1; its snapshot delete fails.
+      const outage = { CATALOG_DB: db, CATALOG_KV: makeFailingKV() }
+      expect((await retractDataset(outage, TARGET)).ok).toBe(true)
+      expect(await idsOf(await onRequestGet(makeCtx({ env: outage })))).not.toContain(TARGET)
+      // The premise: the pre-outage entry is still there, listing TARGET.
+      expect(kv._store.get(SNAPSHOT_KEY)).toContain(TARGET)
+
+      // KV recovers. A client revalidating the pre-outage body is not
+      // told it is current, and gets a body without TARGET.
+      const revalidated = await onRequestGet(
+        makeCtx({ env: healthy, headers: { 'if-none-match': staleEtag } }),
+      )
+      expect(revalidated.status).toBe(200)
+      expect(revalidated.headers.get('etag')).not.toBe(staleEtag)
+      expect(await idsOf(revalidated)).not.toContain(TARGET)
+      // The rebuild replaced the stale entry, so later reads hit it.
+      expect(kv._store.get(SNAPSHOT_KEY)).not.toContain(TARGET)
+      expect(await idsOf(await onRequestGet(makeCtx({ env: healthy })))).not.toContain(TARGET)
+
+      // The failed delete was logged. The bump landed, so it exposed
+      // nothing: a warning, not an error.
+      expect(logged(warn)).toMatch(/KV snapshot delete failed — the generation bump landed/)
+      expect(error).not.toHaveBeenCalled()
+    })
+
+    it('is not served from a render that read D1 before the retraction and cached after it', async () => {
+      const db = asD1(seedFixtures({ count: 3 }))
+      const kv = makeKV()
+      const env = { CATALOG_DB: db, CATALOG_KV: kv }
+
+      // Land the retraction, invalidation included, between a render
+      // and its put: a request that read D1 just before the retraction
+      // committed and wrote KV just after its delete.
+      const put = kv.put
+      let raced = false
+      ;(kv as { put: KVNamespace['put'] }).put = vi.fn(async (...args: Parameters<KVNamespace['put']>) => {
+        if (!raced) {
+          raced = true
+          expect((await retractDataset(env, TARGET)).ok).toBe(true)
+        }
+        return put(...args)
+      })
+
+      // That request read D1 first, so it answers with TARGET, and it
+      // cached that body after the retraction's delete.
+      expect(await idsOf(await onRequestGet(makeCtx({ env })))).toContain(TARGET)
+      expect(raced).toBe(true)
+      expect(kv._store.get(SNAPSHOT_KEY)).toContain(TARGET)
+
+      // The next request does not serve it.
+      expect(await idsOf(await onRequestGet(makeCtx({ env })))).not.toContain(TARGET)
+      expect(kv._store.get(SNAPSHOT_KEY)).not.toContain(TARGET)
+    })
+
+    it('re-renders over an entry written before the generation check existed', async () => {
+      const kv = makeKV()
+      kv._store.set(
+        SNAPSHOT_KEY,
+        JSON.stringify({ etag: '"old"', generatedAt: '2026-11-01T00:00:00.000Z', body: '{"stale":true}', contentType: 'application/json' }),
+      )
+      const res = await onRequestGet(makeCtx({ env: { CATALOG_DB: asD1(seedFixtures({ count: 2 })), CATALOG_KV: kv } }))
+      expect(res.headers.get('etag')).not.toBe('"old"')
+      expect(await idsOf(res)).toHaveLength(2)
+    })
+
+    it('when D1 cannot be read, serves the cached snapshot unverified, logged, under the TTL every put sets', async () => {
+      const kv = makeKV()
+      await onRequestGet(makeCtx({ env: { CATALOG_DB: asD1(seedFixtures({ count: 3 })), CATALOG_KV: kv } }))
+      expect(kv.put).toHaveBeenCalledWith(SNAPSHOT_KEY, expect.any(String), {
+        expirationTtl: SNAPSHOT_TTL_SECONDS,
+      })
+      const cached = JSON.parse(kv._store.get(SNAPSHOT_KEY)!) as { body: string }
+
+      const res = await onRequestGet(makeCtx({ env: { CATALOG_DB: makeFailingD1(), CATALOG_KV: kv } }))
+      expect(res.status).toBe(200)
+      expect(await res.text()).toBe(cached.body)
+      expect(logged(error)).toMatch(/generation read failed — serving the cached snapshot unverified/)
+    })
+
+    it('keeps caching on a deploy ahead of migration 0062, and re-renders once it applies', async () => {
+      const sqlite = seedFixtures({ count: 2 })
+      sqlite.prepare('DROP TABLE catalog_snapshot_generation').run()
+      const kv = makeKV()
+      const env = { CATALOG_DB: asD1(sqlite), CATALOG_KV: kv }
+      const stamp = () => (JSON.parse(kv._store.get(SNAPSHOT_KEY)!) as { generation: unknown }).generation
+
+      await onRequestGet(makeCtx({ env }))
+      await onRequestGet(makeCtx({ env }))
+      expect(kv.put).toHaveBeenCalledTimes(1)
+      expect(stamp()).toBeNull()
+
+      sqlite.exec(readFileSync(join(MIGRATIONS_DIR, '0062_catalog_snapshot_generation.sql'), 'utf8'))
+      await onRequestGet(makeCtx({ env }))
+      expect(kv.put).toHaveBeenCalledTimes(2)
+      expect(stamp()).toBe(0)
     })
   })
 

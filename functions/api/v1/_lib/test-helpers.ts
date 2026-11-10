@@ -164,6 +164,20 @@ export function makeFailingKV(): KVNamespace {
 }
 
 /**
+ * A D1Database whose every query rejects — D1 down or out of its daily
+ * read quota. `prepare` and `bind` succeed, as they do in production,
+ * where the failure arrives when the statement runs.
+ */
+export function makeFailingD1(): D1Database {
+  const fail = vi.fn(async () => {
+    throw new Error('D1_ERROR: database unavailable')
+  })
+  const stmt = { first: fail, all: fail, run: fail, raw: fail } as Record<string, unknown>
+  stmt.bind = () => stmt
+  return { prepare: () => stmt, batch: fail, exec: fail } as unknown as D1Database
+}
+
+/**
  * Assert two responses are the same on the wire: status, every header
  * and the body. For pinning that a route handed {@link makeFailingKV}
  * answers exactly as it did on a cache miss — `X-Cache` and
