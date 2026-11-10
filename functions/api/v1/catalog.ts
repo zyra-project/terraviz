@@ -24,6 +24,9 @@
  *     own cache for a minute and revalidate for five.
  *   - Snapshot is rebuilt whenever a publisher write path issues
  *     `invalidateSnapshot(env)` (Commits F+).
+ *   - A KV read that fails is a miss: the response is rendered from
+ *     D1, byte-for-byte what a miss serves, so a broken binding costs
+ *     D1 reads rather than the public catalog.
  *
  * Incremental sync:
  *   - `?since={cursor}` returns only datasets updated after that

@@ -71,8 +71,13 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
   }
 
   if (context.env.CATALOG_KV) {
-    const cached = await context.env.CATALOG_KV.get(FEATURED_EVENT_CACHE_KEY)
-    if (cached) return ok(cached, 'HIT')
+    try {
+      const cached = await context.env.CATALOG_KV.get(FEATURED_EVENT_CACHE_KEY)
+      if (cached) return ok(cached, 'HIT')
+    } catch (err) {
+      // KV failure = cache miss; D1 is the source of truth.
+      console.warn('[featured-event] KV read failed — reading D1:', err instanceof Error ? err.message : String(err))
+    }
   }
 
   // Degrade to `{ event: null }` on any read failure (most commonly the

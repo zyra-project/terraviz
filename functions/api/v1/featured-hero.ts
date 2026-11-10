@@ -61,7 +61,13 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
   }
 
   if (context.env.CATALOG_KV) {
-    const cached = await context.env.CATALOG_KV.get(HERO_CACHE_KEY)
+    let cached: string | null = null
+    try {
+      cached = await context.env.CATALOG_KV.get(HERO_CACHE_KEY)
+    } catch (err) {
+      // KV failure = cache miss; D1 is the source of truth.
+      console.warn('[featured-hero] KV read failed — reading D1:', err instanceof Error ? err.message : String(err))
+    }
     if (cached) {
       return new Response(cached, {
         status: 200,

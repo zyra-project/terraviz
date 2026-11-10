@@ -73,8 +73,13 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
   if (!(await getEffectiveFeatures(context.env)).events) return degraded()
 
   if (context.env.CATALOG_KV) {
-    const cached = await context.env.CATALOG_KV.get(EVENTS_LIST_CACHE_KEY)
-    if (cached) return ok(cached, 'HIT')
+    try {
+      const cached = await context.env.CATALOG_KV.get(EVENTS_LIST_CACHE_KEY)
+      if (cached) return ok(cached, 'HIT')
+    } catch (err) {
+      // KV failure = cache miss; D1 is the source of truth.
+      console.warn('[events] KV read failed — reading D1:', err instanceof Error ? err.message : String(err))
+    }
   }
 
   // Degrade to a `no-store` `{ events: [] }` on any read failure (most

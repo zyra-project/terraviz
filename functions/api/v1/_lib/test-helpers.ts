@@ -26,7 +26,7 @@
  */
 
 import Database from 'better-sqlite3'
-import { vi } from 'vitest'
+import { expect, vi } from 'vitest'
 import { freshMigratedDb } from '../../../../scripts/lib/catalog-migrations'
 
 export interface FakeD1Bindings {
@@ -148,6 +148,38 @@ export function makeKV(): KVNamespace & { _store: Map<string, string> } {
     }),
   } as unknown as KVNamespace & { _store: Map<string, string> }
   return kv
+}
+
+/**
+ * A KVNamespace whose every call rejects — what a deployment sees
+ * when `CATALOG_KV` is bound to a namespace that no longer exists.
+ * Everything in `CATALOG_KV` is a cache rebuilt from D1, so a route
+ * handed this must answer exactly as it does on a cache miss.
+ */
+export function makeFailingKV(): KVNamespace {
+  const fail = vi.fn(async () => {
+    throw new Error('KV namespace not found')
+  })
+  return { get: fail, getWithMetadata: fail, put: fail, delete: fail, list: fail } as unknown as KVNamespace
+}
+
+/**
+ * Assert two responses are the same on the wire: status, every header
+ * and the body. For pinning that a route handed {@link makeFailingKV}
+ * answers exactly as it did on a cache miss — `X-Cache` and
+ * `Cache-Control` included, so a failure can never be served as a hit.
+ */
+export async function expectSameResponse(actual: Response, expected: Response): Promise<void> {
+  const headersOf = (res: Response): Record<string, string> => {
+    const out: Record<string, string> = {}
+    res.headers.forEach((value, name) => {
+      out[name] = value
+    })
+    return out
+  }
+  expect(actual.status).toBe(expected.status)
+  expect(headersOf(actual)).toEqual(headersOf(expected))
+  expect(await actual.text()).toBe(await expected.text())
 }
 
 /**

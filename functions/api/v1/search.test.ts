@@ -9,6 +9,7 @@
  *   - 400 for missing / overlong q, or out-of-range limit.
  *   - 200 + result set under MOCK_AI / MOCK_VECTORIZE.
  *   - KV cache: second call hits KV with `X-Cache: HIT`.
+ *   - A KV read that rejects: the cache-miss response, searched fresh.
  *   - Different (q, limit, category, peer_id) tuples land in
  *     different cache slots.
  *   - Degraded responses (`degraded: 'unconfigured'`) are NOT cached
@@ -18,7 +19,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { onRequestGet } from './search'
-import { asD1, makeCtx, makeKV } from './_lib/test-helpers'
+import { asD1, expectSameResponse, makeCtx, makeFailingKV, makeKV } from './_lib/test-helpers'
 import { freshMigratedDb } from '../../../scripts/lib/catalog-migrations'
 import { embedDatasetJob } from './_lib/embed-dataset-job'
 import { __clearMockStore, type VectorizeEnv } from './_lib/vectorize-store'
@@ -315,6 +316,23 @@ describe('GET /api/v1/search', () => {
     expect(res.status).toBe(200)
     const body = await readJson<SearchBody>(res)
     expect(body.datasets.length).toBeGreaterThan(0)
+  })
+
+  it('answers a KV read that rejects exactly as a cache miss', async () => {
+    const { env } = setup()
+    await index(env, ['DS_HURR', 'DS_VOLC'])
+    const url = 'https://t/api/v1/search?q=hurricane'
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const miss = await onRequestGet(makeCtx({ env, url }))
+      const failed = await onRequestGet(makeCtx({ env: { ...env, CATALOG_KV: makeFailingKV() }, url }))
+      expect(failed.headers.get('X-Cache')).toBe('MISS')
+      expect((await readJson<SearchBody>(failed.clone())).datasets.length).toBeGreaterThan(0)
+      await expectSameResponse(failed, miss)
+      expect(warn.mock.calls.map(c => c.join(' ')).join('\n')).toMatch(/\[search\] KV read failed/)
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   it('skips the SHA-256 cache-key computation when CATALOG_KV is not bound', async () => {

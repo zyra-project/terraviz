@@ -15,19 +15,23 @@
  *   - KV cache: second call hits KV not D1; bumping a row
  *     invalidates the snapshot only on explicit invalidation.
  *   - ETag-driven 304 with `If-None-Match`.
+ *   - A KV read that rejects: rendered from D1, byte-for-byte the
+ *     cache-miss response, and 304s still work.
  *   - `?since=` cursor filter: only rows updated after the cursor
  *     come back; cursor stamp updates accordingly.
  */
 
-import { describe, it, expect } from 'vitest'
+import { afterEach, beforeEach, describe, it, expect, vi, type MockInstance } from 'vitest'
 import { onRequestGet, renderCatalog } from './catalog'
 import {
   asD1,
+  expectSameResponse,
   makeCtx,
+  makeFailingKV,
   makeKV,
   seedFixtures,
 } from './_lib/test-helpers'
-import { invalidateSnapshot } from './_lib/snapshot'
+import { invalidateSnapshot, SNAPSHOT_KEY } from './_lib/snapshot'
 
 interface CatalogBody {
   schema_version: number
@@ -154,6 +158,60 @@ describe('GET /api/v1/catalog', () => {
     )
     expect(second.status).toBe(304)
     expect(second.headers.get('etag')).toBe(etag)
+  })
+
+  describe('when CATALOG_KV reads reject (binding to a deleted namespace)', () => {
+    // The 2026-11-09 NOAA-GSL outage: every catalog read threw, and
+    // every visitor got a 500. KV holds only a cache of D1, so a
+    // failing read must answer exactly as a cache miss does.
+    let warn: MockInstance<typeof console.warn>
+    beforeEach(() => {
+      warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    })
+    afterEach(() => warn.mockRestore())
+
+    it('renders from D1 with the same response as a cache miss', async () => {
+      const db = asD1(seedFixtures({ count: 2 }))
+      const miss = await onRequestGet(makeCtx({ env: { CATALOG_DB: db, CATALOG_KV: makeKV() } }))
+      const failed = await onRequestGet(makeCtx({ env: { CATALOG_DB: db, CATALOG_KV: makeFailingKV() } }))
+
+      expect(failed.status).toBe(200)
+      await expectSameResponse(failed, miss)
+      expect(warn.mock.calls.map(c => c.join(' ')).join('\n')).toMatch(/\[catalog\] KV snapshot read failed/)
+    })
+
+    it('answers 304 to an ETag a KV hit served, once KV starts failing', async () => {
+      const db = asD1(seedFixtures({ count: 2 }))
+      const kv = makeKV()
+      await onRequestGet(makeCtx({ env: { CATALOG_DB: db, CATALOG_KV: kv } }))
+      const hit = await onRequestGet(makeCtx({ env: { CATALOG_DB: db, CATALOG_KV: kv } }))
+      expect(kv.get).toHaveBeenCalledTimes(2)
+      const etag = hit.headers.get('etag')!
+
+      const after = await onRequestGet(
+        makeCtx({ env: { CATALOG_DB: db, CATALOG_KV: makeFailingKV() }, headers: { 'if-none-match': etag } }),
+      )
+      expect(after.status).toBe(304)
+      expect(after.headers.get('etag')).toBe(etag)
+    })
+
+    it('rebuilds over a snapshot entry that is not valid JSON', async () => {
+      const kv = makeKV()
+      kv._store.set(SNAPSHOT_KEY, '{not json')
+      const res = await onRequestGet(makeCtx({ env: { CATALOG_DB: asD1(seedFixtures({ count: 2 })), CATALOG_KV: kv } }))
+      expect(res.status).toBe(200)
+      const stored = JSON.parse(kv._store.get(SNAPSHOT_KEY)!) as { etag: string }
+      expect(stored.etag).toBe(res.headers.get('etag'))
+    })
+
+    it('still answers 304 to a matching If-None-Match', async () => {
+      const env = { CATALOG_DB: asD1(seedFixtures({ count: 2 })), CATALOG_KV: makeFailingKV() }
+      const first = await onRequestGet(makeCtx({ env }))
+      const etag = first.headers.get('etag')!
+      const second = await onRequestGet(makeCtx({ env, headers: { 'if-none-match': etag } }))
+      expect(second.status).toBe(304)
+      expect(second.headers.get('etag')).toBe(etag)
+    })
   })
 
   it('serves a body whose .etag field matches the response ETag header', async () => {

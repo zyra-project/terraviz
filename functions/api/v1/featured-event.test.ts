@@ -7,12 +7,13 @@
  *
  * Coverage: 503 when unbound; `{ event: null }` when nothing qualifies;
  * the assembled event+dataset shape for an approved event with an
- * approved visible link; and the KV read-through cache.
+ * approved visible link; the KV read-through cache; and a KV read that
+ * rejects, which answers as a cache miss.
  */
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { onRequestGet as featuredEventGet } from './featured-event'
-import { asD1, makeKV, seedFixtures } from './_lib/test-helpers'
+import { asD1, expectSameResponse, makeFailingKV, makeKV, seedFixtures } from './_lib/test-helpers'
 import {
   insertCurrentEvent,
   upsertEventDatasetLink,
@@ -94,5 +95,20 @@ describe('GET /api/v1/featured-event', () => {
     expect(kv._store.has(FEATURED_EVENT_CACHE_KEY)).toBe(true)
     const res2 = await featuredEventGet(ctx(env))
     expect(res2.headers.get('X-Cache')).toBe('HIT')
+  })
+
+  it('answers a KV read that rejects exactly as a cache miss', async () => {
+    const { env } = setupEnv()
+    await seedApproved(env)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const miss = await featuredEventGet(ctx(env))
+      const failed = await featuredEventGet(ctx({ ...env, CATALOG_KV: makeFailingKV() }))
+      expect(failed.headers.get('X-Cache')).toBe('MISS')
+      await expectSameResponse(failed, miss)
+      expect(warn.mock.calls.map(c => c.join(' ')).join('\n')).toMatch(/\[featured-event\] KV read failed/)
+    } finally {
+      warn.mockRestore()
+    }
   })
 })

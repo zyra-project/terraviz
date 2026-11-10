@@ -288,10 +288,10 @@ Phase 2 opt-in public projection:
 | `functions/api/v1/_lib/image-upload.ts` | Shared validation for small direct image uploads (base64-in-JSON): png/jpeg/webp allowlist, magic-byte check against the claimed type, bounded decode, sha256 for content-addressed keys — used by the node-profile logo and tour-media routes |
 | `functions/api/v1/_lib/r2-store.ts` | R2 storage helpers — Phase 1b |
 | `functions/api/v1/_lib/search-datasets.ts` | Vector search over the dataset catalog — Phase 1c |
-| `functions/api/v1/_lib/snapshot.ts` | KV-backed snapshot cache for the public catalog response |
+| `functions/api/v1/_lib/snapshot.ts` | KV-backed snapshot cache for the public catalog response. A KV read that fails is a cache miss, logged, so a broken `CATALOG_KV` binding costs D1 reads rather than the public catalog |
 | `functions/api/v1/_lib/sphere-thumbnail-job.ts` | Sphere-thumbnail generation job — Phase 1b |
 | `functions/api/v1/_lib/stream-store.ts` | Cloudflare Stream helpers — Phase 1b |
-| `functions/api/v1/_lib/test-helpers.ts` | Test helpers — adapters that let Vitest exercise the catalog route handlers against real SQL (better-sqlite3) and an in-memory KV map |
+| `functions/api/v1/_lib/test-helpers.ts` | Test helpers — adapters that let Vitest exercise the catalog route handlers against real SQL (better-sqlite3) and an in-memory KV map, plus a KV whose every call rejects (`makeFailingKV`) and `expectSameResponse`, for pinning that a route answers a failed cache read exactly as a miss |
 | `functions/api/v1/_lib/tour-mutations.ts` | Publisher-API write paths for the `tours` table |
 | `functions/api/v1/_lib/ulid.ts` | Single source of truth for ULID minting on the publisher write paths |
 | `functions/api/v1/_lib/validators.ts` | Field-level validators for the publisher-API write paths |
