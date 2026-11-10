@@ -22,15 +22,18 @@
 -- A body left behind by a failed KV delete, or put by a render that
 -- raced a retraction, is then never served, whatever KV does.
 --
--- A random token rather than a counter, so a value never comes back: a
--- counter rolled back by a D1 restore, or restarted by a recreated
--- database, would count up again to stamps still cached in KV.
+-- A random token rather than a counter. A counter rolled back by a D1
+-- restore, or restarted by a recreated database, would count up again
+-- to stamps still cached in KV; no token minted later can match one.
+-- `lower(hex(randomblob(16)))` is the one expression every mint uses
+-- (snapshot.ts, and the runbook's manual purge).
 --
 -- Singleton by construction, like `node_settings` (0037): `id` is
--- pinned to 1, and the replacement is an upsert on id = 1, so it
--- recreates a deleted row. Additive only; code deployed before this
--- migration applies logs an error naming it, and serves only what the
--- KV entry's TTL bounds (see snapshot.ts).
+-- pinned to 1, the replacement is an upsert on id = 1, and a read that
+-- finds no row mints one, so a deleted row comes back with a new token.
+-- Additive only; code deployed before this migration applies logs an
+-- error naming it, and serves only what the KV entry's TTL bounds (see
+-- snapshot.ts).
 
 CREATE TABLE catalog_snapshot_generation (
   id         INTEGER PRIMARY KEY CHECK (id = 1),  -- singleton row

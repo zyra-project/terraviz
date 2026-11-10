@@ -1867,7 +1867,7 @@ playbooks for the failure modes that actually happen.
 | Resource | Inspect with | Notes |
 |---|---|---|
 | **D1** | `npx wrangler d1 execute CATALOG_DB --remote --command "..."` | Read-only queries are safe; never run schema-mutating SQL ad-hoc — use a migration. |
-| **KV** | `npx wrangler kv key list --binding=CATALOG_KV --remote` (and `... key get`) | KV reads are billed per call; an audit script that lists every key is fine, fetching every value isn't. |
+| **KV** | `npx wrangler kv key list --namespace-id=<id> --remote` (and `... key get`) | Take the id from the Pages project's `CATALOG_KV` binding (Production and Preview can differ); `--binding=CATALOG_KV` would resolve the placeholder id in `wrangler.toml`. KV reads are billed per call; an audit script that lists every key is fine, fetching every value isn't. |
 | **R2** | `npx wrangler r2 object list terraviz-assets --remote` (and `... object get`) | Free reads up to standard tier limits; bulk download via wrangler is rate-limited and expensive. |
 | **Stream** | Cloudflare dashboard → Stream → list videos | The `uid` from the dataset row's `data_ref` is searchable directly. |
 | **Audit log** | `wrangler d1 execute CATALOG_DB --remote 'SELECT * FROM audit_events WHERE subject_id = ? ORDER BY id DESC LIMIT 50'` | The subject-keyed timeline is the answer to most "what happened to dataset X" incidents. |
@@ -1905,30 +1905,40 @@ audit_events rows."
   is served only under the snapshot generation in D1
   (`functions/api/v1/_lib/snapshot.ts`), so replacing it retires
   every cached copy at once, in every deployment and isolate that
-  shares the D1:
+  shares the D1. This is the same statement the code runs, so it
+  also recreates a missing row:
   ```
-  npx wrangler d1 execute CATALOG_DB --remote --command "UPDATE catalog_snapshot_generation SET generation = lower(hex(randomblob(16))) WHERE id = 1"
+  npx wrangler d1 execute CATALOG_DB --remote --command "INSERT INTO catalog_snapshot_generation (id, generation) VALUES (1, lower(hex(randomblob(16)))) ON CONFLICT (id) DO UPDATE SET generation = excluded.generation"
   ```
-  Then delete the KV entry as well, so that nothing can serve it
-  unverified if D1 becomes unreadable. Take the namespace id from
-  the Pages project's `CATALOG_KV` binding in the dashboard; the id
-  in `wrangler.toml` is a placeholder:
+  Check that the output reports one row changed. Then delete the KV
+  entry as well, so that nothing can serve it unverified if D1
+  becomes unreadable. Do it for each environment's `CATALOG_KV`
+  binding (Production and Preview can bind different namespaces),
+  taking each namespace id from the Pages project's bindings in the
+  dashboard; the id in `wrangler.toml` is a placeholder:
   ```
   npx wrangler kv key delete catalog:snapshot:v1 --namespace-id=<id> --remote
   ```
   If the log names `no such table: catalog_snapshot_generation`,
   migration 0062 has not been applied: the first command fails
   until `npx wrangler d1 migrations apply CATALOG_DB --remote` has
-  run, and until then the KV delete is the fix. Run both commands
-  after any hand-run SQL that changes what is public, too. Such a
-  write never calls `invalidateSnapshot`, so nothing else retires
-  the cached catalog before its 6-hour TTL. Three copies are out of
-  reach of either command. Browsers and intermediaries may keep a
-  catalog body for up to six minutes (`max-age=60,
-  stale-while-revalidate=300`). An open SPA tab keeps its catalog
-  in memory for up to an hour. And retraction leaves the dataset's
-  R2 assets in place, so their public URLs keep working for anyone
-  who already has them.
+  run, and until then the KV delete is the fix. Run the migration
+  from an up-to-date `main` checkout, never a feature branch, which
+  would apply that branch's unmerged migrations to the production
+  D1. Run both commands after any hand-run SQL that changes what is
+  public, and after a D1 restore, too. Neither goes through
+  `invalidateSnapshot`, so nothing else retires the cached catalog
+  before its 6-hour TTL. Some copies are out of reach of either
+  command:
+  - browsers and intermediaries may keep a catalog body for up to
+    six minutes (`max-age=60, stale-while-revalidate=300`);
+  - an open SPA tab keeps its catalog in memory for up to an hour;
+  - the other public caches that list datasets expire on their own
+    within about two minutes: search, related datasets, featured
+    and the featured hero (60 s in KV), and `?since=` responses
+    (`max-age=30`);
+  - retraction leaves the dataset's R2 assets in place, so their
+    public URLs keep working for anyone who already has them.
 - **An integrity-failure event surfaces in the publisher
   portal.** The `audit_events` row carries
   `(peer_id, dataset_id, expected_digest, actual_digest)` in

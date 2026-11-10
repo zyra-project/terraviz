@@ -67,11 +67,14 @@
  *   - The generation write fails after the data write landed (logged
  *     at error level, once, by `invalidateSnapshot`). An entry stamped
  *     with the old generation then still counts as current: the old
- *     snapshot itself if the KV delete failed too, or a raced render's
- *     late `put`.
- *   - A write that never calls `invalidateSnapshot`: one made through
- *     a deployment of older code sharing this D1 (a preview, or a
- *     rollback), or a hand-run SQL fix. Nothing is logged for these.
+ *     snapshot itself if the KV delete failed too, a raced render's
+ *     late `put`, an isolate copy that never reached KV, and every
+ *     other deployment's entry for this D1.
+ *   - A write that never reaches the generation write: one made
+ *     through a deployment of older code sharing this D1 (a preview,
+ *     or a rollback), a hand-run SQL fix or a D1 restore, or a request
+ *     the runtime ends between its data write and `invalidateSnapshot`.
+ *     Nothing is logged for these.
  *
  * In each, a withheld row can be served for at most
  * `SNAPSHOT_TTL_SECONDS` after the snapshot was written, plus the up
@@ -81,11 +84,15 @@
  * six minutes (`max-age=60, stale-while-revalidate=300`).
  *
  * Each isolate also keeps the last body it rendered (`isolateCopy`),
- * served under the same generation check and the same TTL. A render
- * then costs D1 once per isolate per generation even when the KV
- * `put` fails, as it does once the free tier's 1k daily KV writes are
- * spent. Without it, every request after a TTL expiry or an
- * invalidation would render from D1 until the quota reset.
+ * and serves it only in KV's place: when that body's own `put` failed,
+ * as every put does once the free tier's 1k daily KV writes are spent,
+ * or there is no KV binding to put it in.
+ * A render then costs D1 once per isolate per generation rather than
+ * once per request until the quota resets. A copy is served under the
+ * same generation check and the same TTL as a KV entry, and when D1
+ * cannot be read it fails open as a KV entry does. A copy whose put
+ * landed is never served: KV holds that body, so a KV miss means a
+ * delete or an expiry, and the next request renders.
  */
 
 import { CatalogEnv } from './env'
@@ -99,9 +106,8 @@ export const SNAPSHOT_KEY = 'catalog:snapshot:v1'
  * a write. This TTL is only the upper bound in the cases that check
  * cannot cover (see the module comment). It costs a full D1 render
  * each time the entry expires: four times a day, plus one per KV edge
- * location that misses before the new entry reaches it, and one per
- * isolate that has not rendered under the current generation if the
- * `put` fails. A render reads every `datasets` row plus the public
+ * location that misses before the new entry reaches it, or one per
+ * isolate when the `put` fails. A render reads every `datasets` row plus the public
  * rows' decorations, the reads `docs/CATALOG_BACKEND_PLAN.md`
  * "Free-tier limits to watch" prices at about 600 for a SOS-scale
  * catalog before decorations. Shorter is a tighter bound and a larger
@@ -111,11 +117,12 @@ export const SNAPSHOT_KEY = 'catalog:snapshot:v1'
 export const SNAPSHOT_TTL_SECONDS = 6 * 60 * 60
 
 /**
- * The generation a database with no `catalog_snapshot_generation` row
- * reads as. Migration 0062 seeds the row and the first invalidation
- * recreates it, so this only appears after someone deletes it.
+ * A new generation token, as SQL. One expression for every place that
+ * mints one: migration 0062's seed, `replaceSnapshotGeneration`, a
+ * missing row read by `readSnapshotGeneration`, and the runbook's
+ * manual purge (docs/CATALOG_BACKEND_DEVELOPMENT.md).
  */
-export const MISSING_ROW_GENERATION = 'none'
+const NEW_GENERATION_SQL = 'lower(hex(randomblob(16)))'
 
 export interface SnapshotPayload {
   /** Strong validator that goes into the `ETag` response header. */
@@ -172,7 +179,7 @@ function messageOf(err: unknown): string {
  */
 function describeGenerationError(message: string): string {
   return /no such table/i.test(message)
-    ? `${message} (migration 0062 has not been applied: run \`wrangler d1 migrations apply CATALOG_DB --remote\`)`
+    ? `${message} (migration 0062 has not been applied: run \`wrangler d1 migrations apply CATALOG_DB --remote\` from an up-to-date main checkout)`
     : message
 }
 
@@ -181,35 +188,66 @@ const RUNBOOK =
   'To end it now, see "A withheld dataset is still in the public catalog" in docs/CATALOG_BACKEND_DEVELOPMENT.md.'
 
 /**
- * The current snapshot generation, or `MISSING_ROW_GENERATION` when
- * the row is absent. Throws when D1 fails, including when migration
- * 0062 has not been applied.
+ * The current snapshot generation. Throws when D1 fails, including
+ * when migration 0062 has not been applied.
+ *
+ * A missing row (deleted by hand) is given a fresh token here rather
+ * than read as a fixed value, which could come back and match an entry
+ * stamped with it the last time the row was missing. Concurrent
+ * readers agree: the insert is a no-op for all but the first.
  */
 export async function readSnapshotGeneration(db: D1Database): Promise<string> {
-  const row = await db
-    .prepare('SELECT generation FROM catalog_snapshot_generation WHERE id = 1')
-    .first<{ generation: string }>()
-  return row?.generation ?? MISSING_ROW_GENERATION
+  const select = () =>
+    db
+      .prepare('SELECT generation FROM catalog_snapshot_generation WHERE id = 1')
+      .first<{ generation: string }>()
+  let row = await select()
+  if (!row) {
+    await db
+      .prepare(
+        `INSERT INTO catalog_snapshot_generation (id, generation) VALUES (1, ${NEW_GENERATION_SQL})
+         ON CONFLICT (id) DO NOTHING`,
+      )
+      .run()
+    row = await select()
+  }
+  if (!row) throw new Error('catalog_snapshot_generation has no row after inserting one')
+  return row.generation
 }
 
 /** Replace the snapshot generation with a new token, recreating the row if it is missing. */
 async function replaceSnapshotGeneration(db: D1Database): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO catalog_snapshot_generation (id, generation) VALUES (1, ?)
+      `INSERT INTO catalog_snapshot_generation (id, generation) VALUES (1, ${NEW_GENERATION_SQL})
        ON CONFLICT (id) DO UPDATE SET generation = excluded.generation`,
     )
-    .bind(crypto.randomUUID())
     .run()
 }
 
 /**
- * The last body this isolate rendered under a known generation. Served
- * only as `lookupSnapshot` would serve a KV entry: under the current
- * generation, and within the TTL. Generations are random tokens, so a
- * copy can never match a different database's, or a restored one's.
+ * The last body this isolate rendered under a known generation, and
+ * whether its KV `put` landed. Served only in KV's place, when it did
+ * not (see the module comment), and then only as a KV entry would be:
+ * under the current generation, or unverified when D1 cannot be read,
+ * and within the TTL either way. Generations are random tokens, so no
+ * token minted later can match a copy stamped with an older one, even
+ * after a D1 restore.
  */
-let isolateCopy: SnapshotPayload | null = null
+let isolateCopy: { payload: SnapshotPayload; inKV: boolean } | null = null
+
+/**
+ * The generation under which this isolate last deleted a stale KV entry
+ * found beside its copy, so it tries once per generation, not on every
+ * request.
+ */
+let staleEntryDeletedFor: string | null = null
+
+/** Forget the isolate copy — tests only; module state outlives a test case. */
+export function resetSnapshotIsolateCopyForTests(): void {
+  isolateCopy = null
+  staleEntryDeletedFor = null
+}
 
 function withinTtl(payload: { generatedAt: string }): boolean {
   return Date.now() - Date.parse(payload.generatedAt) < SNAPSHOT_TTL_SECONDS * 1000
@@ -274,42 +312,62 @@ export async function lookupSnapshot(env: CatalogEnv): Promise<SnapshotLookup> {
   })()
   const [read, cached] = await Promise.all([generationRead, readSnapshot(env)])
 
+  // Only a copy that never reached KV stands in for KV.
+  const copy = isolateCopy && !isolateCopy.inKV && withinTtl(isolateCopy.payload) ? isolateCopy.payload : null
+
   if ('error' in read) {
-    if (cached && cached.generation !== undefined) {
+    const unverified = cached && cached.generation !== undefined ? cached : copy
+    if (unverified) {
       console.error(
         '[catalog] snapshot generation read failed — serving the cached snapshot unverified ' +
-          `(rendered ${cached.generatedAt}; its KV entry lasts at most ${SNAPSHOT_TTL_SECONDS} s):`,
+          `(rendered ${unverified.generatedAt}; served for at most ${SNAPSHOT_TTL_SECONDS} s after that):`,
         read.error,
       )
-      return { hit: true, payload: cached }
+      return { hit: true, payload: unverified }
     }
     console.error('[catalog] snapshot generation read failed — rendering from D1:', read.error)
     return { hit: false, generation: null }
   }
 
   if (cached && cached.generation === read.generation) return { hit: true, payload: cached }
-  if (isolateCopy && isolateCopy.generation === read.generation && withinTtl(isolateCopy)) {
-    return { hit: true, payload: isolateCopy }
+  if (copy && copy.generation === read.generation) {
+    // KV holds a stale entry beside a current copy: KV is answering
+    // again after the outage that failed this copy's put. Delete the
+    // entry, so that nothing serves it unverified if D1 is unreadable
+    // later. Not a put of the copy, which would give an old render a
+    // fresh TTL.
+    if (cached && env.CATALOG_KV && staleEntryDeletedFor !== read.generation) {
+      staleEntryDeletedFor = read.generation
+      try {
+        await env.CATALOG_KV.delete(SNAPSHOT_KEY)
+      } catch (err) {
+        console.warn('[catalog] KV delete of a stale snapshot entry failed:', messageOf(err))
+      }
+    }
+    return { hit: true, payload: copy }
   }
   return { hit: false, generation: read.generation }
 }
 
 /**
  * Persist a freshly-rendered snapshot, expiring after
- * `SNAPSHOT_TTL_SECONDS`. Best-effort — a KV write failure should not
+ * `SNAPSHOT_TTL_SECONDS`, and say whether it landed. Best-effort — a
+ * KV write failure should not
  * fail the request itself, since the response is already rendered and
  * serveable; we just won't cache it. Logged as a warning rather than
  * an error: an unwritten snapshot costs D1 reads, never correctness,
  * and during a KV outage every request reaches this.
  */
-export async function writeSnapshot(env: CatalogEnv, payload: SnapshotPayload): Promise<void> {
-  if (!env.CATALOG_KV) return
+export async function writeSnapshot(env: CatalogEnv, payload: SnapshotPayload): Promise<boolean> {
+  if (!env.CATALOG_KV) return false
   try {
     await env.CATALOG_KV.put(SNAPSHOT_KEY, JSON.stringify(payload), {
       expirationTtl: SNAPSHOT_TTL_SECONDS,
     })
+    return true
   } catch (err) {
     console.warn('[catalog] KV snapshot write failed — not cached:', messageOf(err))
+    return false
   }
 }
 
@@ -317,7 +375,8 @@ export async function writeSnapshot(env: CatalogEnv, payload: SnapshotPayload): 
  * Build a fresh snapshot from the renderer fn, write it through to
  * KV, and return the payload. Used by the catalog handler when
  * `lookupSnapshot` misses, with the generation that lookup read. A
- * render under a known generation also becomes this isolate's copy.
+ * render under a known generation also becomes this isolate's copy,
+ * served in KV's place if its put failed.
  *
  * The renderer is expected to return the etag along with the body —
  * the catalog response stamps the etag both inside the JSON body
@@ -338,8 +397,8 @@ export async function buildAndCacheSnapshot(
     contentType,
     generation,
   }
-  if (generation !== null) isolateCopy = payload
-  await writeSnapshot(env, payload)
+  const inKV = await writeSnapshot(env, payload)
+  if (generation !== null) isolateCopy = { payload, inKV }
   return payload
 }
 
@@ -355,9 +414,10 @@ export async function buildAndCacheSnapshot(
  * follows has already landed), so each is logged at the level of what
  * it exposes:
  *
- *   - the generation write fails: error. An entry stamped with the old
- *     generation still counts as current, in every deployment sharing
- *     this D1, until its TTL runs out.
+ *   - the generation write fails: error. A catalog stamped with the old
+ *     generation still counts as current wherever it is cached (a raced
+ *     late put, an isolate copy that never reached KV, every other
+ *     deployment sharing this D1) until its TTL runs out.
  *   - only the delete fails: warning. The stale entry carries the old
  *     generation, so it is a miss, and the next read replaces it.
  */
@@ -401,10 +461,11 @@ export async function invalidateSnapshot(env: CatalogEnv): Promise<void> {
     )
   } else {
     console.error(
-      '[catalog] snapshot generation write failed — an entry rendered before this write still counts ' +
-        'as current: a render that raced it can re-cache the previous catalog here, and other ' +
-        'deployments sharing this D1 keep theirs, for at most ' +
-        `${SNAPSHOT_TTL_SECONDS} s or until the next invalidation. ${RUNBOOK} Cause:`,
+      '[catalog] snapshot generation write failed — ' +
+        (env.CATALOG_KV ? 'the KV entry was deleted, but ' : '') +
+        'a catalog rendered before this write still counts as current wherever it is cached: a render that raced it can ' +
+        're-cache it, isolates whose KV write failed keep their copy, and other deployments sharing this ' +
+        `D1 keep theirs, for at most ${SNAPSHOT_TTL_SECONDS} s or until the next invalidation. ${RUNBOOK} Cause:`,
       generationError,
     )
   }

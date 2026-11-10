@@ -47,7 +47,12 @@ import {
   makeKV,
   seedFixtures,
 } from './_lib/test-helpers'
-import { invalidateSnapshot, SNAPSHOT_KEY, SNAPSHOT_TTL_SECONDS } from './_lib/snapshot'
+import {
+  invalidateSnapshot,
+  resetSnapshotIsolateCopyForTests,
+  SNAPSHOT_KEY,
+  SNAPSHOT_TTL_SECONDS,
+} from './_lib/snapshot'
 import { retractDataset } from './_lib/dataset-mutations'
 import { PUBLIC_DATASET_PREDICATE } from './_lib/catalog-store'
 
@@ -74,6 +79,9 @@ async function readJson<T>(res: Response): Promise<T> {
 }
 
 describe('GET /api/v1/catalog', () => {
+  // Each test is a fresh node; the copy an isolate keeps belongs to one.
+  beforeEach(() => resetSnapshotIsolateCopyForTests())
+
   it('returns 503 when CATALOG_DB is not bound', async () => {
     const ctx = makeCtx({ env: {} })
     const res = await onRequestGet(ctx)
@@ -228,9 +236,13 @@ describe('GET /api/v1/catalog', () => {
     })
 
     it('still answers 304 to a matching If-None-Match', async () => {
-      const env = { CATALOG_DB: asD1(seedFixtures({ count: 2 })), CATALOG_KV: makeFailingKV() }
-      const first = await onRequestGet(makeCtx({ env }))
+      // A second database with the same rows, so the conditional request
+      // renders rather than hitting the copy the first left in this isolate.
+      const first = await onRequestGet(
+        makeCtx({ env: { CATALOG_DB: asD1(seedFixtures({ count: 2 })), CATALOG_KV: makeFailingKV() } }),
+      )
       const etag = first.headers.get('etag')!
+      const env = { CATALOG_DB: asD1(seedFixtures({ count: 2 })), CATALOG_KV: makeFailingKV() }
       const second = await onRequestGet(makeCtx({ env, headers: { 'if-none-match': etag } }))
       expect(second.status).toBe(304)
       expect(second.headers.get('etag')).toBe(etag)
@@ -275,19 +287,23 @@ describe('GET /api/v1/catalog', () => {
       expect(await idsOf(await onRequestGet(makeCtx({ env: outage })))).not.toContain(TARGET)
       // The premise: the pre-outage entry is still there, listing TARGET.
       expect(kv._store.get(SNAPSHOT_KEY)).toContain(TARGET)
+      const stalePayload = JSON.parse(kv._store.get(SNAPSHOT_KEY)!) as unknown
 
       // KV recovers. A client revalidating the pre-outage body is not
-      // told it is current, and gets a body without TARGET. This
-      // isolate rendered during the outage, so it answers from that.
+      // told it is current, and gets a body without TARGET. This isolate
+      // rendered during the outage and could not put it, so it answers
+      // from that copy, and deletes the stale entry it finds in KV.
       const revalidated = await onRequestGet(
         makeCtx({ env: healthy, headers: { 'if-none-match': staleEtag } }),
       )
       expect(revalidated.status).toBe(200)
       expect(revalidated.headers.get('etag')).not.toBe(staleEtag)
       expect(await idsOf(revalidated)).not.toContain(TARGET)
+      expect(kv._store.has(SNAPSHOT_KEY)).toBe(false)
 
       // An isolate that never rendered finds the pre-outage entry in KV,
       // does not serve it, and replaces it.
+      kv._store.set(SNAPSHOT_KEY, JSON.stringify(stalePayload))
       vi.resetModules()
       const fresh = (await import('./catalog')).onRequestGet
       expect(await idsOf(await fresh(makeCtx({ env: healthy })))).not.toContain(TARGET)
@@ -332,16 +348,20 @@ describe('GET /api/v1/catalog', () => {
       const db = asD1(seedFixtures({ count: 3 }))
       const env = { CATALOG_DB: db, CATALOG_KV: makeKV() }
       const prepare = db.prepare.bind(db)
+      let fired = false
       let retraction: Awaited<ReturnType<typeof retractDataset>> | null = null
       ;(db as { prepare: D1Database['prepare'] }).prepare = (sql: string) => {
         const stmt = prepare(sql)
-        if (retraction || !sql.includes(PUBLIC_DATASET_PREDICATE)) return stmt
+        if (fired || !sql.includes(PUBLIC_DATASET_PREDICATE)) return stmt
         const bind = stmt.bind.bind(stmt)
         stmt.bind = (...values: unknown[]) => {
           const bound = bind(...values)
           const all = bound.all.bind(bound)
           bound.all = (async () => {
             const rows = await all()
+            // Set before the await: a retraction that read the public
+            // rows itself must not land a second one inside it.
+            fired = true
             retraction = await retractDataset(env, TARGET)
             return rows
           }) as typeof bound.all
@@ -353,6 +373,28 @@ describe('GET /api/v1/catalog', () => {
       expect(await idsOf(await onRequestGet(makeCtx({ env })))).toContain(TARGET)
       expect(retraction).toMatchObject({ ok: true })
       expect(await idsOf(await onRequestGet(makeCtx({ env })))).not.toContain(TARGET)
+    })
+
+    it('re-renders after a retraction whose generation write failed but whose KV delete landed', async () => {
+      // This isolate cached the catalog in KV. The retraction's data
+      // write and KV delete land; its generation write fails. The copy
+      // this isolate kept is not served in KV's place, because it did
+      // reach KV, so the delete still retires it.
+      const db = asD1(seedFixtures({ count: 3 }))
+      const kv = makeKV()
+      expect(await idsOf(await onRequestGet(makeCtx({ env: { CATALOG_DB: db, CATALOG_KV: kv } })))).toContain(TARGET)
+
+      const prepare = db.prepare.bind(db)
+      const noGenerationWrite = Object.create(db) as D1Database
+      noGenerationWrite.prepare = (sql: string) => {
+        if (/^\s*INSERT INTO catalog_snapshot_generation/.test(sql)) throw new Error('D1_ERROR: overloaded')
+        return prepare(sql)
+      }
+      expect((await retractDataset({ CATALOG_DB: noGenerationWrite, CATALOG_KV: kv }, TARGET)).ok).toBe(true)
+      expect(kv._store.has(SNAPSHOT_KEY)).toBe(false)
+      expect(logged(error)).toMatch(/snapshot generation write failed — the KV entry was deleted/)
+
+      expect(await idsOf(await onRequestGet(makeCtx({ env: { CATALOG_DB: db, CATALOG_KV: kv } })))).not.toContain(TARGET)
     })
 
     it('re-renders over an entry written before the generation check existed', async () => {

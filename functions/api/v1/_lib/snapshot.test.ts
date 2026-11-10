@@ -11,16 +11,20 @@
  *     2026-11-09 NOAA-GSL outage: `CATALOG_KV` bound to a deleted
  *     namespace turned every catalog read into a 500).
  *   - The generation: a random token, never shared by two databases,
- *     replaced by each invalidation; a missing row has a fixed reading
- *     and the next invalidation recreates it.
+ *     replaced by each invalidation; a missing row is given a fresh
+ *     token on read, never a fixed value that could come back.
  *   - lookupSnapshot: a payload is served only under the current
  *     generation. An older stamp, no stamp (an entry from before the
  *     check) and a `null` stamp are misses. When the generation cannot
  *     be read, a payload this code wrote is served unverified, logged
  *     as an error; an entry from before the check, which has no TTL,
  *     is not.
- *   - The isolate copy: served under the current generation only, and
- *     only within the TTL; a render under no generation is not kept.
+ *   - The isolate copy: served only in KV's place (its put failed),
+ *     under the current generation or unverified when D1 cannot be
+ *     read, and within the TTL; a copy whose put landed is never
+ *     served, so a KV delete retires it; a stale KV entry beside a
+ *     current copy is deleted once per generation; a render under no
+ *     generation does not replace a copy.
  *   - writeSnapshot: every put carries the TTL that bounds the cases
  *     the check cannot cover; a failing put is a warning, not a throw.
  *   - invalidateSnapshot: generation, then delete, with or without a
@@ -33,9 +37,9 @@ import {
   buildAndCacheSnapshot,
   invalidateSnapshot,
   lookupSnapshot,
-  MISSING_ROW_GENERATION,
   readSnapshot,
   readSnapshotGeneration,
+  resetSnapshotIsolateCopyForTests,
   SNAPSHOT_KEY,
   SNAPSHOT_TTL_SECONDS,
   writeSnapshot,
@@ -54,6 +58,7 @@ const BASE: Omit<SnapshotPayload, 'generation'> = {
 let warn: MockInstance<typeof console.warn>
 let error: MockInstance<typeof console.error>
 beforeEach(() => {
+  resetSnapshotIsolateCopyForTests()
   warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
   error = vi.spyOn(console, 'error').mockImplementation(() => {})
 })
@@ -81,6 +86,15 @@ function withFailingDelete<E extends { CATALOG_KV: ReturnType<typeof makeKV> }>(
   const kv = Object.create(env.CATALOG_KV) as ReturnType<typeof makeKV>
   kv.delete = vi.fn(async () => {
     throw new Error('KV delete timed out')
+  })
+  return { ...env, CATALOG_KV: kv }
+}
+
+/** `env` with a KV over the same store whose put rejects: the free tier's daily writes spent. */
+function withFailingPut<E extends { CATALOG_KV: ReturnType<typeof makeKV> }>(env: E): E {
+  const kv = Object.create(env.CATALOG_KV) as ReturnType<typeof makeKV>
+  kv.put = vi.fn(async () => {
+    throw new Error('KV put limit exceeded')
   })
   return { ...env, CATALOG_KV: kv }
 }
@@ -115,6 +129,7 @@ describe('snapshot generation', () => {
     const second = await readSnapshotGeneration(env.CATALOG_DB)
     await invalidateSnapshot(env)
     const third = await readSnapshotGeneration(env.CATALOG_DB)
+    expect(second).toMatch(/^[0-9a-f]{32}$/)
     expect(new Set([first, second, third]).size).toBe(3)
   })
 
@@ -124,12 +139,15 @@ describe('snapshot generation', () => {
     expect(a.generation).not.toBe(b.generation)
   })
 
-  it('reads a missing row as a fixed value, and the next invalidation recreates it', async () => {
-    const { sqlite, env } = await setup()
+  it('gives a missing row a fresh token on read, never a fixed value that could come back', async () => {
+    const { sqlite, env, generation } = await setup()
     sqlite.prepare('DELETE FROM catalog_snapshot_generation').run()
-    expect(await readSnapshotGeneration(env.CATALOG_DB)).toBe(MISSING_ROW_GENERATION)
-    await invalidateSnapshot(env)
-    expect(await readSnapshotGeneration(env.CATALOG_DB)).not.toBe(MISSING_ROW_GENERATION)
+    const first = await readSnapshotGeneration(env.CATALOG_DB)
+    expect(first).toMatch(/^[0-9a-f]{32}$/)
+    expect(first).not.toBe(generation)
+    expect(await readSnapshotGeneration(env.CATALOG_DB)).toBe(first)
+    sqlite.prepare('DELETE FROM catalog_snapshot_generation').run()
+    expect(await readSnapshotGeneration(env.CATALOG_DB)).not.toBe(first)
   })
 })
 
@@ -195,18 +213,29 @@ describe('lookupSnapshot', () => {
 })
 
 describe('the isolate copy', () => {
-  it('serves the last render under the current generation when KV has nothing', async () => {
+  it('serves the last render under the current generation when it could not reach KV', async () => {
     const { env, generation } = await setup()
+    const failingPut = withFailingPut(env)
+    const built = await buildAndCacheSnapshot(failingPut, generation, render('one'))
+    expect(await lookupSnapshot(failingPut)).toEqual({ hit: true, payload: built })
     const noKV = { CATALOG_DB: env.CATALOG_DB }
-    const built = await buildAndCacheSnapshot(noKV, generation, render('one'))
     expect(await lookupSnapshot(noKV)).toEqual({ hit: true, payload: built })
+  })
+
+  it('is never served once its put landed, so a KV delete retires it', async () => {
+    const { kv, env, generation } = await setup()
+    await buildAndCacheSnapshot(env, generation, render('one'))
+    // The generation write of an invalidation failed; its delete landed.
+    kv._store.delete(SNAPSHOT_KEY)
+    expect(await lookupSnapshot(env)).toEqual({ hit: false, generation })
   })
 
   it('stops serving it once the generation changes', async () => {
     const { env, generation } = await setup()
-    await buildAndCacheSnapshot(env, generation, render('one'))
-    await invalidateSnapshot(env)
-    expect((await lookupSnapshot(env)).hit).toBe(false)
+    const noKV = { CATALOG_DB: env.CATALOG_DB }
+    await buildAndCacheSnapshot(noKV, generation, render('one'))
+    await invalidateSnapshot(noKV)
+    expect((await lookupSnapshot(noKV)).hit).toBe(false)
   })
 
   it('stops serving it once it is older than the TTL', async () => {
@@ -227,6 +256,41 @@ describe('the isolate copy', () => {
     const one = await buildAndCacheSnapshot(noKV, generation, render('one'))
     await buildAndCacheSnapshot(noKV, null, render('two'))
     expect(await lookupSnapshot(noKV)).toEqual({ hit: true, payload: one })
+  })
+
+  it('fails open like a KV entry when the generation cannot be read', async () => {
+    const { env, generation } = await setup()
+    const built = await buildAndCacheSnapshot({ CATALOG_DB: env.CATALOG_DB }, generation, render('one'))
+    expect(await lookupSnapshot({ CATALOG_DB: makeFailingD1() })).toEqual({ hit: true, payload: built })
+    expect(logged(error)).toMatch(/generation read failed — serving the cached snapshot unverified/)
+  })
+
+  it('does not fail open with a copy whose put landed', async () => {
+    const { kv, env, generation } = await setup()
+    await buildAndCacheSnapshot(env, generation, render('one'))
+    kv._store.delete(SNAPSHOT_KEY)
+    expect(await lookupSnapshot({ CATALOG_DB: makeFailingD1(), CATALOG_KV: kv })).toEqual({
+      hit: false,
+      generation: null,
+    })
+  })
+
+  it('deletes a stale KV entry it finds beside a current copy, once per generation', async () => {
+    const { kv, env, generation: old } = await setup()
+    await invalidateSnapshot(env)
+    const current = await readSnapshotGeneration(env.CATALOG_DB)
+    const failingPut = withFailingPut(env)
+    const built = await buildAndCacheSnapshot(failingPut, current, render('one'))
+
+    // KV answers again, still holding the pre-outage entry.
+    kv._store.set(SNAPSHOT_KEY, JSON.stringify({ ...BASE, generation: old }))
+    expect(await lookupSnapshot(env)).toEqual({ hit: true, payload: built })
+    expect(kv._store.has(SNAPSHOT_KEY)).toBe(false)
+
+    kv._store.set(SNAPSHOT_KEY, JSON.stringify({ ...BASE, generation: old }))
+    const deletes = vi.mocked(kv.delete).mock.calls.length
+    await lookupSnapshot(env)
+    expect(vi.mocked(kv.delete).mock.calls.length).toBe(deletes)
   })
 })
 
@@ -280,9 +344,16 @@ describe('invalidateSnapshot', () => {
     await invalidateSnapshot(env)
     expect(kv._store.has(SNAPSHOT_KEY)).toBe(false)
     const line = logged(error)
-    expect(line).toMatch(/snapshot generation write failed — an entry rendered before this write still counts as current/)
+    expect(line).toMatch(/snapshot generation write failed — the KV entry was deleted, but a catalog rendered before this write still counts as current/)
+    expect(line).toMatch(/isolates whose KV write failed keep their copy/)
     expect(line).toMatch(/A withheld dataset is still in the public catalog/)
-    expect(line).toMatch(/no such table.*migration 0062 has not been applied/)
+    expect(line).toMatch(/no such table.*migration 0062 has not been applied.*from an up-to-date main checkout/)
+  })
+
+  it('does not claim a KV delete it never made when KV is unbound', async () => {
+    await invalidateSnapshot({ CATALOG_DB: makeFailingD1() })
+    expect(logged(error)).toMatch(/snapshot generation write failed — a catalog rendered before this write/)
+    expect(logged(error)).not.toMatch(/KV entry was deleted/)
   })
 
   it('logs both failing as an error naming the TTL bound, and does not throw', async () => {
