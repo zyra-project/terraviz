@@ -9,13 +9,14 @@
  *   - 400 for an out-of-range or non-integer `limit`.
  *   - 200 + result with the documented payload shape.
  *   - KV cache: second call hits KV with `X-Cache: HIT`.
+ *   - A KV read that rejects: the cache-miss response, from D1.
  *   - Different `limit` values land in different cache slots.
  *   - Works without CATALOG_KV (no-cache fallback).
  */
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { onRequestGet } from './featured'
-import { asD1, makeCtx, makeKV } from './_lib/test-helpers'
+import { asD1, expectSameResponse, makeCtx, makeFailingKV, makeKV } from './_lib/test-helpers'
 import { freshMigratedDb } from '../../../scripts/lib/catalog-migrations'
 
 const TS = '2026-04-29T12:00:00.000Z'
@@ -126,5 +127,20 @@ describe('GET /api/v1/featured', () => {
     expect(res.status).toBe(200)
     const body = await readJson<FeaturedBody>(res)
     expect(body.datasets.length).toBe(3)
+  })
+
+  it('answers a KV read that rejects exactly as a cache miss', async () => {
+    const { env } = setup()
+    const url = 'https://t/api/v1/featured'
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const miss = await onRequestGet(makeCtx({ env, url }))
+      const failed = await onRequestGet(makeCtx({ env: { ...env, CATALOG_KV: makeFailingKV() }, url }))
+      expect(failed.headers.get('X-Cache')).toBe('MISS')
+      await expectSameResponse(failed, miss)
+      expect(warn.mock.calls.map(c => c.join(' ')).join('\n')).toMatch(/\[featured\] KV read failed/)
+    } finally {
+      warn.mockRestore()
+    }
   })
 })

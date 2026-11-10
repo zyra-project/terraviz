@@ -243,7 +243,13 @@ export const onRequestGet: PagesFunction<CatalogEnv> = async context => {
   }
 
   if (context.env.CATALOG_KV) {
-    const cached = await context.env.CATALOG_KV.get(await getCacheKey())
+    let cached: string | null = null
+    try {
+      cached = await context.env.CATALOG_KV.get(await getCacheKey())
+    } catch (err) {
+      // KV failure = cache miss; serve fresh results.
+      console.warn('[search] KV read failed — searching uncached:', err instanceof Error ? err.message : String(err))
+    }
     if (cached) {
       return new Response(cached, {
         status: 200,

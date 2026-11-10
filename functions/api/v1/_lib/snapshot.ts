@@ -62,11 +62,28 @@ export async function computeEtag(body: string): Promise<string> {
   return `"${b64.slice(0, ETAG_HASH_LENGTH)}"`
 }
 
-/** Read-through cache: returns the cached payload, or null on miss. */
+/**
+ * Read-through cache: returns the cached payload, or null on miss.
+ *
+ * A read that fails is a miss. The snapshot is rebuilt from D1, the
+ * source of truth, so the catalog renders from there instead of
+ * answering 500 — which is what every visitor got from a node whose
+ * `CATALOG_KV` was bound to a namespace that no longer existed. The
+ * failure is logged so the broken binding shows up in Workers Logs;
+ * the catalog itself stays up, at the cost of D1 reads per request.
+ */
 export async function readSnapshot(env: CatalogEnv): Promise<SnapshotPayload | null> {
   if (!env.CATALOG_KV) return null
-  const raw = await env.CATALOG_KV.get(SNAPSHOT_KEY, 'json')
-  return (raw as SnapshotPayload | null) ?? null
+  try {
+    const raw = await env.CATALOG_KV.get(SNAPSHOT_KEY, 'json')
+    return (raw as SnapshotPayload | null) ?? null
+  } catch (err) {
+    console.warn(
+      '[catalog] KV snapshot read failed — rendering from D1:',
+      err instanceof Error ? err.message : String(err),
+    )
+    return null
+  }
 }
 
 /**

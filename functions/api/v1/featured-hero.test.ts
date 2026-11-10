@@ -9,12 +9,13 @@
  *   - 200 `{ hero: null }` when no override is set.
  *   - 200 with the raw override payload when one is set.
  *   - KV cache: second call hits KV with `X-Cache: HIT`.
+ *   - A KV read that rejects: the cache-miss response, from D1.
  *   - Works without CATALOG_KV (no-cache fallback).
  */
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { onRequestGet } from './featured-hero'
-import { asD1, makeCtx, makeKV } from './_lib/test-helpers'
+import { asD1, expectSameResponse, makeCtx, makeFailingKV, makeKV } from './_lib/test-helpers'
 import { HERO_CACHE_KEY, setHeroOverride } from './_lib/hero-override-store'
 import { freshMigratedDb } from '../../../scripts/lib/catalog-migrations'
 import type { PublisherRow } from './_lib/publisher-store'
@@ -131,6 +132,22 @@ describe('GET /api/v1/featured-hero', () => {
     expect(res.status).toBe(200)
     const body = await readJson<HeroBody>(res)
     expect(body.hero?.datasetId).toBe(datasetId)
+  })
+
+  it('answers a KV read that rejects exactly as a cache miss', async () => {
+    const { env, datasetId } = setup()
+    await pin(env, datasetId, 'Big storm')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const miss = await onRequestGet(makeCtx({ env, url: URL_HERO }))
+      const failed = await onRequestGet(makeCtx({ env: { ...env, CATALOG_KV: makeFailingKV() }, url: URL_HERO }))
+      expect(failed.headers.get('X-Cache')).toBe('MISS')
+      expect((await readJson<HeroBody>(failed.clone())).hero?.datasetId).toBe(datasetId)
+      await expectSameResponse(failed, miss)
+      expect(warn.mock.calls.map(c => c.join(' ')).join('\n')).toMatch(/\[featured-hero\] KV read failed/)
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   it('degrades to { hero: null } (200) when the read throws (table missing / D1 error)', async () => {

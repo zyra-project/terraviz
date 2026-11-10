@@ -16,11 +16,12 @@
  *     aren't wired — NOT cached, stamps a Warning header, so the client
  *     falls back to the lexical scorer.
  *   - KV cache: second call hits KV with `X-Cache: HIT`.
+ *   - A KV read that rejects: the cache-miss response, computed fresh.
  */
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { onRequestGet } from './related'
-import { asD1, makeCtx, makeKV } from '../../_lib/test-helpers'
+import { asD1, expectSameResponse, makeCtx, makeFailingKV, makeKV } from '../../_lib/test-helpers'
 import { freshMigratedDb } from '../../../../../scripts/lib/catalog-migrations'
 import { embedDatasetJob } from '../../_lib/embed-dataset-job'
 import { __clearMockStore, type VectorizeEnv } from '../../_lib/vectorize-store'
@@ -184,5 +185,24 @@ describe('GET /api/v1/datasets/:id/related', () => {
     const second = await onRequestGet(makeCtx<'id'>({ env, url, params: { id: 'DS_HURR' } }))
     expect(second.headers.get('X-Cache')).toBe('HIT')
     expect(await readJson<RelatedBody>(second)).toEqual(await readJson<RelatedBody>(first))
+  })
+
+  it('answers a KV read that rejects exactly as a cache miss', async () => {
+    const { env } = setup()
+    await index(env, ['DS_HURR', 'DS_STORM', 'DS_VOLC'])
+    const url = 'https://t/api/v1/datasets/DS_HURR/related'
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const miss = await onRequestGet(makeCtx<'id'>({ env, url, params: { id: 'DS_HURR' } }))
+      const failed = await onRequestGet(
+        makeCtx<'id'>({ env: { ...env, CATALOG_KV: makeFailingKV() }, url, params: { id: 'DS_HURR' } }),
+      )
+      expect(failed.headers.get('X-Cache')).toBe('MISS')
+      expect((await readJson<RelatedBody>(failed.clone())).datasets.length).toBeGreaterThan(0)
+      await expectSameResponse(failed, miss)
+      expect(warn.mock.calls.map(c => c.join(' ')).join('\n')).toMatch(/\[related\] KV read failed/)
+    } finally {
+      warn.mockRestore()
+    }
   })
 })
