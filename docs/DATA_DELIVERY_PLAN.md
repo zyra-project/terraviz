@@ -14,7 +14,7 @@ desk research (vendor documentation, source code and release notes,
 cited in the sources section), not hands-on testing, except where a
 sibling document already records a test.
 
-**Last reviewed:** 2026-11-08 (first draft 2026-11-06, from desk
+**Last reviewed:** 2026-11-09 (first draft 2026-11-06, from desk
 research on each consumer; §9's phased implementation and §9.14's usage
 metrics added the same day. On 2026-11-07 the four follow-ups this
 plan spun off were merged and are marked done: the ArcGIS wildcard
@@ -27,10 +27,23 @@ Video Streaming Engineer §6, the Scientific Visualization Reviewer §7
 and the Privacy Engineer §9.14. Their findings are applied. They are
 AI review, not hands-on testing, and no person outside the drafting
 loop has reviewed the plan. On 2026-11-08 the scope was drawn against
-#528's licensed-access proposal: §8, §9.9 and §10.)
+#528's licensed-access proposal: §8, §9.9 and §10. Later that day
+Phase D1 began. Its machine-run rows (grids, client time, calendar
+snapping, regional frames, pyramid cost, video encodes) are recorded in
+[`delivery/D1_PROTOTYPES.md`](delivery/D1_PROTOTYPES.md). The sections
+they contradicted or sharpened were amended and are logged in §9.2:
+§5.1, §5.2, §5.3, §5.7, §5.8, §6.1, §6.3, §7.1, §7.3 and §11. On
+2026-11-09 the Cloudflare tests ran on a scratch Worker on the paid
+plan: `GetMap`'s CPU, the redirect route in a headless browser, and R2
+upload time. They amended §5.6, §5.8, §5.9, §9.10 and §11. The rows
+that need a person or a place are kits.)
 
-**Decisions recorded:** thirty, all by the maintainer and logged
-in §9.2. Twenty-five were made on 2026-11-06: rasters for analysis carry the producer's own values on
+**Decisions recorded:** forty, all by the maintainer and logged in
+§9.2. The latest, on 2026-11-09, is q31: tiles are stored as one pack
+per frame per grid. Nine came on 2026-11-08 from an interview on D1's
+first results: q27 to q30, the RRFS zeros, Mercator's polar rows, the
+format for colour-mapped pictures, the SOS movie's rate, and merging
+D1 in two parts. Twenty-five were made on 2026-11-06: rasters for analysis carry the producer's own values on
 the producer's own grid, before any regridding (§9.11); use is measured
 per platform and per method (§9.14); five choices about how that
 measuring works (§11 q17–q21); the five D0 blockers (§11 q1, q4, q7,
@@ -50,6 +63,9 @@ domain (q25). On 2026-11-08, licensed or gated access by a node was
 put outside this plan's scope (§10, #528). Open: q2, q3, q10's date
 parsing and q11, tested in D1;
 and q23, now only for datasets whose known licence is No-Derivatives.
+D1 added four, q27 to q30, all decided the same day, and on
+2026-11-09 a fifth, q31 (loose tiles or packs), decided the same day
+for packs.
 
 **Revisit when any of the following becomes true:**
 
@@ -654,7 +670,10 @@ with a TopLeftCorner of `-180 90`, as GIBS's 4326 sets are. Not the
 EPSG URN, which requires `90 -180`: GDAL swaps the axes for an EPSG
 URN but not for the short form `EPSG:4326`, and QGIS swaps on the CRS's
 axis order, so the `epsg4326` path name invites exactly the wrong
-choice. Level *n*'s scale denominator is 139770566.00717944 / 2ⁿ, which
+choice. D1 confirmed it. GDAL and QGIS read both CRS84 with `-180 90`
+and the EPSG URN with `90 -180` correctly, and GDAL reads any
+mismatched corner wrong without an error
+(`delivery/D1_PROTOTYPES.md` §3.1). Level *n*'s scale denominator is 139770566.00717944 / 2ⁿ, which
 equals the registered 256-pixel set's at level *n* + 1, a useful clue if
 a client picks the wrong levels in D1. The set must not be named, or
 declare the well-known scale set, `GoogleCRS84Quad`, which GDAL
@@ -678,11 +697,19 @@ other widths — a 0.1° science grid is 3600 wide, a 0.25° one 1440 — are
 handled in §7.1, and a global frame that is not 2:1 (a 1440×721
 pixel-is-point grid, which would land half a cell off) is refused.
 
-**How deep each layer goes.** One shared tile matrix set id needs
-`TileMatrixSetLimits` per layer to say where its levels stop; GIBS
-instead declares an id per depth (`GoogleMapsCompatible_Level6` to
-`…_Level9`), a pattern ArcGIS reads. q2's answer may depend on which
-is declared, so D1 tries both.
+**How deep each layer goes: a set per depth** (amended from D1's
+evidence, 2026-11-08). GIBS declares a tile matrix set per depth
+(`GoogleMapsCompatible_Level6` to `…_Level9`), a pattern ArcGIS reads,
+and that is the form to use: each layer links to a set that ends at its
+own native level, `CRS84Quad512_Level2`, `CRS84Quad512_Level3` and so
+on, and `GoogleMapsCompatible_Level4` and so on for Mercator.
+`TileMatrixSetLimits` stay only to bound a regional layer's extent. D1
+tried the alternative, one shared set with limits saying where each
+layer's levels stop. GDAL's WMTS driver and QGIS both take the
+deepest matrix in the *set* as the layer's full resolution whatever the
+limits say, so they ask for tiles past the layer's last level and draw
+nothing (`delivery/D1_PROTOTYPES.md` §3.1). ArcGIS is still to be
+checked (q2).
 
 **Why 512 pixels.** A time step through tiles costs one request per
 tile on screen, and OpenSpace refetches every tile at every step with
@@ -694,7 +721,10 @@ scheme takes any tile width. It quarters the object count in R2 too.
 The cost is that a client hard-coded to the registered 256-pixel
 WorldCRS84Quad will not read it without the capabilities document.
 Decided provisionally (§11 q1): 512, with D1 loading both sizes in
-every client and free to reverse it.
+every client and free to reverse it. So far D1 has found nothing to
+reverse it. GDAL, QGIS, CesiumJS, MapLibre and Leaflet each read 512
+correctly and asked for a quarter as many tiles, though each must be
+told the size (§5.7). ArcGIS and OpenSpace are still to report.
 
 **Secondary: WebMercatorQuad** (declaring the `GoogleMapsCompatible`
 well-known scale set, the standard 256-pixel set; MapLibre's default
@@ -755,7 +785,11 @@ dimensions.
   `%3A`, and in KVP a `+` that arrived as a space — because OpenSpace
   formats the time from a per-layer picture string the producer
   writes, `toISOString` and the ArcGIS SDK add milliseconds, and a
-  strict parser would turn every mismatch into a 404.
+  strict parser would turn every mismatch into a 404. It also accepts
+  ISO 8601's basic form (`20260516`, `20260516T120000Z`). D1 found that
+  QGIS sends a basic-form date when a capabilities document lists its
+  times with milliseconds (`delivery/D1_PROTOTYPES.md` §3.3), and that
+  CesiumJS sends the colon as `%3A` (§3.2).
 - **A reduced-precision time names an interval.** A date is that UTC
   day, and selects the first frame inside it; only when none does is
   §5.3's snap applied. Without the rule, daily frames stamped at 12:00Z
@@ -765,6 +799,9 @@ dimensions.
 - KVP `GetTile` and `GetCapabilities` requests are accepted and mapped
   onto the same handlers, since some clients only issue KVP, and both
   encodings are advertised in `OperationsMetadata` (`GetEncoding`).
+  QGIS 3.34 used KVP for every tile when both were advertised, never
+  the REST template, so KVP is the encoding QGIS users depend on (D1
+  §3.1).
   Extra query parameters on the REST capabilities address are ignored,
   since QGIS adds some and §9.14's `via` is one. Time must be in the
   *path* for OpenSpace regardless: GDAL's WMTS driver has no time
@@ -788,7 +825,11 @@ pinned in `docs/protocol/` the way STAC's is (§8).
   `start/end/period` interval rather than listing every frame, with no
   milliseconds in any advertised time: QGIS's parser for listed values
   accepts `YYYY-MM-DDTHH:MM:SSZ`, a date or a year, and today's
-  `frameTimestamp` emits `.000Z`. **Irregular series are not tiled in
+  `frameTimestamp` emits `.000Z`. D1 narrowed the reason. QGIS 3.34's
+  interval and WMS-T parsers take milliseconds. Its WMTS parser loads a
+  millisecond list, then requests `Time=20260928`, a basic-form date
+  that a parser accepting only the extended form answers with a 404
+  (`delivery/D1_PROTOTYPES.md` §3.3; §5.2 now accepts it). **Irregular series are not tiled in
   v1**: frame times come only from start and period
   (`functions/api/v1/_lib/frames-manifest.ts`), so there is no source
   for a list.
@@ -802,7 +843,13 @@ pinned in `docs/protocol/` the way STAC's is (§8).
   declared `start/end/P1M` matches it, and D2a fixes `frameTimestamp`
   at the source (§6.3). GIBS's check here used a mid-month date, which
   is exactly the case that hides this; D1 requests the 1st of each
-  month.
+  month. D1 measured it with the repository's own `frameTimestamp`.
+  Floored on average durations, requests on the 1st are answered with
+  the wrong frame for 10 of SOS 491's 12 months and 116 of SOS 420's
+  175 years. A stamp can also fall in the previous calendar year
+  (2005's frame at `2004-12-31T23:16:48Z`). QGIS steps months on the
+  1st at 00:00Z, so calendar arithmetic is what makes it right (D1
+  §3.3).
 - **A requested time snaps down to the frame whose period contains
   it**, and a time outside the dataset's span is a 404. That is GIBS's
   behaviour, checked with live requests (a mid-June date returns the
@@ -813,7 +860,22 @@ pinned in `docs/protocol/` the way STAC's is (§8).
   time to a configured resolution — ask for times that are not frame
   times and must get the frame they are inside, not an error. D3a tests
   the round trip: for every advertised time tᵢ, the snap of tᵢ is frame
-  *i* and the snap of tᵢ less a millisecond is frame *i* − 1.
+  *i* and the snap of tᵢ less a millisecond is frame *i* − 1. D1
+  confirmed the clients' side. QGIS sends the start of its temporal
+  range verbatim, whatever interval-handling method is set; GDAL sends
+  the `Default`; CesiumJS asks for the start of the interval containing
+  its clock. Every off-frame request QGIS made was answered right by
+  this rule. One case it cannot fix is frames stamped mid-period, such
+  as SOS 643's daily frames at 12:00Z. Stepping by day from midnight,
+  QGIS gets the previous day's frame, and so does CesiumJS for any
+  clock before noon, because it asks for an exact frame time (D1
+  §3.2). Only the advertised time can fix that. **Decided 2026-11-08 by
+  the maintainer (q27):** a frame that represents a period is advertised
+  at the start of that period, 00:00Z for a frame standing for a day.
+  This applies only where the dataset's record says what its frames
+  represent; a frame with no such record is advertised as stamped. The
+  record is the represented time Phase 0 of the metadata work persists
+  (`metadata/PHASE0_IMPLEMENTATION.md` step 2).
 - **This deliberately differs from `/frames?at=`**, which returns the
   *closest* frame. A closest-frame rule shows a frame up to half a
   period before its own time, which for a forecast is showing the
@@ -826,7 +888,14 @@ pinned in `docs/protocol/` the way STAC's is (§8).
   only the latest 100 periods per layer and answers a `DescribeDomains`
   request for the rest; its 4326 document is 5.3 MB for 1,332 layers.
   Regular series here declare one `start/end/period` interval and need
-  no cap.
+  no cap. But QGIS 3.34 expands an interval into at most 1,000
+  instants. At 1,001 it shows the layer as one undivided range with no
+  frame list, though it still animates through the server's snapping;
+  a list of values expands whatever its length (D1 §3.3). Clouds, at
+  4,314 ten-minute frames, would collapse. **Decided 2026-11-08 by the
+  maintainer (q29):** keep the compact interval past 1,000 steps. QGIS
+  still animates such a layer through the server's snapping, and the
+  capabilities documents stay small.
 - **Datasets with no real time axis** — a looping diagram animation, a
   "typical year" climatology — are not tiled in v1. Exposing a frame
   index as a non-time dimension is valid WMTS, but almost no client
@@ -908,13 +977,22 @@ antimeridian-crossing one among the cases.
   anything. A re-published dataset re-cuts only what changed. Unlike
   the earlier draft, this does not promise that a frame shared by two
   datasets is cut once: `cli/lib/frame-store.ts` keys frames per
-  dataset (`videos/{datasetId}/frames/sha256/…`). An option D1 weighs:
-  one object per frame per grid with an offset index, read by R2 range
-  requests (the PMTiles-on-R2 pattern), which cuts the object count
-  about 380 times and makes clean-up trivial, since every tile passes
-  the Function anyway.
+  dataset (`videos/{datasetId}/frames/sha256/…`).
+- **One pack per frame per grid** (decided, q31): one object holding
+  the frame's tiles on that grid and an offset index, read by R2 range
+  requests (the PMTiles-on-R2 pattern). That cuts the object count about
+  380 times, and makes clean-up trivial, since every tile passes the
+  Function anyway. In D1 (`delivery/D1_PROTOTYPES.md` §3.15), a packed
+  frame uploaded 12 to 15 times faster than loose tiles, with 190 to
+  770 times fewer billed writes. A scratch Worker served every tile from
+  packs, reading each pack's index once per isolate. The format is
+  D3a's to fix. D1's was an 8-byte header, a 16-byte index entry per
+  tile and the tiles concatenated. Nothing reads a pack but the
+  Function, so it need not be a published format. Not measured: a
+  tile's read time from a pack against a loose object.
 - **Served by a Pages Function** that resolves `{time}` to a frame,
-  reads the tile from R2, and caches at the edge. A Function in front
+  reads the tile from that frame's pack by a range request, and caches
+  at the edge. A Function in front
   (rather than a public bucket URL) is what makes time snapping, KVP
   requests, CORS and visibility checks possible. Its cost is one Worker
   invocation per tile request, which on a free-plan node is the binding
@@ -926,6 +1004,8 @@ antimeridian-crossing one among the cases.
     lookup. An `ETag` and a finite max-age, a short one for `default`.
   - **The time-to-frame index** is computed arithmetically for a
     regular series, or memoised per isolate, not read from R2 per tile.
+    So is each pack's own index, which costs two small range reads the
+    first time an isolate meets the frame.
   - **CORS** is `Access-Control-Allow-Origin: *` on every response:
     tiles, 404s, a `403 feature_disabled`, capabilities, TileJSON and
     the GDAL XML, with `OPTIONS` answered, since `public/_headers`
@@ -941,28 +1021,50 @@ antimeridian-crossing one among the cases.
   refuses rather than serves, because §8 relies on retraction to
   withdraw a dataset and to fail closed. A retraction removes the layer
   from the capabilities documents and stops its tiles at once; a
-  clean-up job, built in D3a, deletes the objects later.
+  clean-up job, built in D3a, deletes the packs later.
 
 ### 5.7 Capabilities and companions
 
 Each projection's WMTS capabilities document (§5.2) is generated by a
 Function from the catalog database: one layer per eligible dataset, its
 time dimension, its one tile matrix set, the abstract, attribution and
-licence from the catalog record. Beside it, cheap per-layer companions
-for clients that do not read WMTS capabilities:
+licence from the catalog record. Two rules for its bounding boxes
+come from D1 (`delivery/D1_PROTOTYPES.md` §3.1, §3.4):
+- **A Mercator layer's `WGS84BoundingBox` stops at ±85.0511°.** Running
+  it to ±90°, GDAL made a 4096-wide pyramid into a raster 49,577 pixels
+  tall.
+- **A layer whose box crosses the antimeridian declares −180 to 180.**
+  Both GDAL and QGIS read a box from 150 to −150 as its 300°
+  complement and draw nothing right. Its limits and tiles still cover
+  only the box, and its abstract states the real bounds.
+
+Beside it, cheap per-layer companions for clients that do not read
+WMTS capabilities:
 
 - **TileJSON** for MapLibre and other XYZ web maps, on the Mercator
   grid only, since MapLibre cannot draw the lat/lon one. It sets
   `"tileSize": 256`, or MapLibre assumes 512 and renders blurry. It has
   no time, so it bakes in `default`, or one is offered per time. Its
   `attribution` is escaped, since TileJSON 3.0 lets clients treat it as
-  HTML and Leaflet and OpenLayers insert it as it is.
+  HTML and Leaflet and OpenLayers insert it as it is. D1 confirmed the
+  `tileSize` rule: without it MapLibre asked for zoom 2 where it
+  needed zoom 3, the right place at half the resolution. The docs that
+  go with it also need two settings D1 found are needed:
+  - Leaflet needs `zoomOffset: -1` beside `tileSize: 512`; without it
+    the tiles landed up to 2,044 source pixels out.
+  - A CesiumJS `TimeIntervalCollection` must include the last frame's
+    interval (`trailingInterval`, or the stop included). A clock
+    outside every interval sends a literal `{Time}`, which is a 404.
 - **A GDAL WMS XML** per layer for GDAL-based tools, with
   `ZeroBlockHttpCodes` of `204,404` (the default is 204 alone, so a
   regional or gap 404 aborts the read), `BandsCount` 4 for PNG layers,
   `MaxConnections` raised from 2, and a `<Cache>`, both of which shape
   what a time step costs. A plain GDAL tool cannot follow time, so the
-  generic XML uses `default`.
+  generic XML uses `default`. D1 confirmed the first point. With the
+  default, `gdal_translate` of a regional layer failed at the first
+  tile outside its box; with `204,404` it read. GDAL's WMTS driver sets
+  `204,404` for itself, and the XML does not. Partial palette alpha
+  survives `BandsCount` 4 exactly (D1 §3.4).
 - **An OpenSpace asset, not just the XML.** OpenSpace needs a `.asset`
   with a `Prototyped` table (start, end, `TemporalResolution`, a time
   format) and the XML inline as the prototype carrying
@@ -988,15 +1090,20 @@ for clients that do not read WMTS capabilities:
 
 ### 5.8 Cost, roughly
 
-Order-of-magnitude only; Phase D1 replaces these with measurements.
+Measured in D1 (`delivery/D1_PROTOTYPES.md` §3.15) on a machine of a
+GitHub runner's shape, except where a row says otherwise. The first
+draft's estimates are kept in brackets where D1 changed them.
 
-| Quantity | Estimate |
+| Quantity | Measured |
 |---|---|
-| Tiles per 4096×2048 frame, WorldCRS84Quad layout at 512 px | 42 |
-| Tiles per frame, WebMercatorQuad at 256 px to level 4 | 341, about 2× the lat/lon set's pixels (level 4 is 4096×4096) and 8× its objects |
-| Bytes per frame, all levels | ~1.3× the frame itself per lat/lon grid; a few MB as JPEG, more as PNG |
-| Per 1,000 frames, both grids | 3–4× the lat/lon grid alone: tens of GB |
-| Runner time per frame | seconds; likely dominated by the 383 uploads per frame rather than PNG encoding, unless tiles are packed (§5.6) |
+| Tiles per 4096×2048 frame, WorldCRS84Quad layout at 512 px | 42 (as estimated) |
+| Tiles per frame, WebMercatorQuad at 256 px to level 4 | 341, 1.9× the lat/lon set's bytes and 8× its objects (as estimated) |
+| Bytes per frame, lat/lon grid at 512 | 1.8–2.0 MB for a 4096-wide picture as JPEG; 8.9 MB for the same as PNG; 21 MB for MPAS's 7200-wide data frame as indexed PNG; 0.6 MB for the RRFS regional frame. [Estimated ~1.3× the frame: true only of a source 1024 × 2ⁿ wide, since the cut to the native level multiplies by (native width ÷ effective source width)², 1.29× for 7200 → 8192 and 2.3× for RRFS's effective 10,800 → 16,384] |
+| Per 1,000 frames, both grids | 5.2 GB and 383,000 objects for a 4096-wide JPEG picture; 44 GB and 1.5 million objects for MPAS; 1.3 GB and 228,000 objects for RRFS. [Estimated "tens of GB": true of data, not of pictures] |
+| Cut time per frame, single core, all four tile sets | 1.5 s (RRFS), 5 s (4096-wide pictures), 10.5 s (MPAS); 167 frames in 173 s on four cores |
+| Upload time per frame to R2, loose against packed | 19.6 s loose (383 objects, eight at a time) against 1.3 s packed (2 objects) for a 4096-wide picture; 74 s against about 5.5 s for MPAS (1,535 objects). A loose tile costs about 0.2 s of R2's own time whatever its size. Per 1,000 frames: about 5.4 h against 22 min for pictures, and 21 h against 1.7 h for MPAS. Measured from a cloud container through a Worker, not from the runner (D1 §3.15) |
+| R2 writes per 1,000 frames | 383,000 loose against 2,000 packed for pictures, and 1.5 million against 2,000 for MPAS. Each is a Class A operation, $4.50 per million after the first million a month: $1.72 and $6.91 loose, under a cent packed |
+| `GetMap` CPU, paid plan | 0.25–1 s typical; 1.8 s median and 3.6 s at most for the worst request, a 2048×2048 Mercator picture from 256 tiles, against a 30 s default. None under 108 ms. 30 million CPU milliseconds a month are included, about 16,000 of the worst maps, then $0.02 per million (D1 §3.8) |
 
 R2 charges for storage and operations but not for egress, so a popular
 layer costs requests and Function invocations, not bandwidth. The costs
@@ -1011,7 +1118,8 @@ fail-open setup loses its API and a fail-closed one its whole site.
 One OpenSpace show, which refetches every tile on screen at every step,
 can spend tens of thousands of those in an evening. And a WMS `GetMap`
 cannot fit the free plan's 10 ms of CPU, against 30 s by default on a
-paid plan. So WMS has its own switch, `wms`, off by default (decided,
+paid plan: D1 measured none under 108 ms on the paid plan (§5.9). So
+WMS has its own switch, `wms`, off by default (decided,
 q26): `SELF_HOSTING.md` says to turn it on only on a plan tier where
 D4's CPU gate passed, and states the daily request budget the `tiles`
 switch's WMTS layers draw on. D4's gate names the plan it was measured
@@ -1049,13 +1157,35 @@ built after the WMTS because it is served from the WMTS's pyramids.
   is per isolate and shared by concurrent requests and every route, so
   a `GetMap` that runs out of memory takes unrelated API calls with it,
   and R2 reads count toward six simultaneous connections, so 81 Mercator
-  tiles arrive in about 14 waves. D1 measures memory and CPU under
-  concurrency on both plan tiers, and a separate Worker for WMS is an
+  tiles arrive in about 14 waves. A separate Worker for WMS is an
   option.
+  - **Measured in D1** (`delivery/D1_PROTOTYPES.md` §3.8), on the paid
+    plan only, since no free-plan account was available. The worst
+    request a client may make is a 2048×2048 global Mercator picture,
+    which stitches 256 tiles. It needed 1.8 s of CPU at the median and
+    3.6 s at most, against the default 30 s. A 2048-pixel data map
+    needed about 1 s. No request needed less than 108 ms, against the
+    free plan's 10 ms. CPU per request barely changed at 30 concurrent
+    requests, and the 256-tile map took about 5 s elapsed, most of it
+    waiting on R2.
+  - **Memory, one row of tiles at a time.** Workers report memory per
+    isolate, not per request, so D1 could not measure it. By
+    arithmetic, holding every decoded tile until the stitch ends peaks
+    at about 96 MB for the 256-tile map, against 128 MB shared by
+    everything the isolate serves. D4 decodes and stitches one row of
+    tiles at a time, writing straight into the PNG's scanline buffer,
+    which brings that map's peak to about 20 MB.
+- **Codecs.** JPEG tiles are decoded by mozjpeg compiled to
+  WebAssembly (q15). In D1 a JavaScript decoder was slower, and it
+  drew different colours from libjpeg, by up to 70 levels on a quarter
+  of the pixels. PNG needs no codec. The runtime's own
+  `DecompressionStream` and `CompressionStream` handle its zlib
+  stream, and PNG's filters are a short loop.
 - **A cheap path for data layers.** Decode the indexed PNGs to their
   indices, scale by nearest neighbour, and re-encode with the same
-  palette chunks: one byte a pixel and no colour arithmetic, which may
-  decide the CPU gate.
+  palette chunks: one byte a pixel and no colour arithmetic. It did not
+  decide D1's CPU test: pictures passed on the paid plan through RGBA
+  too, so the cheap path is a saving rather than a condition.
 - **The final scale follows §7.1.** A data layer is scaled by nearest
   neighbour, because its pyramid level already carries the dataset's
   own decimation and interpolating between palette colours would undo
@@ -1100,6 +1230,21 @@ quantiser, and ffmpeg's `mpeg4` encoder labels every stream Simple
 Profile @ Level 1 whatever its size. Zyra's `compose-video` `sos`
 preset rescales luma and is never used for data-encoded content.
 
+D1 measured the SOS variant (`delivery/D1_PROTOTYPES.md` §3.12):
+- **The label is confirmed:** Simple Profile, level 1, untagged, for a
+  2048×1024 stream at 58 Mbit/s.
+- **`-q:v 1` produced the same file as `-q:v 2`**, because ffmpeg's
+  default `qmin` is 2. The encode passes `-qmin 1` with `-q:v 1`, or
+  states its floor as 2.
+- **The floor gives the encoder's best quality, not SOS's bitrate.**
+  At `-q:v 2` a weekly drought series ran at 17 Mbit/s, under SOS's
+  25, and 34 seconds of 10-minute clouds at 58.5 Mbit/s (245 MB). The
+  bundle states the rate it reached; whether SOS accepts a movie under
+  25 Mbit/s at the best quantiser is for the SOS contact (q9).
+  **Decided 2026-11-08 by the maintainer:** the movie is made at the
+  best quantiser, never padded up to 25 Mbit/s, and the SOS kit asks
+  the SOS contact whether that is acceptable.
+
 - **One video frame per data frame.** Frame *i* of the file is frame *i*
   of the dataset, so a player that maps a start and end time linearly
   onto the file's duration — OpenSpace does exactly that — lands on the
@@ -1119,7 +1264,17 @@ preset rescales luma and is never used for data-encoded content.
   drops steps rather than stalling; D1 compares 1 s against shorter
   GOPs, and all-intra for short series, with hardware decoding on and
   off, and checks keyframe positions with `ffprobe` rather than trusting
-  the flags.
+  the flags. **D1 found the 1-second interval nearly free.**
+  - Keyframes landed every second exactly.
+  - At the 25 Mbit/s cap, 1,008 frames of clouds at 4096×2048 came out
+    the same size at 1 s and 6 s, with luma PSNR 34.70 against 34.74
+    dB.
+  - With no cap, at the same CRF, the 1-second file was 2.5% larger.
+  - For 51 weekly drought frames, which share little from one to the
+    next, all-intra cost 3.5% more than a 1-second interval.
+  
+  What a seek costs on the dome's hardware decoder is the OpenSpace
+  kit's question (D1 §3.9).
 - **Everything else pinned.** `-profile:v high -level:v 5.1`, so a
   variant above 30 fps fails a test rather than quietly needing level
   5.2 (4096×2048 at 30 fps is exactly 5.1's macroblock rate). No audio
@@ -1227,8 +1382,12 @@ period, and links to the palette and legend. For a calendar period
 that computation is wrong today: `frameTimestamp` uses average months
 and years (`functions/api/v1/_lib/iso-duration.ts`), which dates
 frame 1 of a monthly series starting 1 January at 31 January 10:29.
-D2a fixes it at the source with calendar arithmetic, so the route stays
-the one computation. Each group's own form is derived from it:
+D1 found the yearly form worse for a label: a series starting 2001
+stamps 2005's frame `2004-12-31T23:16:48Z`, so `labels.txt` or a
+filename cut to the date would call it 2004
+(`delivery/D1_PROTOTYPES.md` §3.3). D2a fixes it at the source with
+calendar arithmetic, so the route stays the one computation. Each
+group's own form is derived from it:
 
 - **SOS:** `labels.txt`, one line per frame.
 - **OpenSpace video:** the start and end times the asset passes to
@@ -1237,12 +1396,29 @@ the one computation. Each group's own form is derived from it:
   mid-frame. OpenSpace floors the frame position
   (`modules/video/src/videoplayer.cpp`), and with the bounds on the
   dates themselves a monthly series shows the previous month on nearly
-  every month-start step. D1 steps across month boundaries.
+  every month-start step. D1 steps across month boundaries. D1's
+  arithmetic adds a cost. Under the floor, bounds half a step out make
+  the video show the **nearest** frame between frames, up to half a
+  period ahead, which §5.3 rejects for tiles. A regular period snaps
+  down exactly with bounds on the first frame and one period past the
+  last; only a calendar period needs the half step, and even then a
+  mid-month time shows the next month. **Decided 2026-11-08 by the
+  maintainer (q30): video follows the tiles' rule.** Between frames it
+  shows the earlier frame, never one ahead of its time. So a regular
+  series' bounds are its first frame and one period past its last
+  (start = t₀, end = t₍N−1₎ + P), which OpenSpace's floor turns into
+  an exact snap down. A monthly or yearly series, which no linear
+  mapping gets right, goes to OpenSpace as dated frames or as tiles,
+  not as a time-locked video. The OpenSpace kit's step 5 confirms the
+  floor on a dome (D1 §3.9).
 - **OpenSpace frames:** dated filenames, `<id>_YYYYmmdd_HHMMSS.png`, for
   `TemporalTileProvider`'s Folder mode, seconds included so that a
   sub-minute cadence does not collide. Its filename date parsing
   looked off by one day in OpenSpace's source, so the exact form is
-  settled by a Phase D1 test, not by reading (§11).
+  settled by a Phase D1 test, not by reading (§11). D1 found the line.
+  `TemporalTileProvider` hands SPICE `tm_mday + 1`, the day of the
+  month plus one, so the 31st becomes day 32. The dome test, with date
+  cards across three month ends, is in the OpenSpace kit (D1 §3.10).
 - **OpenSpace sync:** `SecondsUntilResync` set for a dataset that
   updates, since the default caches forever and each resync downloads
   the whole file again, and `PlaybackMode = RealTimeLoop` for the 130
@@ -1476,7 +1652,11 @@ Four rules apply whatever the method.
   codes 40, 40, 5, 5 under a cutoff of 12 would show 40 where its area
   mean is 22.5, and a thin plume would vanish. For a row with a
   `transparentRange` and no `dataMinLuma`, the producer records whether
-  the band means zero or absent before its tiles are cut. Whether the
+  the band means zero or absent before its tiles are cut. For the RRFS
+  smoke rows, the maintainer recorded **zero** on 2026-11-08: a column
+  mass near zero is a measurement of little or no smoke. GSL, the
+  producer, has not been asked (`delivery/D1_PROTOTYPES.md` §1.2).
+  Whether the
   output pixel is itself no-data depends on the method: under `mean`
   and `mode` when less than half the source area is valid, under `max`
   only when none of it is, because the point of `max` is that one fire
@@ -1525,6 +1705,29 @@ never coarser than Mercator's there. The dataset's method is applied
 once, in the lat/lon pyramid, and the warp never averages. Two coarser
 lat/lon levels, 512 and 256 wide, feed Mercator levels 0 and 1, and a
 parity test checks the two grids against each other.
+
+**D1 found the rule blocky toward the poles** (`delivery/D1_PROTOTYPES.md`
+§3.15). A lat/lon row of the same width fills 1 ÷ cos φ Mercator rows:
+2 at 60°, 2.9 at 70°, 5.8 at 80°, 11.5 at 85°. So every Mercator level
+but the native one shows stair-steps several pixels tall over
+Antarctica and Greenland. At the native level that is honest, since
+the source has no more rows; coarser, a finer lat/lon level does have
+them. Taking each Mercator row from the coarsest lat/lon level whose
+rows are no taller than it keeps the rule, with no averaging across
+rows in the warp, without the blocks. The cost is sampling columns
+from a level finer than the row's width. **Decided 2026-11-08 by the
+maintainer: D3a builds the alternative.** Each Mercator row is taken by
+nearest neighbour from the coarsest lat/lon level whose rows are no
+taller than it, so no row is blended with another and the poles keep
+the detail the pyramid already has.
+
+**Pictures with palette classes over imagery are common**, and D1
+measured one (§3.15). The drought frames are single-pixel class
+speckles over Blue Marble. At the native level, 4:2:0 JPEG at quality
+85 lost 36% of the speckle pixels by a colour threshold; 4:4:4 JPEG at
+the same quality kept all of them, at 1.6 times the size of 4:2:0 and
+a third of PNG's. That is now the default for `colour-mapped`
+pictures (§7.3).
 
 ### 7.2 Time: choosing samples
 
@@ -1581,8 +1784,11 @@ clients that cache capabilities need to tolerate.
 ### 7.3 Bit depth and format
 
 - **JPEG** (quality around 85) for opaque natural pictures, as GIBS
-  does for its opaque layers; PNG or 4:4:4 JPEG for `colour-mapped`
-  ones (§7.1).
+  does for its opaque layers. **`colour-mapped` pictures default to
+  4:4:4 JPEG at the same quality** (decided 2026-11-08 by the
+  maintainer). D1 measured it keeping every class speckle that 4:2:0
+  lost 36% of, at 1.6 times 4:2:0's size and a third of PNG's (§7.1).
+  PNG stays for a picture that needs exact colours or transparency.
 - **Indexed PNG for data-encoded layers.** A data-encoded dataset's
   palette is exactly 256 entries (`buildColorScaleLut`), so a decimated
   value, re-quantised to the nearest of the dataset's 256 codes, can be
@@ -1599,7 +1805,17 @@ clients that cache capabilities need to tolerate.
   survives in each. Because the index is the code, such a tile is in
   effect a raw-code tile, so the colour map and abstract publish `vmin`,
   `vmax` and `dataMinLuma`, and a GDAL or QGIS user does not read a bare
-  index as a measurement.
+  index as a measurement. **D1 confirmed it for GDAL and QGIS**
+  (`delivery/D1_PROTOTYPES.md` §3.4). RRFS's LUT fades through 48 alpha
+  values, and `gdal_translate -expand rgba`, the GDAL XML's
+  `BandsCount` 4 and QGIS's render all reproduced them exactly. It also
+  found a gap: a row with no `dataMinLuma` uses every index for a
+  value, so outside a regional box the tile can only write index 0,
+  which reads as a measured zero. **Decided 2026-11-08 by the
+  maintainer (q28), for now:** such a layer's abstract and colour map
+  state that index 0 outside the dataset's box is not a measurement.
+  Reserving a code when frames are made remains the cleaner fix for new
+  datasets, if a GIS user is ever misled.
 - **Never JPEG for data.** JPEG ringing along palette boundaries invents
   colours the palette does not contain — the false-colour failure of
   averaging colours, arriving through compression instead.
@@ -1870,6 +2086,40 @@ and a Second Life sphere. The maintainer can line up all four.
 | 2026-11-07 | The maintainer | An unrecognised `Origin` domain is stored as `other-origin` with no hash; new sites are found through partner tags and the curated list | §9.14, q21b |
 | 2026-11-07 | The maintainer | A delivery request sending Global Privacy Control is counted with no country, version or domain | §9.14, q25 |
 | 2026-11-08 | The maintainer | Licensed or gated access by a node is out of this plan's scope and continues in #528; the delivery channels serve only datasets the node publishes, never rows mirrored from a peer; D3c's discovery field waits on one capabilities and extensions convention (#529) | §8, §9.9, §10 |
+| 2026-11-08 | The maintainer | A frame that represents a period (a day, a month) is advertised at that period's start, where the dataset's record says what it represents; otherwise as stamped | §5.3, q27 |
+| 2026-11-08 | The maintainer | Time dimensions stay a compact `start/end/period` interval past QGIS's 1,000-step limit; QGIS animates them through the server's snapping | §5.3, q29 |
+| 2026-11-08 | The maintainer | D1 merges its first results now and closes in a follow-up PR with the kits' and Cloudflare tests' results | §9.3 |
+| 2026-11-08 | The maintainer | The `sos-mpeg4` movie is made at the best quantiser and never padded to 25 Mbit/s; D1's SOS kit asks the SOS contact whether a lower rate is acceptable | §6.1, q9 |
+| 2026-11-08 | The maintainer | D3a takes each Mercator row from the coarsest lat/lon level whose rows are no taller than it, instead of the same-width level, so the poles are not blocky | §7.1 |
+| 2026-11-08 | The maintainer | The RRFS smoke rows' codes below `transparentRange` are real zeros, not absence; GSL not yet asked | §7.1, `delivery/D1_PROTOTYPES.md` §1.2 |
+| 2026-11-08 | The maintainer | For now, a data layer with no reserved code says in its abstract and colour map that index 0 outside its box is not a measurement | §7.3, q28 |
+| 2026-11-08 | The maintainer | `colour-mapped` pictures default to 4:4:4 JPEG at quality 85; PNG where exact colours or transparency are needed | §7.3 |
+| 2026-11-08 | The maintainer | A time-locked video shows the earlier frame between frames, as the tiles do: a regular series' bounds are its first frame and one period past its last; a monthly or yearly series goes to OpenSpace as frames or tiles, not as time-locked video | §6.3, q30 |
+| 2026-11-09 | The maintainer | Tiles are stored as one pack per frame per grid, with an offset index, and served by R2 range requests, since D1 found packed frames uploaded 12 to 15 times faster with 190 to 770 times fewer billed writes and nothing against them | §5.6, §9.7, q31 |
+
+**Amended by D1's evidence.** Where a D1 measurement contradicted or
+sharpened this plan, the section was amended and the change is logged
+here, with the evidence in
+[`delivery/D1_PROTOTYPES.md`](delivery/D1_PROTOTYPES.md). These are not
+the maintainer's decisions. Where the evidence leaves a choice, it is a
+new §11 question instead.
+
+| Date | Evidence | Amendment | Where |
+|---|---|---|---|
+| 2026-11-08 | GDAL and QGIS each take the deepest matrix in a shared tile matrix set as the layer's, whatever its `TileMatrixSetLimits` say, and ask past its last level (D1 §3.1) | Each layer declares a tile matrix set per depth, GIBS's `_LevelN` pattern; CRS84 and the EPSG URN both confirmed, each with the corner in its own axis order | §5.1 |
+| 2026-11-08 | QGIS sends ISO 8601's basic form when listed times carry milliseconds, and uses KVP for every tile (D1 §3.1, §3.3) | The time parser also accepts the basic form; KVP is noted as the encoding QGIS depends on | §5.2 |
+| 2026-11-08 | Calendar floors measured wrong on 10 of 12 months and 116 of 175 years; QGIS sends its range start; noon-stamped daily frames show the previous day in QGIS and CesiumJS; QGIS expands at most 1,000 instants (D1 §3.2, §3.3) | Measurements added to the calendar, snap, milliseconds and long-list rules; two new questions | §5.3, q27, q29 |
+| 2026-11-08 | Pyramids cut for 161 frames of four datasets on four tile sets (D1 §3.15) | The cost table's estimates replaced by measurements; the bytes estimate corrected for sources not 1024 × 2ⁿ wide; upload time still open | §5.8 |
+| 2026-11-08 | `-q:v 1` equals `-q:v 2` without `-qmin 1`; the quantiser floor gave 17 Mbit/s on easy content; a 1-second keyframe interval cost 0.05 dB at the cap and 2.5% uncapped, all-intra 3.5% on a weekly series (D1 §3.9, §3.12) | Measurements added to the SOS variant and the keyframe rule | §6.1 |
+| 2026-11-08 | `frameTimestamp` stamps a yearly frame in the previous calendar year; half-step video bounds give the nearest frame under OpenSpace's floor; Folder mode hands SPICE `tm_mday + 1` (D1 §3.3, §3.9, §3.10) | Notes on the manifest's dates, the video bounds and Folder mode; a new question on the bounds | §6.3, q30 |
+| 2026-11-08 | Mercator taken from the same-width lat/lon level repeats each row up to 11.5 times near the poles; 4:2:0 JPEG lost 36% of a picture's class speckles, 4:4:4 none (D1 §3.15) | A note on the Mercator rule, with an alternative for D3a; the speckle measurement | §7.1 |
+| 2026-11-08 | Partial palette alpha survives GDAL's expansion and QGIS exactly; a row with no reserved code has no index for absence (D1 §3.4) | Transparency confirmed; the gap noted, with a new question | §7.3, q28 |
+| 2026-11-08 | Five clients read 512; Esri's published GCS v2 tile info; OpenSpace's Folder-mode source (D1 §3.1, §3.6, §3.10) | Status notes on q1, q2, q3, q10 and q11; none closed, since ArcGIS and OpenSpace are in the kits | §11 |
+| 2026-11-08 | GDAL makes a Mercator layer bounded at ±90° 12 times too tall; GDAL and QGIS read an antimeridian-crossing box as its complement; Leaflet misplaces 512 tiles without `zoomOffset`; CesiumJS sends a literal `{Time}` outside its intervals; the GDAL XML aborts on 404 without `ZeroBlockHttpCodes` (D1 §3.1, §3.2, §3.4) | Two bounding-box rules for the capabilities; companion and documentation notes; `tileSize` and `ZeroBlockHttpCodes` confirmed | §5.7 |
+| 2026-11-09 | The prototype `GetMap` passed on the paid plan with mozjpeg in WebAssembly and no PNG codec; nothing came near the free plan's 10 ms (D1 §3.8) | D4's CPU gate records D1's prototype result, narrows the codec to JPEG, and says D4 still measures its own route | §9.10, q15, q26 |
+| 2026-11-09 | Packed frames uploaded 12 to 15 times faster with 190 to 770 times fewer writes, and served every tile by range request (D1 §3.15) | The packing option records D1's weighing; whether to adopt it became q31, decided the same day for packs, and §5.6 now stores tiles that way | §5.6, q31 |
+| 2026-11-09 | Upload to R2: 19.6 s loose against 1.3 s packed for a 4096-wide picture frame, 74 s against about 5.5 s for MPAS; `GetMap` CPU on the paid plan (D1 §3.8, §3.15) | Upload time, R2 writes and `GetMap` CPU rows added to the cost table; the free plan's cliff cites the measurement | §5.8 |
+| 2026-11-09 | `GetMap` on the paid plan: 1.8 s median and 3.6 s maximum CPU for the worst 2048×2048 request, none under 108 ms; a JavaScript JPEG decoder drew different colours from libjpeg, WebAssembly mozjpeg matched it; PNG decoded through the runtime's own streams; memory per request not reported, about 96 MB by arithmetic for the 256-tile map (D1 §3.8) | Measurements added to the bounds; one row of tiles at a time; a codecs rule; the data path's role corrected | §5.9 |
 
 ### 9.3 D1 — Prove it by hand
 
@@ -1899,6 +2149,32 @@ outputs to other organisations (§6.5).
 The output is `docs/delivery/D1_PROTOTYPES.md`: the measurements, the
 answers, and an amendment to every section of this plan they
 contradict.
+
+**Status, 2026-11-09.** D1 has started, on the datasets and terms its
+document records first (§1 there).
+
+- **Run here.** Everything a machine could do: the grids in GDAL,
+  QGIS, CesiumJS, MapLibre and Leaflet; what time each client sends;
+  calendar periods and dates; regional frames and palette
+  transparency; pyramid cost per frame; the video encodes. Their
+  amendments are in §9.2.
+- **Kits for people.** OpenSpace, ArcGIS (with Hub), an SOS site,
+  Second Life and the redirect session are each a kit with a one-page
+  checklist, for the maintainer to hand on.
+- **Run on Cloudflare, 2026-11-09.** A scratch Worker and R2 bucket on
+  the maintainer's paid-plan account. They measured `GetMap`'s CPU
+  (§5.9), the redirect route in a headless browser (§6.5's premise
+  held), and R2 upload time, loose against packed (§5.8, q31). The free
+  plan could not be measured: there is no free-plan account to test on.
+  The kits now point at the Worker, which logs what each client asks
+  for. The Worker and bucket are deleted when D1 closes.
+
+**Merged in two parts** (decided 2026-11-08 by the maintainer). The
+first results merge now, so the plan's corrections land. A follow-up
+PR closes D1 with the kits' and the Cloudflare tests' results, and D1's
+gate is met when that PR merges. The Cloudflare tests ran before the
+first part merged, so they joined it, and what D1 waits on now is the
+kits.
 
 ### 9.4 D2a — Video files
 
@@ -2064,7 +2340,8 @@ need more than the usual `t()` keys.
   palette image's colours and picks the nearest entry, never the values
   the codes stand for, and knows nothing of the no-data band — then
   write indexed PNG for data-encoded layers, JPEG for natural pictures
-  and PNG for `colour-mapped` ones, under the key §5.6 lists. The
+  and PNG for `colour-mapped` ones, as one pack per frame per grid
+  under the key §5.6 lists (q31), whose format the cutter fixes. The
   indexed PNG's palette chunks are written directly: a general encoder
   in palette mode, libvips's included, re-quantises and reorders the
   palette, which would fail the byte-for-byte test below.
@@ -2078,7 +2355,7 @@ need more than the usual `t()` keys.
   whose index is arithmetic (§5.6).
 - **Sharding.** A long series is cut across several jobs by frame
   range, since a GitHub-hosted job stops at six hours.
-- **Clean-up.** A sweep that deletes the tiles of a dataset retracted,
+- **Clean-up.** A sweep that deletes the packs of a dataset retracted,
   unpublished or re-cut, which §5.6 relies on.
 - **The `tiles` switch** (§8): its key, its row in the Features card,
   and its check in the publish dispatch, so it is in place before any
@@ -2102,7 +2379,9 @@ palette is byte for byte the dataset's LUT, alpha ramp included;
 Mercator matches lat/lon under nearest neighbour. A ramp-and-edge frame
 (one stripe per code, a data/no-data edge, a diverging red|blue edge)
 is loaded in every client at native and zoomed in, and no colour off
-the palette appears at an edge.
+the palette appears at an edge. A pack's index lists every tile the
+cut produced and no other, and a range read at each entry returns
+exactly that tile's bytes.
 
 **Gate.** Those tests pass on D1's two datasets, and the longest series
 the catalog holds (3,650 frames, `docs/metadata/PHASE4_IMPLEMENTATION.md`)
@@ -2196,10 +2475,16 @@ is measured on an isolated preview deployment against its CPU limit,
 with memory under concurrent requests, since every Pages Function
 shares one Worker's isolates, and on both a free and a paid plan,
 by the protocol the STAC rollout gate uses
-(`docs/metadata/PHASE4_IMPLEMENTATION.md` §Rollout Gate). Decoding and
-encoding images inside a Worker means a WebAssembly codec, which is a
-new dependency, accepted if the CPU test passes (decided, §11 q15). If
-the measurement
+(`docs/metadata/PHASE4_IMPLEMENTATION.md` §Rollout Gate). Decoding JPEG
+tiles inside a Worker means a WebAssembly codec, which is a new
+dependency, accepted if the CPU test passes (decided, §11 q15). PNG
+needs none, since the runtime's own streams handle its zlib stream.
+D1 ran this test in prototype on the paid plan
+(`delivery/D1_PROTOTYPES.md` §3.8), and it passed: 3.6 s at most
+against 30 s, with mozjpeg in WebAssembly. The free plan could not be
+measured, and no request came near its 10 ms. D1's numbers are not
+D4's gate. D4 measures its own route, stitching one row of tiles at a
+time (§5.9), before it lands. If the measurement
 fails, D4 stops there: ArcGIS users get one XYZ item per frame, the
 time in its path, with time-based visibility (§2.1), which works for
 short series and not for long ones, and the plan says so. A WMTS layer
@@ -2780,15 +3065,23 @@ stays a draft for review.
 
 1. *Decided provisionally 2026-11-06 by the maintainer:* 512 pixels for
    the lat/lon grid; D1 loads both 512 and 256 in every client and may
-   reverse it (§5.1).
+   reverse it (§5.1). *D1, 2026-11-08:* nothing to reverse it in GDAL,
+   QGIS, CesiumJS, MapLibre or Leaflet, each of which read 512
+   correctly when told the size; ArcGIS and OpenSpace are in D1's kits
+   (`delivery/D1_PROTOTYPES.md` §3.1).
 2. **Does ArcGIS stretch WMTS tiles past the deepest level, or go
    blank?** If blank, cut one or two upsampled levels in the Web
-   Mercator set only.
+   Mercator set only. *D1:* handed to the ArcGIS kit (D1 §3.5).
 3. **Is Esri's "WGS 1984 Version 2" scheme the same as the lat/lon
    layout?** It decides whether ArcGIS Scene Viewer can use the lat/lon
    pyramid. From memory it is two tiles of 0.703125° pixels from −180,
    90, which is WorldCRS84Quad; Esri states scales at 96 DPI, so D1
-   compares resolutions rather than scale denominators.
+   compares resolutions rather than scale denominators. *D1, 2026-11-08,
+   in part:* not quite from memory. Esri's published tile info for its
+   own basemap in that scheme has 512-pixel tiles from (−180, 90) at
+   0.703125° a pixel at level 0. So Esri's level *n* + 1 is our level
+   *n*, tile for tile, plus a 360°×360° level 0 we lack. Whether Scene
+   Viewer accepts the layer is in the ArcGIS kit (D1 §3.6).
 4. *Decided 2026-11-06 by the maintainer:* tiles snap to the containing
    period as GIBS does, `/frames?at=` keeps the closest frame, and the
    difference is documented on both routes (§5.3).
@@ -2811,10 +3104,12 @@ stays a draft for review.
 10. *Decided 2026-11-06 by the maintainer:* OpenSpace users download
     TerraViz assets from TerraViz rather than from OpenSpace's own
     library. Still open, and tested in D1: whether Folder mode's date
-    parsing is off by one day.
+    parsing is off by one day. *D1, 2026-11-08:* the source hands SPICE
+    `tm_mday + 1`, so the 31st becomes day 32; the dome test is in the
+    OpenSpace kit (D1 §3.10).
 11. **Does Hub's DCAT feed include WMS and WMTS items?** Tested in D1,
     in the maintainer's ArcGIS organisation, before promising data.gov
-    reach.
+    reach. *D1:* handed to the ArcGIS kit (D1 §3.14).
 12. *Decided 2026-11-06 by the maintainer:* no. Every tile goes through
     the Function, so every tile passes the same checks (§5.6).
 13. *Decided 2026-11-06 by the maintainer:* files (D2) before tiles
@@ -2823,7 +3118,12 @@ stays a draft for review.
     in this repository and run by each organisation with its own
     credentials and credits (§9.12).
 15. *Decided 2026-11-06 by the maintainer:* a WebAssembly image codec
-    may be added for D4 if the CPU test passes (§9.10).
+    may be added for D4 if the CPU test passes (§9.10). *D1,
+    2026-11-09:* the codec is needed for JPEG only, and passed in
+    prototype on the paid plan. A JavaScript decoder drew different
+    colours from libjpeg, while mozjpeg compiled to WebAssembly
+    (`@jsquash/jpeg`, Apache-2.0, 166 KB) matched it. PNG needs no
+    codec (`delivery/D1_PROTOTYPES.md` §3.8).
 16. *Decided 2026-11-06 by the maintainer:* D5a's COGs carry the
     producer's own values on its own grid, taken before any regridding
     (§9.11). Kept here so the numbering of the others holds.
@@ -2912,7 +3212,79 @@ stays a draft for review.
     spend tens of thousands, and a `GetMap` cannot fit the free plan's
     10 ms of CPU (§5.8, §8). Not chosen: `tiles` off on free plans,
     which would need setup to record the plan tier, since a Function
-    cannot see it.
+    cannot see it. *D1, 2026-11-09:* the premise is measured. On the
+    paid plan no `GetMap` used less than 108 ms of CPU, and the worst
+    used 3.6 s. The free plan itself could not be tested
+    (`delivery/D1_PROTOTYPES.md` §3.8).
+27. *Decided 2026-11-08 by the maintainer:* at the start of the
+    period it represents, where the dataset's record says what that is;
+    otherwise as stamped (§5.3). The SSP producers' answer is still to
+    be asked. The question, kept as the record: **How is a frame
+    stamped mid-period advertised?** *Raised by D1, 2026-11-08.* SOS 643's daily frames are stamped 12:00Z. QGIS,
+    stepping by day from midnight, gets the previous day's frame, and
+    so does CesiumJS for any clock before noon, because it asks for
+    the exact time it was given (`delivery/D1_PROTOTYPES.md` §3.2). One
+    option is to advertise each frame at the start of the period it
+    represents (00:00Z for a frame that stands for a day). That needs
+    the dataset's represented time, which legacy rows do not record
+    (`metadata/PHASE0_IMPLEMENTATION.md` step 2). A related question is
+    for the producer: whether the SSP rows' frames, stamped 31
+    December, represent that year or the next.
+28. *Decided 2026-11-08 by the maintainer, for now:* the layer's
+    abstract and colour map say that index 0 outside the box is not a
+    measurement (§7.3). The question, kept as the record: **How does an
+    indexed data tile say "absent" when every code is a value?**
+    *Raised by D1, 2026-11-08.* A data-encoded row with no
+    `dataMinLuma` has no index left over, so outside a regional box the
+    tile carries index 0, which a GDAL user reads as code 0, a
+    measurement of zero (D1 §3.4). The options:
+    - reserve a code when the frames are made;
+    - tile such rows as grey plus alpha, losing the palette;
+    - serve a separate absence mask;
+    - or state in the abstract and colour map that index 0 outside the
+      box is not a measurement.
+29. *Decided 2026-11-08 by the maintainer:* the compact interval,
+    whatever the length (§5.3). The question, kept as the record:
+    **Interval or list past 1,000 steps?** *Raised by D1, 2026-11-08.*
+    QGIS 3.34 expands a `start/end/period` interval into at most 1,000
+    instants and shows a longer one as a single range with no frame
+    list; a list of values expands whatever its length (D1 §3.3). A
+    list grows the capabilities document with the series; GIBS caps
+    its lists at 100 and answers `DescribeDomains` for the rest.
+30. *Decided 2026-11-08 by the maintainer:* the video follows the
+    tiles' rule and shows the earlier frame. A regular series' bounds
+    are its first frame and one period past its last; a monthly or
+    yearly series goes to OpenSpace as frames or tiles, not as a
+    time-locked video (§6.3). The question, kept as the record:
+    **Where do an OpenSpace video's bounds go?** *Raised by D1,
+    2026-11-08.* §6.3 sets them half a mean step outside the first and
+    last dates, so each date lands mid-frame under OpenSpace's floor.
+    That makes the video show the **nearest** frame between frames, up
+    to half a period ahead, which is the behaviour §5.3 rejects for
+    tiles. For a regular period, bounds on the first frame and one
+    period past the last make the floor snap down exactly. For a
+    calendar period no linear mapping is exact, which argues for frames
+    or tiles there rather than video (D1 §3.9).
+31. *Decided 2026-11-09 by the maintainer:* one pack per frame per
+    grid, read by R2 range requests (§5.6, §9.7). The question, kept as
+    the record: **Loose tiles, or one pack per frame per grid?**
+    *Raised by D1, 2026-11-09.* §5.6 offered packing as an option for D1 to weigh, and
+    D1 measured it (`delivery/D1_PROTOTYPES.md` §3.15).
+    - **Upload.** A loose tile costs about 0.2 s of R2's own time
+      whatever its size, so a 4096-wide picture frame took 19.6 s
+      loose (383 objects, eight at a time) and 1.3 s packed. MPAS took
+      74 s against about 5.5 s.
+    - **Writes.** Packed bills 190 to 770 times fewer Class A
+      operations.
+    - **Serving.** A scratch Worker served every tile from packs by
+      range request, reading each pack's index (16 bytes a tile) once
+      per isolate.
+    - **Against it.** Not measured: tile read time against a loose
+      object. A pack is also rewritten whole, which costs nothing
+      extra, since a frame is cut whole anyway.
+
+    The evidence favoured packs, and D3a builds the cutter's output and
+    the tile route around them.
 
 ---
 
