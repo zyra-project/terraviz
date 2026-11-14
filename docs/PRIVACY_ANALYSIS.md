@@ -1050,6 +1050,9 @@ of the page, never raise it, and write nothing:
   works on any page of the app. The app's own address rewrites keep
   both parts, so it survives a change of dataset and a reload, and
   related-dataset links carry them into a tab opened from the link.
+  The blog's links into the app carry the `telemetry` key alone, in
+  the part it came from, since a blog address holds no other state
+  the app reads.
 - **Global Privacy Control, on every page**, read once, as the page
   loads, like the address. In the embed view it is the only preference
   the app can hear. Honouring it everywhere rather
