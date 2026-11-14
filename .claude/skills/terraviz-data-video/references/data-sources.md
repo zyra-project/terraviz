@@ -75,3 +75,42 @@ Run `scripts/sample_grib_range.py <s3-grib2-url> "<idx-regex>"`. It confirms the
 regex matches one record and prints min/max/mean/percentiles. Use it to set
 `vmax ≈ p99.9`. Observed GEFS column aerosols (kg m⁻²) run ~1e-6 background to
 ~7e-4 in heavy plumes; p99.9 is typically ~2–3e-4.
+
+## Sea surface temperature: OISST v2.1 on NODD (NetCDF, not pipeline-ready)
+
+NOAA's daily Optimum Interpolation SST v2.1 is on the open bucket
+**`noaa-cdr-sea-surface-temp-optimum-interpolation-pds`**, which fetches from
+CI like any NODD bucket:
+```
+https://noaa-cdr-sea-surface-temp-optimum-interpolation-pds.s3.amazonaws.com/data/v2.1/avhrr/{YYYYMM}/oisst-avhrr-v02r01.{YYYYMMDD}_preliminary.nc
+```
+- **NetCDF4**, one file per day, 0.25° (1440×720), carrying `sst`, `anom`,
+  `err` and `ice`. `anom` is `int16` with `scale_factor 0.01` and
+  `_FillValue −999` over land, units `Celsius`. Latitude runs south to north
+  and longitude 0–360, so it needs the same `reproject` to ±180 as GEFS.
+- **Preliminary ~D+2, final ~D+16.** The final drops the `_preliminary`
+  suffix. In November 2026 preliminary files were still in the bucket after
+  their finals landed; that is observed, not documented, so check before
+  relying on it.
+- `anom` is a **diverging** field: don't calibrate it with p99.9 or the
+  aerosol palette defaults (SKILL.md §3 and §5,
+  `references/data-encoded-contract.md` §5). The NODD file's own attributes
+  don't name the anomaly's baseline period (checked November 2026), so confirm
+  it from the producer's documentation before writing the description: every
+  value on the globe is relative to it.
+
+Two gaps stop a workflow from using it today:
+
+- **zyra's `convert-format` cannot read NetCDF.** It routes every input
+  through the GRIB-only `grib_decode`, so there is no NetCDF equivalent of the
+  `.idx` `--pattern` path. A Tier 2 gap (`references/capability-gaps.md`).
+  Neither obvious workaround works: `--format netcdf` passes the file through,
+  but `heatmap` then receives a 4-D `(time, zlev, lat, lon)` array and refuses
+  it; and pointing `reproject` at a GDAL subdataset (`NETCDF:<file>:anom`)
+  returns the raw `int16` without `scale_factor`, so a +3.53 °C anomaly would
+  hover as 353.
+- **The placeholder grammar has no `YYYYMM` formatter.** The key's month
+  directory can't be templated: `{{cycle_date}}` gives `YYYYMMDD`,
+  `{{cycle_hour}}` gives `HH`, and the `valid_*` forms give whole instants
+  (`src/types/zyra-pipeline-args.ts`). Adding one is a TerraViz change to that
+  shared file, not a zyra one.

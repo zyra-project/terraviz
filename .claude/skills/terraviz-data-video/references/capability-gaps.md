@@ -36,13 +36,22 @@ the change is "add the command **and** confirm the pinned zyra version has it,"
 bumping both together. File in the node's terraviz fork.
 
 ### Tier 2 — zyra capability gap (nobody can)
-The command does not exist upstream. Two confirmed, both of which come up in
+The command does not exist upstream. Three confirmed, all of which come up in
 practice:
 
-- **Unit rescaling.** No `process` command multiplies a variable by a constant
-  or converts units. A column-mass field is stuck in native `kg m-2` and hovers
-  as `0.0000124`. Workarounds: pick a variable whose native units read well
-  (AOD is dimensionless ~0–2), or accept the exponent. Real upstream candidate.
+- **Arithmetic on values.** No `process` command multiplies a variable by a
+  constant, sums two records, or subtracts a climatology. Readability is no
+  longer the reason to want it: the client restates SI prefixes at display
+  time (`src/types/unit-scale.ts`), so `3e-4 kg m-2` reads as `300 mg m-2`.
+  What still can't be done is a real change of quantity: a unit change that
+  isn't a prefix (kelvin to °C), smoke as organic matter + black carbon, or an
+  anomaly against a baseline the node chose. Workarounds: pick a variable the
+  producer already publishes in the form you want (AOD, a producer-computed
+  anomaly), or accept the native one. Real upstream candidate.
+- **NetCDF input to `convert-format`.** `convert-format` routes every input
+  through the GRIB-only `grib_decode`, so a NetCDF source such as OISST v2.1
+  (`references/data-sources.md`) can't enter the pipeline, even from an open
+  bucket.
 - **Vector / shapefile / GeoJSON geometry.** Nothing in `process` reads vector
   geometry; the toolkit is raster-only (GRIB2 / NetCDF / imagery). A request
   for "overlay these shapefile boundaries" or "render this GeoJSON as a layer"
@@ -54,9 +63,16 @@ then allowlisted here once the release landed.
 
 ### Tier 3 — TerraViz client/render gap (the pipeline could, the globe can't)
 The data could be produced but nothing consumes it. Examples:
-- **Dynamic colorbar legend** from `color_scale` — exists, but on the unmerged
-  `claude/data-driven-video-analytics` branch. On `main` the legend is a
-  publisher-uploaded `legend_ref` image.
+- **Diverging-aware display transforms.** The colorbar's palette swap
+  (`src/services/colorScaleDisplay.ts`) offers only sequential ramps (Viridis,
+  Magma, Turbo, Grayscale), so a viewer who swaps an anomaly's palette loses
+  its zero, and the range stretch has no way to stay symmetric about zero. The
+  publisher's own diverging ramp ("Original") is unaffected. Recorded as the
+  unbuilt anomaly and difference display modes in
+  `docs/DATA_ENCODED_VIDEO_PLAN.md` and `docs/DATA_ANALYSIS_PLAN.md`.
+- **The color scale in a download.** The web zip's `manifest.json` carries no
+  `color_scale`, so a downloaded data-encoded dataset is grayscale luma with no
+  calibration. An open item in `docs/DATA_ENCODED_VIDEO_PLAN.md`.
 - **Non-equirectangular sources** — the sphere shader, `photorealEarth`, and the
   thumbnail generator all assume 2:1 EPSG:4326. Reprojection is deliberately a
   zyra responsibility, never in-browser (`docs/ZYRA_INTEGRATION_PLAN.md`
@@ -97,5 +113,5 @@ outward-facing.
 
 Good issue content, in both places: the real pipeline YAML (trimmed), the
 verbatim error, the data source URL, and the user-visible consequence ("the
-hover readout shows 0.0000124 kg m-2, which is unreadable") — the consequence is
-what motivates a fix.
+daily SST anomaly can't go on the globe at all, because its only reachable
+source is NetCDF") — the consequence is what motivates a fix.
