@@ -10,8 +10,10 @@
  * would: 0.7 em per capital.
  */
 
-import { describe, expect, it } from 'vitest'
-import { fitSubtitle } from './vrLoading'
+import * as THREE from 'three'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { __installMessagesForTests, __resetI18nForTests } from '../i18n'
+import { createVrLoading, fitSubtitle } from './vrLoading'
 
 const measure = (text: string, px: number): number => text.length * px * 0.7
 const MAX = 768 - 64
@@ -56,5 +58,28 @@ describe('fitSubtitle', () => {
     const eighty = Array.from({ length: 16 }, () => 'WWWW').join(' ') // 79 characters
     expect(fitSubtitle(eighty, measure)).toMatchObject({ squeeze: false })
     expect(fitSubtitle(eighty, measure).lines).toHaveLength(2)
+  })
+})
+
+describe('createVrLoading', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    __resetI18nForTests()
+  })
+
+  it('draws the first status line in the active locale', () => {
+    const drawn: string[] = []
+    const ctx = {
+      clearRect: () => {},
+      fillText: (text: string) => drawn.push(text),
+      measureText: (text: string) => ({ width: text.length * 10 }),
+    }
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(ctx as never)
+    __installMessagesForTests('es', { 'vr.loading.initializing': 'Iniciando…' })
+
+    createVrLoading(THREE).dispose()
+
+    expect(drawn).toContain('Iniciando…')
+    expect(drawn).not.toContain('Initializing…')
   })
 })

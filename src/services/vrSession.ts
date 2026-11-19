@@ -870,7 +870,7 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
   // already done by the time we reach this point — most of the visible
   // loading time is the texture-decode wait. Start at a meaningful
   // baseline so the user sees motion not "stuck at 0%".
-  loading.setProgress(0.6, 'Building scene\u2026')
+  loading.setProgress(0.6, t('vr.loading.buildingScene'))
 
   // Initial HUD state + texture. Wait for texture readiness before
   // hiding the loading scene; for video this can take several hundred
@@ -884,7 +884,7 @@ export async function enterImmersive(mode: VrMode, ctx: VrSessionContext): Promi
   // delay.) See vrLoadingHandover for the fallback timer and the
   // failure outcome.
   const datasetStageProgress = 0.8
-  loading.setProgress(datasetStageProgress, 'Loading dataset\u2026')
+  loading.setProgress(datasetStageProgress, t('vr.loading.loadingDataset'))
   const loadingHandover = createVrLoadingHandover({
     // Failure statuses leave the bar at the dataset stage.
     setStatus: (status, progress) => loading.setProgress(progress ?? datasetStageProgress, status),
