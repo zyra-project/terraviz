@@ -22,7 +22,7 @@
  */
 
 import type * as THREE from 'three'
-import { getLocale } from '../i18n'
+import { getLocale, t } from '../i18n'
 import { isNodeTagline, splashTagline } from '../ui/splashTagline'
 
 /** Anchor in local-floor space — same spot the globe will occupy when ready. */
@@ -329,7 +329,8 @@ export function createVrLoading(THREE_: typeof THREE): VrLoadingHandle {
   statusCanvas.height = STATUS_CANVAS_HEIGHT
   const statusCtx = statusCanvas.getContext('2d')
   if (!statusCtx) throw new Error('[VR loading] 2D canvas context unavailable')
-  drawStatus(statusCtx, 'Initializing\u2026')
+  const initialStatus = t('vr.loading.initializing')
+  drawStatus(statusCtx, initialStatus)
 
   const statusTexture = new THREE_.CanvasTexture(statusCanvas)
   statusTexture.colorSpace = THREE_.SRGBColorSpace
@@ -356,7 +357,7 @@ export function createVrLoading(THREE_: typeof THREE): VrLoadingHandle {
   let targetProgress = 0
   /** What's currently shown on the bar — eased toward target each frame. */
   let displayedProgress = 0
-  let lastStatus = 'Initializing\u2026'
+  let lastStatus = initialStatus
 
   /** Active fade tween, if any. */
   let fadeStart: number | null = null
