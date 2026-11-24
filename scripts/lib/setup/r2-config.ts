@@ -138,6 +138,11 @@ export interface R2CustomDomain {
   status?: { ownership?: string; ssl?: string }
 }
 
+/** The `result` of `GET …/r2/buckets/{bucket}/domains/custom`. */
+interface R2CustomDomainList {
+  domains?: R2CustomDomain[]
+}
+
 interface Zone {
   id: string
   name?: string
@@ -166,11 +171,21 @@ export class R2ConfigApi {
     return matchZone(zones, hostname)
   }
 
-  listCustomDomains(bucket: string): Promise<R2CustomDomain[] | null> {
-    return this.api.request<R2CustomDomain[]>(
+  /**
+   * The API wraps the list: `result` is `{ domains: [...] }`, not a
+   * bare array. Read as an array, the first real run crashed with
+   * `existing.some is not a function` while every test passed against
+   * a fixture of the wrong shape. A bare array is still accepted, so
+   * a change on Cloudflare's side in either direction costs nothing.
+   */
+  async listCustomDomains(bucket: string): Promise<R2CustomDomain[] | null> {
+    const result = await this.api.request<R2CustomDomainList | R2CustomDomain[]>(
       `/accounts/${this.accountId}/r2/buckets/${encodeURIComponent(bucket)}/domains/custom`,
       { allowMissing: true },
     )
+    if (result === null) return null
+    if (Array.isArray(result)) return result
+    return Array.isArray(result.domains) ? result.domains : []
   }
 
   addCustomDomain(bucket: string, domain: string, zoneId: string): Promise<unknown> {
