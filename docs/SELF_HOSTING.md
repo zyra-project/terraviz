@@ -235,6 +235,7 @@ so it cannot provision a deploy that
 |---|---|
 | **0** | Cloudflare account, Workers Paid, nameservers — billing and registrar actions. |
 | **5** (part) | *Connecting* the project to a Git remote. That handshake is an OAuth flow between Cloudflare and GitHub with no API — a token cannot grant Cloudflare access to your repos on your behalf. The tool creates the project; you either click Connect, or deploy from CI with `wrangler pages deploy dist/`. |
+| **5.4** (part) | The custom domain's DNS record. The API attach does not create it, and creating it needs Zone → DNS → Edit on a token already at Cloudflare's ten-permission limit. Setup prints the record to add. |
 | **6.1** | Zero Trust onboarding + choosing an identity provider. One-time, per account. |
 | **7** (half) | The node keypair — `npm run gen:node-key` owns it, because it also writes `node-public-key.txt` that Phase 9 reads and stamps your local D1. One command. |
 | **11** | The first single sign-on (SSO) sign-in, which is what makes you admin. |
@@ -354,18 +355,20 @@ your Git remote (`W3`) on the worksheet now. The account ID is in
 the Cloudflare dashboard sidebar and in every dashboard URL.
 
 > **`W2` must be a hostname of its own, not a path.** The node is
-> served from `/`: the app, the Access destinations, the CSP and
-> `/.well-known/terraviz.json` all assume it. A path under another
-> site (`your-org.org/terraviz`) is not supported, and getting there
-> means a proxy Worker on that site's zone or a rebuild with a base
-> path. Pick a subdomain (`terraviz.your-org.org`) instead.
+> served from `/`. The app calls `/api/…` and routes `/publish` and
+> `/dataset/…` from the root of its host, and the Access
+> destinations, `public/_headers` and `/.well-known/terraviz.json`
+> assume the same. A path under another site (`your-org.org/terraviz`)
+> is not supported: a base-path build alone does not get you there,
+> and a proxy Worker rewriting paths on that site's zone is the only
+> route. Pick a subdomain (`terraviz.your-org.org`) instead.
 >
 > If your organisation's Cloudflare account restricts which
 > hostnames may serve traffic (an allow-list in an account-level WAF
-> ruleset, say), ask for `W2` **and** the R2 assets hostname you will
-> pick in 8.5 to be added before you start. Reference D's "403 block
-> page on a new hostname" explains why this one is hard to find
-> after the fact.
+> ruleset, say), ask for `W2` **and** `W19`, the R2 assets hostname
+> (e.g. `assets.<W2>`), to be added before you start.
+> [Reference D](#403-block-page-on-a-new-hostname) explains why this
+> one is hard to find after the fact.
 
 > **Can I skip Workers Paid?** More than you might expect. D1, KV,
 > R2, Vectorize, Analytics Engine and Workers AI all have free
@@ -812,15 +815,19 @@ do, keep the dashboard bindings and the `CATALOG_R2_BUCKET` /
 > **A renamed bucket needs `CATALOG_R2_BUCKET` everywhere it is
 > addressed.** The `CATALOG_R2` binding names the bucket for the
 > Worker's own R2 calls, but presigned uploads, signed URLs, the
-> `upload` and `migrate-r2-*` CLIs and the transcode runner reach it
+> `upload` and `migrate-r2-*` CLIs and the transcode and Zyra
+> workflow runners (`transcode-hls.yml`, `zyra-run.yml`) reach it
 > through the S3 API by the name in `CATALOG_R2_BUCKET`, and fall
-> back to `terraviz-assets` when it is unset. Unset, uploads either
-> fail with `AccessDenied` or, with a token broad enough to reach a
-> bucket of that name, land in it. `npm run setup` writes the Pages
-> variable with the binding and lists the other two places in its
-> handoff: the shell you run the CLI from, and the transcode
-> runner's GitHub secrets. `npm run check:pages-bindings` fails when
-> the binding and the variable disagree.
+> back to `terraviz-assets` when it is unset. Unset, uploads fail
+> (`AccessDenied` with a bucket-scoped token, `NoSuchBucket` without
+> one) or, if your account also has a bucket by that name, land in
+> it. `npm run setup` writes the Pages variable with the binding, and
+> refuses to if your shell exports a `CATALOG_R2_BUCKET` that names a
+> different bucket. Its handoff lists the other two places: the shell
+> you run the CLI from, and the runners' GitHub secrets.
+> `npm run check:pages-bindings` fails when the binding and the
+> variable disagree. It checks Pages only; the shell and the GitHub
+> secrets are yours to keep in step.
 
 > **Your `wrangler.toml` now diverges from upstream, permanently.**
 > That is the intended end state, not drift to be tidied up. Expect a
@@ -1592,8 +1599,8 @@ engine's `frameRate` task assumes 30).
 **GitHub side** (repo Settings → Secrets and variables → Actions):
 `R2_S3_ENDPOINT` (`W21`), `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`
 (`W20`), `TERRAVIZ_SERVER` (`https://<W2>`), `CF_ACCESS_CLIENT_ID`
-(`W14`), `CF_ACCESS_CLIENT_SECRET` (`W15`), and optionally
-`CATALOG_R2_BUCKET`.
+(`W14`), `CF_ACCESS_CLIENT_SECRET` (`W15`), and `CATALOG_R2_BUCKET`
+(`W7`), which is required if you renamed the bucket (Phase 3).
 
 `npm run setup -- --github-secrets` prints the exact `gh secret set`
 commands for all of them, annotated with what each is for and which
@@ -2043,28 +2050,36 @@ own, as an edge rule or a `Content-Security-Policy` line in
 `public/_headers`:
 
 - `connect-src`: `'self'`, `gibs.earthdata.nasa.gov`,
-  `s3.dualstack.us-east-1.amazonaws.com`, `s3.amazonaws.com`, your
-  video and caption proxies, and `W19`.
+  `tiles.openfreemap.org`, `s3.dualstack.us-east-1.amazonaws.com`,
+  `s3.amazonaws.com`, your video and caption proxies, and `W19`.
 - `img-src` / `media-src`: `'self' data: blob:`,
   `s3.dualstack.us-east-1.amazonaws.com`, the SOS/CloudFront asset
   hosts, and `W19`. The Earth basemap textures need no entry —
   they are served from your own origin, so `'self'` already covers
   them. Add a host here only if you set `VITE_EARTH_ASSET_BASE`.
 
-The two S3 hosts are needed on **every** node, not only one that
-mirrored the SOS catalog. `s3.dualstack.us-east-1.amazonaws.com`
-serves the cloud texture (`clouds_4096.jpg` / `clouds_8192.jpg`)
-as well as the SOS snapshot. The globe loads the clouds as an image
-and the output page refreshes them with `fetch`, so the host belongs
-in both lists. `s3.amazonaws.com` serves the terrain elevation tiles,
-fetched whenever terrain is switched on. Neither host can be changed
-by configuration (Reference C), so a policy without them blanks the
-clouds on every node, and the terrain whenever it is on.
+Three of those hosts are needed on **every** node, not only one
+that mirrored the SOS catalog, and none can be changed by
+configuration (Reference C):
 
-Apply the policy as `Content-Security-Policy-Report-Only` first and
-load the globe, a dataset and a tour with the console open. Each
-violation names a host the policy is missing, and nothing is blocked
-while you collect them.
+- `tiles.openfreemap.org` serves the vector source and fonts behind
+  labels, borders and coastlines. The map asks it for the source
+  description as soon as it loads, whichever layers are on.
+- `s3.dualstack.us-east-1.amazonaws.com` serves the cloud texture
+  (`clouds_4096.jpg` / `clouds_8192.jpg`) as well as the SOS
+  snapshot. The globe loads the clouds as an image and the output
+  page refreshes them with `fetch`, so the host belongs in both
+  lists.
+- `s3.amazonaws.com` serves the terrain elevation tiles, fetched
+  whenever terrain is switched on.
+
+Apply the policy as `Content-Security-Policy-Report-Only` first, with
+the console open. Load the globe, a dataset and a tour; switch on
+terrain, labels and borders, since a host behind a toggle that is
+off never shows up; and open the output page (`/output/output`) if
+you use it.
+Each violation names a host the policy is missing, and nothing is
+blocked while you collect them.
 
 The app uses `blob:` for preview tours and screenshots — omitting
 it reproduces the "may not load data from blob:" failure. Test
@@ -2693,9 +2708,12 @@ quietly dependent on upstream infrastructure.
 Content you publish through the portal is transcoded to your own
 R2 (`r2:` data refs) and never touches either proxy — the proxies
 only matter for mirrored SOS rows. The proxy worker is not in this
-repo, so you cannot run your own copy of it. The way to drop the
-dependency is to move those rows onto your own R2 with
-`migrate-r2-hls`, which rewrites each `vimeo:` ref as `r2:`.
+repo, so changing these only helps if you run a compatible proxy of
+your own. The other way to drop the dependency is to move those rows
+onto your own R2 with `migrate-r2-hls`, which rewrites each `vimeo:`
+ref as `r2:`, except the real-time rows it skips by default: NOAA
+re-uploads those daily, so a one-off copy goes stale within a day.
+They stay on the proxy.
 
 > `TERRAVIZ_DOCS_URL` only matters for people reading your node's
 > `/setup` without filling anything in. The console also retargets
@@ -2704,7 +2722,8 @@ dependency is to move those rows onto your own R2 with
 > as they enter it, whether or not you set the variable.
 
 The SOS metadata snapshot, the cloud-texture bucket, NASA GIBS
-tiles and the terrain elevation tiles (AWS Open Data) are third-party
+tiles, OpenFreeMap's vector tiles and fonts, and the terrain
+elevation tiles (AWS Open Data) are third-party
 **public data sources** shared by all nodes, not upstream
 infrastructure. There is nothing to repoint, and no setting to do it
 with, so your CSP (Phase 13) has to allow their hosts.
@@ -2813,7 +2832,9 @@ among the zone's own, so a zone-level search finds nothing, and the
 token this guide prescribes cannot read them. Ask whoever runs the
 account to check the account-level rulesets and add both hostnames,
 or mint a separate read-only token that can see them. The setup
-token is already full (Shortcut, "Token scope").
+token is already full (Shortcut, "Token scope"). Send them the Ray
+ID printed at the bottom of the block page: it identifies the
+request in their security events, and with it the rule that fired.
 
 ### `/api/ingest` returns 403
 The cross-origin (CORS) gate rejected it, for one of two reasons.

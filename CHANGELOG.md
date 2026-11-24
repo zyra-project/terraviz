@@ -18,29 +18,37 @@ referenced in [`README.md`](README.md).
 
 ## Unreleased - Self-hosting fixes from a fresh install
 
+Fixes [#538](https://github.com/zyra-project/terraviz/issues/538).
+
 - `npm run setup -- --apply --only=r2` no longer crashes with
   `existing.some is not a function` when it attaches the R2 public domain.
   It read the custom-domain list as a bare array; the API wraps it.
 - Setup now writes `CATALOG_R2_BUCKET` to both Pages environments with the
-  `CATALOG_R2` binding. Uploads, signed URLs, the thumbnail job and the
-  `upload` / `migrate-r2-*` CLI read the bucket name from that variable and
-  fell back to `terraviz-assets` without it, so a renamed bucket was addressed
-  by two names. The handoff report asks for the same value in the CLI's shell
-  and the transcode runner's GitHub secrets.
+  `CATALOG_R2` binding. Uploads, signed URLs, the thumbnail job, the
+  `upload` / `migrate-r2-*` CLI and the transcode and Zyra workflow runners
+  read the bucket name from that variable and fell back to `terraviz-assets`
+  without it, so a renamed bucket was addressed by two names. Setup refuses
+  to write when the shell exports a `CATALOG_R2_BUCKET` naming a different
+  bucket, and the handoff report asks for the value in the CLI's shell and
+  the runners' GitHub secrets.
 - `npm run check:pages-bindings` now fails when the `CATALOG_R2` binding and
-  `CATALOG_R2_BUCKET` name different buckets.
+  `CATALOG_R2_BUCKET` name different buckets, and notes an environment whose
+  values it cannot read.
 - Setup prints the CNAME a Pages custom domain needs. Attaching a domain
   through the API, as setup does, does not create the DNS record.
-- `docs/SELF_HOSTING.md`: the hostname must be a hostname, not a path; the
-  setup token's permissions fill Cloudflare's 10-per-token limit; the server's
-  own `VIDEO_PROXY_BASE`; the two S3 hosts every node's CSP needs; and a
-  troubleshooting entry for a block page from an account-level WAF rule.
+- `docs/SELF_HOSTING.md`: the node needs a hostname of its own, not a path;
+  the setup token's permissions fill Cloudflare's ten-per-token limit; the
+  server's own `VIDEO_PROXY_BASE`; the CSP hosts every node needs
+  (`tiles.openfreemap.org` and two S3 hosts); and a troubleshooting entry
+  for a block page from an account-level WAF rule.
 - **Operators:** if you renamed the R2 bucket, run
-  `npm run check:pages-bindings`. If it reports a mismatch, set
-  `CATALOG_R2_BUCKET` to your bucket's name in both Pages environments, in the
-  shell you run the CLI from, and, if you use video transcode, as a GitHub
-  secret. Then check that nothing was uploaded to a `terraviz-assets` bucket
-  you do not own.
+  `npm run check:pages-bindings`. If it reports a mismatch, point the binding
+  and `CATALOG_R2_BUCKET` at the bucket that holds your assets in both Pages
+  environments, then redeploy: a Pages variable takes effect on the next
+  deployment. Set the same value in the shell you run the CLI from and, if
+  you use video transcode or Zyra workflows, as a GitHub secret. Then check
+  that nothing was uploaded to a `terraviz-assets` bucket in the same account,
+  such as an earlier install's or another node's.
 
 ## Unreleased - Feedback admin routes verify the Access token
 
