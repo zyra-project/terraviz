@@ -264,7 +264,7 @@ wrangler d1 migrations apply FEEDBACK_DB --remote   # migrations/`,
     produces: ['W10', 'W11'],
     automated: { code: 'npm run setup -- --apply --only=pages' },
     automatedNote: [
-      "Creates the project with the right build settings and attaches your custom domain. What it *cannot* do is connect the Git remote — that handshake is an OAuth flow between Cloudflare and GitHub with no API behind it. A project the tool creates is Direct Upload, so Cloudflare never runs your build and the `VITE_*` variables must be set wherever the build actually runs. Click Connect in the dashboard afterwards to convert it in place, or stay on Direct Upload and deploy from CI.",
+      "Creates the project with the right build settings and attaches your custom domain. Attaching through the API does not create the domain\u2019s DNS record, so it prints the CNAME to add. What it *cannot* do at all is connect the Git remote — that handshake is an OAuth flow between Cloudflare and GitHub with no API behind it. A project the tool creates is Direct Upload, so Cloudflare never runs your build and the `VITE_*` variables must be set wherever the build actually runs. Click Connect in the dashboard afterwards to convert it in place, or stay on Direct Upload and deploy from CI.",
     ],
     body: [
       {
@@ -787,7 +787,7 @@ export const WORKSHEET: WorksheetField[] = [
   { id: 'W4', label: 'D1 database ID', phase: 2, token: '‹d1-id›', placeholder: 'from wrangler d1 create', note: 'The one value you cannot recover from a later error.', origin: 'discovered', consumedBy: [3, 8], minTier: 1 },
   { id: 'W5', label: 'KV — TELEMETRY_KILL_SWITCH', phase: 2, token: '‹kv-killswitch-id›', placeholder: '32-char hex', origin: 'discovered', consumedBy: [3, 8], minTier: 1 },
   { id: 'W6', label: 'KV — CATALOG_KV', phase: 2, token: '‹catalog-kv-id›', placeholder: '32-char hex', origin: 'discovered', consumedBy: [3, 8], minTier: 2 },
-  { id: 'W7', label: 'R2 bucket name', phase: 2, token: 'terraviz-assets', placeholder: 'terraviz-assets', note: 'Yours to rename; keep the bindings in sync if you do.', origin: 'default', consumedBy: [8, 13], minTier: 2 },
+  { id: 'W7', label: 'R2 bucket name', phase: 2, token: 'terraviz-assets', placeholder: 'terraviz-assets', note: 'Yours to rename. The S3-API paths read it from CATALOG_R2_BUCKET, which setup writes with the binding; set it yourself if you wire bindings by hand.', origin: 'default', consumedBy: [8, 13], minTier: 2 },
   { id: 'W8', label: 'Vectorize index', phase: 2, token: 'terraviz-datasets', placeholder: 'terraviz-datasets', origin: 'default', consumedBy: [8], minTier: 2 },
   { id: 'W9', label: 'Analytics Engine dataset', phase: 2, token: 'terraviz_events', placeholder: 'terraviz_events', note: 'Nothing to create — it appears on first write.', origin: 'default', consumedBy: [8, 13], minTier: 1 },
   { id: 'W10', label: 'Pages project name', phase: 5, token: '‹pages-project›', placeholder: 'terraviz', origin: 'asked', fromTool: 'pagesProject', validator: 'projectName', consumedBy: [6, 8, 10], minTier: 1 },

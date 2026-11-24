@@ -316,7 +316,7 @@ code{overflow-wrap:anywhere}
 <!--
   GENERATED FILE — do not edit.
 
-  Produced by scripts/build-setup-page.ts on 2026-11-08.
+  Produced by scripts/build-setup-page.ts on 2026-11-24.
   Prose lives in scripts/setup-page/content.ts; every binding,
   prerequisite and validator is imported from the modules the setup
   tool itself uses, so this page cannot disagree with `npm run setup`.
@@ -1324,7 +1324,7 @@ npm run dev:functions<span style="color:var(--tv-text-dim)">      # http://local
     </div>
     <input data-field="W7" placeholder="terraviz-assets" spellcheck="false" autocomplete="off" style="width:100%;background:var(--tv-surface-3);border:1px solid var(--tv-border-strong);border-radius:6px;padding:8px 10px;font:400 13px/1.4 var(--tv-font-mono);color:var(--tv-text)"/>
     <div data-error="W7" style="display:none;font:400 11.5px/1.5 var(--tv-font-sans);color:var(--tv-error);margin-top:4px"></div>
-    <div style="font:400 11.5px/1.5 var(--tv-font-sans);color:var(--tv-text-dim);margin-top:4px">Yours to rename; keep the bindings in sync if you do.</div>
+    <div style="font:400 11.5px/1.5 var(--tv-font-sans);color:var(--tv-text-dim);margin-top:4px">Yours to rename. The S3-API paths read it from CATALOG_R2_BUCKET, which setup writes with the binding; set it yourself if you wire bindings by hand.</div>
   </div>
       <div data-field-row="W8" data-tier="2" style="margin:0 0 14px">
     <div style="display:flex;align-items:center;gap:7px;margin:0 0 5px;flex-wrap:wrap">
@@ -1443,7 +1443,7 @@ wrangler d1 migrations apply FEEDBACK_DB --remote<span style="color:var(--tv-tex
   <pre style="margin:0;background:var(--tv-surface-code);border:1px solid var(--tv-border);color:var(--tv-text-muted);font:400 12.5px/1.8 var(--tv-font-mono);padding:36px 16px 15px;border-radius:6px;overflow-x:auto">npm run setup -- --apply --only=pages</pre>
   <button data-copy="1" style="position:absolute;top:7px;right:8px;background:rgba(255,255,255,.07);color:var(--tv-text-dim);border:1px solid var(--tv-border-strong);border-radius:3px;font:500 10px/1 var(--tv-font-sans);letter-spacing:.08em;text-transform:uppercase;padding:5px 8px;cursor:pointer">Copy</button>
 </div>
-  <p style="margin:0 0 16px;max-width:64ch;font-size:13.5px;color:var(--tv-text-muted);text-wrap:pretty">Creates the project with the right build settings and attaches your custom domain. What it <i>cannot</i> do is connect the Git remote — that handshake is an OAuth flow between Cloudflare and GitHub with no API behind it. A project the tool creates is Direct Upload, so Cloudflare never runs your build and the <code style="font-family:var(--tv-font-mono);font-size:.92em;background:var(--tv-surface-3);padding:1px 5px;border-radius:3px">VITE_*</code> variables must be set wherever the build actually runs. Click Connect in the dashboard afterwards to convert it in place, or stay on Direct Upload and deploy from CI.</p>
+  <p style="margin:0 0 16px;max-width:64ch;font-size:13.5px;color:var(--tv-text-muted);text-wrap:pretty">Creates the project with the right build settings and attaches your custom domain. Attaching through the API does not create the domain’s DNS record, so it prints the CNAME to add. What it <i>cannot</i> do at all is connect the Git remote — that handshake is an OAuth flow between Cloudflare and GitHub with no API behind it. A project the tool creates is Direct Upload, so Cloudflare never runs your build and the <code style="font-family:var(--tv-font-mono);font-size:.92em;background:var(--tv-surface-3);padding:1px 5px;border-radius:3px">VITE_*</code> variables must be set wherever the build actually runs. Click Connect in the dashboard afterwards to convert it in place, or stay on Direct Upload and deploy from CI.</p>
   <div style="background:var(--tv-warn-bg);border:1px solid var(--tv-warn-border);border-left:3px solid var(--tv-warn);border-radius:6px;padding:15px 17px;margin:0 0 16px">
   <div style="font:600 10.5px/1.35 var(--tv-font-sans);letter-spacing:.13em;text-transform:uppercase;color:var(--tv-warn);margin:0 0 8px">Worth knowing · Pick exactly one deploy path</div>
   <p style="margin:0 0 10px;font-size:13.5px;line-height:1.55;color:var(--tv-text-muted);text-wrap:pretty">The repo ships a <code style="font-family:var(--tv-font-mono);font-size:.92em;background:var(--tv-surface-3);padding:1px 5px;border-radius:3px">deploy</code> job that targets the project name <code style="font-family:var(--tv-font-mono);font-size:.92em;background:var(--tv-surface-3);padding:1px 5px;border-radius:3px">terraviz</code>. On a fresh fork it either fails for lack of secrets or — worse, if you have set them — deploys to a project that is not yours.</p>
@@ -2274,7 +2274,7 @@ npm run terraviz -- import-snapshot \
     </div>
     <input data-field="W7" placeholder="terraviz-assets" spellcheck="false" autocomplete="off" style="width:100%;background:var(--tv-surface-3);border:1px solid var(--tv-border-strong);border-radius:6px;padding:8px 10px;font:400 13px/1.4 var(--tv-font-mono);color:var(--tv-text)"/>
     <div data-error="W7" style="display:none;font:400 11.5px/1.5 var(--tv-font-sans);color:var(--tv-error);margin-top:4px"></div>
-    <div style="font:400 11.5px/1.5 var(--tv-font-sans);color:var(--tv-text-dim);margin-top:4px">Yours to rename; keep the bindings in sync if you do.</div>
+    <div style="font:400 11.5px/1.5 var(--tv-font-sans);color:var(--tv-text-dim);margin-top:4px">Yours to rename. The S3-API paths read it from CATALOG_R2_BUCKET, which setup writes with the binding; set it yourself if you wire bindings by hand.</div>
   </div>
       <div data-field-row="W8" data-tier="2" style="margin:0 0 14px">
     <div style="display:flex;align-items:center;gap:7px;margin:0 0 5px;flex-wrap:wrap">

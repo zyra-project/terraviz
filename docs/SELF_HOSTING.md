@@ -301,6 +301,15 @@ These two are needed only for the step named beside each:
 Each step names the permission it is missing rather than failing
 with a bare `10000: Authentication error`.
 
+> **That is ten permissions, and ten is all one token can hold.** The
+> dashboard makes each row a separate policy on the token, and
+> Cloudflare refuses an eleventh with `policies must have a length
+> lower than or equal to 10`. A publisher node that runs both
+> optional steps has no room left, so when you need more access,
+> usually read access to WAF rules or zone analytics while
+> troubleshooting, mint a second, read-only token for it rather
+> than widening this one.
+
 > **The two Zone rows are the ones people cannot find.** Each
 > permission row has three dropdowns, and the first one — the
 > scope — starts on **Account**. Zone permissions are not in the
@@ -343,6 +352,20 @@ with a bare `10000: Authentication error`.
 Write your account ID (`W1`), your intended hostname (`W2`), and
 your Git remote (`W3`) on the worksheet now. The account ID is in
 the Cloudflare dashboard sidebar and in every dashboard URL.
+
+> **`W2` must be a hostname of its own, not a path.** The node is
+> served from `/`: the app, the Access destinations, the CSP and
+> `/.well-known/terraviz.json` all assume it. A path under another
+> site (`your-org.org/terraviz`) is not supported, and getting there
+> means a proxy Worker on that site's zone or a rebuild with a base
+> path. Pick a subdomain (`terraviz.your-org.org`) instead.
+>
+> If your organisation's Cloudflare account restricts which
+> hostnames may serve traffic (an allow-list in an account-level WAF
+> ruleset, say), ask for `W2` **and** the R2 assets hostname you will
+> pick in 8.5 to be added before you start. Reference D's "403 block
+> page on a new hostname" explains why this one is hard to find
+> after the fact.
 
 > **Can I skip Workers Paid?** More than you might expect. D1, KV,
 > R2, Vectorize, Analytics Engine and Workers AI all have free
@@ -786,6 +809,19 @@ Resource *names* (`sphere-feedback`, `terraviz-assets`,
 do, keep the dashboard bindings and the `CATALOG_R2_BUCKET` /
 `ANALYTICS_AE_DATASET` overrides in sync.
 
+> **A renamed bucket needs `CATALOG_R2_BUCKET` everywhere it is
+> addressed.** The `CATALOG_R2` binding names the bucket for the
+> Worker's own R2 calls, but presigned uploads, signed URLs, the
+> `upload` and `migrate-r2-*` CLIs and the transcode runner reach it
+> through the S3 API by the name in `CATALOG_R2_BUCKET`, and fall
+> back to `terraviz-assets` when it is unset. Unset, uploads either
+> fail with `AccessDenied` or, with a token broad enough to reach a
+> bucket of that name, land in it. `npm run setup` writes the Pages
+> variable with the binding and lists the other two places in its
+> handoff: the shell you run the CLI from, and the transcode
+> runner's GitHub secrets. `npm run check:pages-bindings` fails when
+> the binding and the variable disagree.
+
 > **Your `wrangler.toml` now diverges from upstream, permanently.**
 > That is the intended end state, not drift to be tidied up. Expect a
 > conflict on this file every time you merge upstream — keep your IDs
@@ -980,8 +1016,17 @@ for a repo you control, and worth narrowing for one you share.
 ## 5.4 Custom domain
 
 Pages → your project → **Custom domains → Set up a custom domain**
-→ enter `W2`. Cloudflare creates the CNAME automatically when the
-zone is on its DNS.
+→ enter `W2`. When the zone is on Cloudflare DNS, this dashboard
+flow creates the CNAME for you.
+
+`npm run setup` attaches the domain through the API instead, and
+the API does **not** create the record: the domain stays `pending`
+with "CNAME record not set" until it exists. Setup prints the record
+to add: `W2` as a proxied CNAME to the project's `*.pages.dev`
+hostname. That is usually `<W10>.pages.dev`, but Cloudflare adds a
+suffix when the name is taken, so copy it from setup's output or the
+project's overview page rather than typing it. A domain attached by
+hand in the dashboard and then adopted by setup needs nothing more.
 
 **Gate:** `https://<W2>` serves the app over TLS.
 
@@ -1388,6 +1433,7 @@ Everything referenced below now exists. Pages → your project →
 | `ACCESS_AUD` | `W13` | |
 | `ACCESS_FEEDBACK_AUD` | 6.4's admin app AUD, `W13`, or `none` (see 6.4) | |
 | `TRUSTED_PUBLISHER_DOMAINS` | `your-org.org` (comma-separated, optional) | |
+| `CATALOG_R2_BUCKET` | `W7` — the same bucket the `CATALOG_R2` binding names. Optional only while the bucket keeps its default name (Phase 3) | |
 
 ## 8.3 Secrets (encrypted)
 
@@ -1997,12 +2043,28 @@ own, as an edge rule or a `Content-Security-Policy` line in
 `public/_headers`:
 
 - `connect-src`: `'self'`, `gibs.earthdata.nasa.gov`,
-  `s3.dualstack.us-east-1.amazonaws.com` (SOS snapshot), your video
-  and caption proxies, and `W19`.
-- `img-src` / `media-src`: `'self' data: blob:`, the SOS/CloudFront
-  asset hosts, and `W19`. The Earth basemap textures need no entry —
+  `s3.dualstack.us-east-1.amazonaws.com`, `s3.amazonaws.com`, your
+  video and caption proxies, and `W19`.
+- `img-src` / `media-src`: `'self' data: blob:`,
+  `s3.dualstack.us-east-1.amazonaws.com`, the SOS/CloudFront asset
+  hosts, and `W19`. The Earth basemap textures need no entry —
   they are served from your own origin, so `'self'` already covers
   them. Add a host here only if you set `VITE_EARTH_ASSET_BASE`.
+
+The two S3 hosts are needed on **every** node, not only one that
+mirrored the SOS catalog. `s3.dualstack.us-east-1.amazonaws.com`
+serves the cloud texture (`clouds_4096.jpg` / `clouds_8192.jpg`)
+as well as the SOS snapshot. The globe loads the clouds as an image
+and the output page refreshes them with `fetch`, so the host belongs
+in both lists. `s3.amazonaws.com` serves the terrain elevation tiles,
+fetched whenever terrain is switched on. Neither host can be changed
+by configuration (Reference C), so a policy without them blanks the
+clouds on every node, and the terrain whenever it is on.
+
+Apply the policy as `Content-Security-Policy-Report-Only` first and
+load the globe, a dataset and a tour with the console open. Each
+violation names a host the policy is missing, and nothing is blocked
+while you collect them.
 
 The app uses `blob:` for preview tours and screenshots — omitting
 it reproduces the "may not load data from blob:" failure. Test
@@ -2557,7 +2619,8 @@ is [`scripts/lib/expected-bindings.ts`](../scripts/lib/expected-bindings.ts).
 | `YOUTUBE_API_KEY` | secret | 14.5 | YouTube suggestions |
 | `KILL_VOICE` | plaintext | 14.5 | Stops the Cloud voice engine, not the browser's |
 | `FEEDBACK_ADMIN_TOKEN` | secret | 6.4 | Bearer fallback for legacy admin routes |
-| `CATALOG_R2_BUCKET` | plaintext | — | Bucket-name override |
+| `CATALOG_R2_BUCKET` | plaintext | 8.2 | Bucket name for the S3-API paths; must match `CATALOG_R2` |
+| `VIDEO_PROXY_BASE` | plaintext | Ref. C | Server-side resolution of legacy `vimeo:` refs |
 
 **Build-time (`VITE_*`, Pages → Environment variables):**
 `VITE_BUILD_CHANNEL`, `VITE_TELEMETRY_ENABLED`,
@@ -2622,13 +2685,17 @@ quietly dependent on upstream infrastructure.
 |---|---|---|---|
 | `VITE_EARTH_ASSET_BASE` | *(unset — served from your own origin)* | Earth basemap textures (diffuse / night lights / normal / borders) for the photoreal Earth and 2D overlays — loaded by **every** node. | **Nothing to do.** The eleven files are committed under `public/assets/basemaps/`, so your clone has them and your build serves them itself — no install-time fetch, and it works air-gapped. Set this only to move them to a CDN. |
 | `VITE_VIDEO_PROXY_BASE` | `https://video-proxy.zyra-project.org/video` | Resolves **legacy SOS** `vimeo:` data refs into HLS/MP4. | Only if you ran `import-snapshot` and want video independent of upstream. The proxy worker isn't in this repo. |
+| `VIDEO_PROXY_BASE` | `https://video-proxy.zyra-project.org/video` | The same proxy, read by the **server**: `/api/v1/datasets/:id/manifest` resolves `vimeo:` refs through it, and the exhibit reads ask it for a video's length. A Pages variable, set at runtime, not a build variable. | Together with `VITE_VIDEO_PROXY_BASE`. Setting only the build variable moves the browser's lookups and leaves every manifest the node serves on upstream's proxy. `migrate-r2-hls` takes `--proxy-base` for the same reason. |
 | `VITE_CAPTION_PROXY_BASE` | `https://video-proxy.zyra-project.org/captions` | CORS shim for legacy `sos.noaa.gov` `.srt` captions. | Same. |
 | `VITE_SAMPLE_TOURS` | *(unset — the two bundled tours are shown)* | "Climate Connections" and "Climate Futures", the sample tours committed under `public/assets/`. They are injected into the catalog **client-side**, after `/api/v1/catalog` returns, so they appear even on a node that has published nothing — and they load SOS handles (`INTERNAL_SOS_25_VIDEO`, `INTERNAL_SOS_SSP_GA_19`, …) that only exist upstream. On your node the cards open a tour that can load nothing, and Orbit recommends them to newcomers besides. | **Set it to `false`** unless you ran `import-snapshot` and hold those datasets. It drops those two rows only — your own published tours are unaffected (that is the `tours` node-feature toggle, which is broader). If CI builds, it is a **GitHub Variable** (Settings → Secrets and variables → Actions → Variables, or the `production` Environment); `ci.yml` already passes it through. If Cloudflare builds, set it in Pages → Settings → Environment variables. |
 | `TERRAVIZ_DOCS_URL` | `https://github.com/zyra-project/terraviz/blob/main/docs/SELF_HOSTING.md` | Base for the 19 links the `/setup` console makes into this guide (17 anchored per phase). Read at **build** time by `npm run build:setup-page`. | Once your fork's copy of this guide diverges from upstream's. Set it to your own blob URL — including the branch, if yours isn't `main` — and rebuild. |
 
 Content you publish through the portal is transcoded to your own
 R2 (`r2:` data refs) and never touches either proxy — the proxies
-only matter for mirrored SOS rows.
+only matter for mirrored SOS rows. The proxy worker is not in this
+repo, so you cannot run your own copy of it. The way to drop the
+dependency is to move those rows onto your own R2 with
+`migrate-r2-hls`, which rewrites each `vimeo:` ref as `r2:`.
 
 > `TERRAVIZ_DOCS_URL` only matters for people reading your node's
 > `/setup` without filling anything in. The console also retargets
@@ -2636,9 +2703,11 @@ only matter for mirrored SOS rows.
 > actually working through the install gets your fork's guide as soon
 > as they enter it, whether or not you set the variable.
 
-The SOS metadata snapshot, the cloud-texture bucket, and NASA GIBS
-tiles are third-party **public data sources** shared by all nodes,
-not upstream infrastructure. Leave them pointed at NOAA/NASA.
+The SOS metadata snapshot, the cloud-texture bucket, NASA GIBS
+tiles and the terrain elevation tiles (AWS Open Data) are third-party
+**public data sources** shared by all nodes, not upstream
+infrastructure. There is nothing to repoint, and no setting to do it
+with, so your CSP (Phase 13) has to allow their hosts.
 
 Cosmetic, change at leisure: `src/ui/creditsPanel.ts` and
 `docs/PRIVACY.md` link to `github.com/zyra-project/terraviz` (after
@@ -2728,6 +2797,23 @@ The `ANALYTICS` binding is missing in the environment serving
 traffic. Check both Production and Preview.
 `functions/api/ingest.ts` reads `context.env.ANALYTICS` and
 silently skips the write when undefined.
+
+### 403 block page on a new hostname
+DNS resolves, the Pages domain is active, and every request to `W2`
+(or to the R2 assets hostname) still gets a Cloudflare block page,
+in a browser and from `curl`, from any network. Your node never saw
+the request: a WAF rule refused it at the edge.
+
+If the zone's own **Security → WAF → Custom rules** list nothing
+that matches, look at the **account** level. On Enterprise plans an
+account can deploy custom rulesets that run on every zone it owns,
+and an organisation often uses one as a hostname allow-list: any
+subdomain not on the list is blocked. Those rules are not shown
+among the zone's own, so a zone-level search finds nothing, and the
+token this guide prescribes cannot read them. Ask whoever runs the
+account to check the account-level rulesets and add both hostnames,
+or mint a separate read-only token that can see them. The setup
+token is already full (Shortcut, "Token scope").
 
 ### `/api/ingest` returns 403
 The cross-origin (CORS) gate rejected it, for one of two reasons.
