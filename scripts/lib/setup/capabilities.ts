@@ -344,8 +344,20 @@ export function planNode(selected: readonly CapabilityId[], actions: ActionsAnsw
   return plan
 }
 
-/** The `npm run setup` invocation for a set of features. */
-export function setupCommand(features: readonly SetupFeature[]): string {
+/**
+ * The setup steps a viewer node runs. A bare `npm run setup` also runs
+ * `access` (an Access application) and `secrets` (the node keys), which
+ * are publisher concerns a viewer never uses, and its interview asks
+ * the Access questions only when `access` runs. The bindings step still
+ * binds every resource Phase 2 created; the publisher ones sit unused
+ * until the node publishes, and adding publishing later needs no
+ * rebinding.
+ */
+export const VIEWER_STEPS = ['pages', 'resources', 'wrangler-toml', 'migrations', 'bindings'] as const
+
+/** The `npm run setup` invocation for a plan's tier and features. */
+export function setupCommand(features: readonly SetupFeature[], tier: NodeTier = 2): string {
+  if (tier === 1) return `npm run setup -- --interactive --only=${VIEWER_STEPS.join(',')}`
   return features.length === 0
     ? 'npm run setup -- --interactive'
     : `npm run setup -- --interactive --with=${features.join(',')}`

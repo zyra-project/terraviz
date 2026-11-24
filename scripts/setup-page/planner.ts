@@ -42,6 +42,7 @@ import {
   REQUIREMENTS,
   SETUP_FEATURES,
   TIER_NAMES,
+  VIEWER_STEPS,
   type Capability,
 } from '../lib/setup/capabilities'
 
@@ -202,7 +203,8 @@ function tvpPlan(D, selected, actions) {
   plan.features = D.features.filter(function (f) { return feats[f]; });
   return plan;
 }
-function tvpCommand(features) {
+function tvpCommand(features, tier, viewerSteps) {
+  if (tier === 1) return 'npm run setup -- --interactive --only=' + viewerSteps.join(',');
   return features.length === 0
     ? 'npm run setup -- --interactive'
     : 'npm run setup -- --interactive --with=' + features.join(',');
@@ -228,6 +230,7 @@ export function plannerData(): unknown {
     features: SETUP_FEATURES,
     tiers: TIER_NAMES,
     baseline: BASELINE,
+    viewerSteps: VIEWER_STEPS,
   }
 }
 
@@ -379,7 +382,11 @@ ${PLAN_LOGIC}
 
     body.appendChild(el('h4', H, 'Then run'));
     body.appendChild(el('pre', 'margin:0;padding:10px 12px;background:var(--tv-surface-code);border-radius:6px;white-space:pre-wrap;overflow-wrap:anywhere;font:500 12.5px/1.5 var(--tv-font-mono);color:var(--tv-text)',
-      tvpCommand(plan.features)));
+      tvpCommand(plan.features, plan.tier, D.viewerSteps)));
+    if (plan.tier === 1) {
+      body.appendChild(el('p', 'margin:6px 0 0;font-size:13px;color:var(--tv-text-muted)',
+        'Scoped to a viewer node: it skips Access, the node keys and the publisher questions.'));
+    }
   }
 
   function paint(announce) {

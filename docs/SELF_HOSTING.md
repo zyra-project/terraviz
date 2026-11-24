@@ -69,7 +69,7 @@ silently, since there is nothing to start them.
 
 | If you want to… | It needs | Without GitHub Actions |
 |---|---|---|
-| Show the globe, the SOS catalog and Orbit | A deployed node (Phases 0–5, then 13) | Works |
+| Show the globe, the SOS catalog and Orbit | A deployed node: Phases 0–5, the Tier 1 bindings in 8, the checks in 10, then 13. `npm run setup -- --interactive --only=pages,resources,wrangler-toml,migrations,bindings` runs the automated part and skips Access and the node keys | Works |
 | Publish your own datasets, tours and blog posts | The publisher backend (Phases 2–11) | Works |
 | Upload images and other files | + an R2 public domain and S3 token (8.5) | Works |
 | Upload videos and image sequences | + R2, and `transcode-hls.yml` (8.6) | Finishing an upload answers 503 |

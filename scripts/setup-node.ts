@@ -479,7 +479,10 @@ export async function runSetup(deps: SetupDeps): Promise<number> {
   // ── Interview ───────────────────────────────────────────────────
   if (opts.interactive) {
     const prompter = deps.prompter ?? new NonInteractivePrompter(deps.stdout.write)
-    const pending = pendingQuestions(state, deps.env, { features: opts.features })
+    const pending = pendingQuestions(state, deps.env, {
+      features: opts.features,
+      steps: opts.steps,
+    })
 
     prompter.say(
       '\nTerraviz node setup — interactive\n\n' +

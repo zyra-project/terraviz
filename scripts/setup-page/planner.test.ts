@@ -8,6 +8,7 @@ import {
   CAPABILITIES,
   planNode,
   setupCommand,
+  VIEWER_STEPS,
   type ActionsAnswer,
   type CapabilityId,
 } from '../lib/setup/capabilities'
@@ -40,9 +41,12 @@ const jsPlan = new Function(
   'actions',
   `${PLAN_LOGIC}; return tvpPlan(D, selected, actions)`,
 ) as (d: unknown, selected: string[], actions: string) => JsPlan
-const jsCommand = new Function('features', `${PLAN_LOGIC}; return tvpCommand(features)`) as (
-  features: string[],
-) => string
+const jsCommand = new Function(
+  'features',
+  'tier',
+  'viewerSteps',
+  `${PLAN_LOGIC}; return tvpCommand(features, tier, viewerSteps)`,
+) as (features: string[], tier: number, viewerSteps: readonly string[]) => string
 
 /** Every subset of the capabilities. */
 function subsets(): CapabilityId[][] {
@@ -86,7 +90,9 @@ describe('the page plan', () => {
           workflows: ts.workflows.map(w => w.file),
           features: ts.features,
         })
-        expect(jsCommand(js.features)).toBe(setupCommand(ts.features))
+        expect(jsCommand(js.features, js.tier, VIEWER_STEPS)).toBe(
+          setupCommand(ts.features, ts.tier),
+        )
         compared++
       }
     }

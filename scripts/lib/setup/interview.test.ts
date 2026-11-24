@@ -98,6 +98,19 @@ describe('pendingQuestions', () => {
     expect(keys(new Set(['feeds']))).not.toContain('githubRepo')
   })
 
+  // A viewer node's run leaves out the access step, and with it the
+  // questions about who may sign in to a portal it does not have.
+  it('asks the Access questions only when the access step runs', () => {
+    const keys = (steps?: Set<string>) =>
+      pendingQuestions(defaultState(), {}, { steps }).map(q => q.key)
+    const viewer = keys(new Set(['pages', 'resources', 'wrangler-toml', 'migrations', 'bindings']))
+    expect(viewer).not.toContain('staffEmailDomain')
+    expect(viewer).not.toContain('trustedPublisherDomains')
+    expect(viewer).toContain('hostname')
+    expect(keys(new Set(['access']))).toContain('staffEmailDomain')
+    expect(keys()).toContain('staffEmailDomain')
+  })
+
   it('skips what the environment already supplies', () => {
     const pending = pendingQuestions(defaultState(), {
       CLOUDFLARE_ACCOUNT_ID: 'x',

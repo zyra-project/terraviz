@@ -47,6 +47,16 @@ export interface InterviewQuestion extends Question {
   envVar: string
   /** Skip unless the operator wants one of these optional features. */
   featureGate?: FeatureGate
+  /**
+   * The setup step whose answer this is. Skipped when a run leaves
+   * that step out, so a viewer node's `--only=` run is not asked who
+   * may sign in to a publisher portal it does not have. Both Access
+   * answers are tied to `access`, including the trusted domains the
+   * bindings step writes: they mean nothing on a node without Access.
+   * A partial re-run without `access` can still supply them through
+   * their environment variables.
+   */
+  step?: 'access'
 }
 
 /** One optional feature, or any of several. */
@@ -98,6 +108,7 @@ export const QUESTIONS: InterviewQuestion[] = [
   },
   {
     key: 'staffEmailDomain',
+    step: 'access',
     envVar: 'TERRAVIZ_STAFF_EMAIL_DOMAIN',
     label: 'Staff email domain',
     help: [
@@ -111,6 +122,7 @@ export const QUESTIONS: InterviewQuestion[] = [
   },
   {
     key: 'trustedPublisherDomains',
+    step: 'access',
     envVar: 'TRUSTED_PUBLISHER_DOMAINS',
     label: 'Auto-approve domains',
     help: [
@@ -216,6 +228,8 @@ export function isAnswered(
 export interface PendingOptions {
   /** Include questions gated on optional features. */
   features?: ReadonlySet<SetupFeature>
+  /** The steps this run will perform; omitted means all of them. */
+  steps?: ReadonlySet<string>
 }
 
 export function pendingQuestions(
@@ -225,6 +239,7 @@ export function pendingQuestions(
 ): InterviewQuestion[] {
   return QUESTIONS.filter(q => {
     if (!gateOpen(q.featureGate, opts.features)) return false
+    if (q.step && opts.steps && !opts.steps.has(q.step)) return false
     return !isAnswered(q, state, env)
   })
 }

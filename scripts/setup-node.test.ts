@@ -999,8 +999,9 @@ describe('runSetup — interactive mode', () => {
       staffEmailDomain: 'example.org',
       trustedPublisherDomains: 'example.org',
     })
+    // The Access answers are asked when the access step runs.
     const h = harness({
-      argv: ['--interactive', '--only=bindings'],
+      argv: ['--interactive', '--only=access,bindings'],
       files: {},
       prompter: p.prompter,
     })
@@ -1049,6 +1050,18 @@ describe('runSetup — interactive mode', () => {
     const h = harness({ argv: ['--interactive', '--only=bindings'], files: {}, prompter: p.prompter })
     await runSetup(h.deps)
     expect(p.said()).toContain('CLOUDFLARE_ACCOUNT_ID')
+  })
+
+  it('does not ask a viewer run the Access questions', async () => {
+    const p = scriptedPrompter({})
+    const h = harness({
+      argv: ['--interactive', '--only=pages,resources,wrangler-toml,migrations,bindings'],
+      files: {},
+      prompter: p.prompter,
+    })
+    await runSetup(h.deps)
+    expect(p.asked).toContain('hostname')
+    expect(p.asked).not.toContain('staffEmailDomain')
   })
 
   // transcode-hls.yml writes into the bucket, so asking for video

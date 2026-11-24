@@ -97,7 +97,18 @@ describe('planNode', () => {
     expect(plan.tier).toBe(1)
     expect(plan.have).toEqual([])
     expect(plan.requirements).toEqual([])
-    expect(setupCommand(plan.features)).toBe('npm run setup -- --interactive')
+  })
+
+  // A bare run provisions Access and the node keys; a viewer node
+  // following its plan should not start a publisher install.
+  it('gives a viewer node a command scoped to what it needs', () => {
+    const cmd = setupCommand(planNode([], 'yes').features, 1)
+    expect(cmd).toBe(
+      'npm run setup -- --interactive --only=pages,resources,wrangler-toml,migrations,bindings',
+    )
+    expect(cmd).not.toMatch(/access|secrets/)
+    expect(setupCommand([], 2)).toBe('npm run setup -- --interactive')
+    expect(setupCommand(['r2'], 2)).toBe('npm run setup -- --interactive --with=r2')
   })
 
   it('brings in what a capability implies', () => {
