@@ -138,7 +138,7 @@ describe('ensureR2CustomDomain', () => {
     const seen: string[] = []
     const api = stubR2(
       {
-        'GET /accounts/acct/r2/buckets/terraviz-assets/domains/custom': [],
+        'GET /accounts/acct/r2/buckets/terraviz-assets/domains/custom': { domains: [] },
         'GET /zones?per_page=200': [{ id: 'z1', name: 'example.org' }],
         'POST /accounts/acct/r2/buckets/terraviz-assets/domains/custom': {},
       },
@@ -152,9 +152,10 @@ describe('ensureR2CustomDomain', () => {
     const seen: string[] = []
     const api = stubR2(
       {
-        'GET /accounts/acct/r2/buckets/terraviz-assets/domains/custom': [
-          { domain: 'assets.example.org' },
-        ],
+        // The shape the API actually returns: the list is wrapped.
+        'GET /accounts/acct/r2/buckets/terraviz-assets/domains/custom': {
+          domains: [{ domain: 'assets.example.org', enabled: true }],
+        },
       },
       seen,
     )
@@ -163,9 +164,34 @@ describe('ensureR2CustomDomain', () => {
     expect(seen.some(s => s.startsWith('POST'))).toBe(false)
   })
 
+  it('still reads a bare array, in case the API ever unwraps it', async () => {
+    const seen: string[] = []
+    const api = stubR2(
+      {
+        'GET /accounts/acct/r2/buckets/terraviz-assets/domains/custom': [
+          { domain: 'assets.example.org' },
+        ],
+      },
+      seen,
+    )
+    const res = await ensureR2CustomDomain(api, 'terraviz-assets', 'assets.example.org')
+    expect(res.created).toBe(false)
+    expect(seen.some(s => s.startsWith('POST'))).toBe(false)
+  })
+
+  it('treats a bucket with no domains list as having none', async () => {
+    const api = stubR2({
+      'GET /accounts/acct/r2/buckets/terraviz-assets/domains/custom': {},
+      'GET /zones?per_page=200': [{ id: 'z1', name: 'example.org' }],
+      'POST /accounts/acct/r2/buckets/terraviz-assets/domains/custom': {},
+    })
+    const res = await ensureR2CustomDomain(api, 'terraviz-assets', 'assets.example.org')
+    expect(res.created).toBe(true)
+  })
+
   it('explains that the domain must be on Cloudflare DNS first', async () => {
     const api = stubR2({
-      'GET /accounts/acct/r2/buckets/terraviz-assets/domains/custom': [],
+      'GET /accounts/acct/r2/buckets/terraviz-assets/domains/custom': { domains: [] },
       'GET /zones?per_page=200': [{ id: 'z1', name: 'unrelated.org' }],
     })
     await expect(

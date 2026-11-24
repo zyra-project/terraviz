@@ -46,6 +46,7 @@
  */
 
 import { MARKDOWN_URL, type WorksheetField } from './content'
+import { applyPlanner } from './planner'
 import { GB_PER_VIDEO_DATASET, R2_PRICING } from './pricing'
 
 // ── Fork-friendly documentation links ─────────────────────────────
@@ -473,6 +474,11 @@ export function applyShell(
     out = out.replace(anchor, `$1\n${CSP_META}`)
     repairs.csp = true
   }
+
+  // The capability questions go in front of the export's tier picker,
+  // which they drive (see planner.ts). Before the doc links, so their
+  // runtime also lands after render.ts's own script.
+  out = applyPlanner(out, INJECTED_MARK).html
 
   // Doc links last, so the runtime script lands after render.ts's own
   // inline script and can read the inputs it has already populated.

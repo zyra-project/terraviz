@@ -74,7 +74,67 @@ export const OPTIONAL_EXTRAS: ExpectedBinding[] = [
       'ACCESS_AUD\'s value if the publisher app covers it, or none if ' +
       'no app does (SELF_HOSTING.md 6.4). Export it, or set it in the dashboard.',
   },
+  {
+    // The `CATALOG_R2` binding names the bucket for the Worker's own
+    // R2 calls, but every S3-API path (presigned uploads, public-URL
+    // signing, the thumbnail job) reads the name from this variable
+    // and falls back to `terraviz-assets` without it. Written from the
+    // same state as the binding, always, so the two cannot disagree:
+    // a renamed bucket with this unset sends those paths to another
+    // bucket in the account, or to none. `check-pages-bindings` flags
+    // a mismatch.
+    name: 'CATALOG_R2_BUCKET',
+    type: 'plaintext',
+    environments: ['production', 'preview'],
+    hint:
+      'The R2 bucket name, matching the CATALOG_R2 binding. The S3-API ' +
+      'paths read it and fall back to terraviz-assets when it is unset.',
+  },
+  {
+    // The same split for Analytics Engine: the `ANALYTICS` binding
+    // names the dataset telemetry is written to, but the nightly
+    // export (Phase 14.2) queries the SQL API by the name in this
+    // variable and falls back to `terraviz_events` without it. A
+    // renamed dataset with this unset exports the wrong dataset, or
+    // fails the query. Written from the same state as the binding.
+    name: 'ANALYTICS_AE_DATASET',
+    type: 'plaintext',
+    environments: ['production', 'preview'],
+    hint:
+      'The Analytics Engine dataset name, matching the ANALYTICS binding. ' +
+      'The analytics export reads it and falls back to terraviz_events.',
+  },
 ]
+
+/**
+ * The bindings step writes `CATALOG_R2_BUCKET` from setup's own bucket
+ * name, which comes from `.terraviz-setup.json` or
+ * `TERRAVIZ_R2_BUCKET`, never from `CATALOG_R2_BUCKET` itself. An
+ * operator who exported `CATALOG_R2_BUCKET` for the CLI, as the
+ * handoff asks, and then runs setup from a fresh checkout would have
+ * the binding and the variable both written with the default name.
+ * The two would agree, so the audit could not see it, and the node
+ * would point at the wrong bucket. A message to refuse with, or
+ * `null` when the shell agrees or says nothing.
+ *
+ * Refused rather than adopted: an export left over from another node
+ * would otherwise rebind this one, and the resources step would
+ * create a bucket by that name.
+ */
+export function bucketEnvConflict(
+  state: Pick<SetupState, 'r2Bucket'>,
+  env: Readonly<Record<string, string | undefined>>,
+): string | null {
+  const shell = env.CATALOG_R2_BUCKET?.trim()
+  const ours = state.r2Bucket.name
+  if (!shell || shell === ours) return null
+  return (
+    `CATALOG_R2_BUCKET is "${shell}" in this shell, but setup's bucket is "${ours}", ` +
+    `and writing would point the node at "${ours}". If your bucket is "${shell}", ` +
+    `export TERRAVIZ_R2_BUCKET=${shell} (the name setup creates, binds and writes); ` +
+    'otherwise unset CATALOG_R2_BUCKET.'
+  )
+}
 
 /** Cloudflare's per-binding payload shapes, keyed by binding type. */
 export type BindingPayload =
@@ -189,6 +249,10 @@ function plaintextValue(name: string, state: SetupState): string | undefined {
       return state.accessFeedbackAud
     case 'R2_PUBLIC_BASE':
       return state.r2PublicBase
+    case 'CATALOG_R2_BUCKET':
+      return state.r2Bucket.name
+    case 'ANALYTICS_AE_DATASET':
+      return state.analyticsDataset.name
     case 'GITHUB_OWNER':
       return state.githubOwner
     case 'GITHUB_REPO':

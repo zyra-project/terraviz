@@ -4,6 +4,7 @@
 import { describe, expect, it } from 'vitest'
 import { EXPECTED_BINDINGS } from '../expected-bindings'
 import {
+  bucketEnvConflict,
   buildPatchBody,
   formatBindingsPlan,
   OPTIONAL_EXTRAS,
@@ -93,6 +94,51 @@ describe('planBindings', () => {
     const exported = applyEnvOverrides(provisionedState(), { ACCESS_FEEDBACK_AUD: '  none\n' })
     expect(find(exported)).toMatchObject({ status: 'resolved', payload: { type: 'plain_text', value: 'none' } })
   })
+
+  // The S3-API paths read CATALOG_R2_BUCKET and fall back to
+  // terraviz-assets. Writing the binding without the variable left a
+  // renamed bucket addressed by two different names.
+  it('writes CATALOG_R2_BUCKET from the same name as the CATALOG_R2 binding', () => {
+    const renamed = applyEnvOverrides(provisionedState(), { TERRAVIZ_R2_BUCKET: 'node-assets' })
+    const plan = planBindings(renamed)
+    const byName = new Map(plan.resolutions.map(r => [r.name, r]))
+    expect(byName.get('CATALOG_R2')?.payload).toEqual({ name: 'node-assets' })
+    expect(byName.get('CATALOG_R2_BUCKET')).toMatchObject({
+      status: 'resolved',
+      payload: { type: 'plain_text', value: 'node-assets' },
+    })
+
+    const body = buildPatchBody(plan)
+    for (const env of ['production', 'preview'] as const) {
+      const config = body.deployment_configs[env]
+      expect(config?.r2_buckets?.CATALOG_R2).toEqual({ name: 'node-assets' })
+      expect(config?.env_vars?.CATALOG_R2_BUCKET).toEqual({
+        type: 'plain_text',
+        value: 'node-assets',
+      })
+    }
+  })
+
+  // The analytics export queries by ANALYTICS_AE_DATASET and falls
+  // back to terraviz_events; the binding alone left a renamed dataset
+  // exported by the wrong name.
+  it('writes ANALYTICS_AE_DATASET from the same name as the ANALYTICS binding', () => {
+    const renamed = applyEnvOverrides(provisionedState(), { TERRAVIZ_AE_DATASET: 'node_events' })
+    const plan = planBindings(renamed)
+    const byName = new Map(plan.resolutions.map(r => [r.name, r]))
+    expect(byName.get('ANALYTICS')?.payload).toEqual({ dataset: 'node_events' })
+    expect(byName.get('ANALYTICS_AE_DATASET')?.payload).toEqual({
+      type: 'plain_text',
+      value: 'node_events',
+    })
+  })
+
+  it('writes CATALOG_R2_BUCKET for an unrenamed bucket too, so the name is explicit', () => {
+    const bucket = planBindings(provisionedState()).resolutions.find(
+      r => r.name === 'CATALOG_R2_BUCKET',
+    )
+    expect(bucket?.payload).toEqual({ type: 'plain_text', value: 'terraviz-assets' })
+  })
 })
 
 describe('buildPatchBody', () => {
@@ -127,5 +173,27 @@ describe('buildPatchBody', () => {
   it('emits no environment at all when nothing resolved', () => {
     const empty = { resolutions: [], resolved: [], skipped: [] }
     expect(buildPatchBody(empty).deployment_configs).toEqual({})
+  })
+})
+
+// The bindings step writes the bucket name from setup's state. A shell
+// that names another bucket would otherwise be overwritten in both
+// places at once, leaving a pair the audit reads as consistent.
+describe('bucketEnvConflict', () => {
+  const state = { r2Bucket: { name: 'terraviz-assets' } }
+
+  it('refuses when the shell names a different bucket', () => {
+    const message = bucketEnvConflict(state, { CATALOG_R2_BUCKET: 'node-assets' })
+    expect(message).toContain('"node-assets"')
+    expect(message).toContain('export TERRAVIZ_R2_BUCKET=node-assets')
+  })
+
+  it('is satisfied when the shell agrees, after trimming as the Worker does', () => {
+    expect(bucketEnvConflict(state, { CATALOG_R2_BUCKET: ' terraviz-assets\n' })).toBeNull()
+  })
+
+  it('says nothing when the shell does not set it', () => {
+    expect(bucketEnvConflict(state, {})).toBeNull()
+    expect(bucketEnvConflict(state, { CATALOG_R2_BUCKET: '  ' })).toBeNull()
   })
 })

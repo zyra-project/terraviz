@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildProjectBody,
   DEFAULT_BUILD_CONFIG,
+  cnameInstruction,
   ensureCustomDomain,
   ensurePagesProject,
   PagesProjectApi,
@@ -107,6 +108,50 @@ describe('ensureCustomDomain', () => {
     const res = await ensureCustomDomain(api, 'my-node', 'https://a.example.org/')
     expect(res).toEqual({ name: 'a.example.org', created: false, status: 'active' })
     expect(seen.some(s => s.startsWith('POST'))).toBe(false)
+  })
+})
+
+// The API attaches the domain without creating its DNS record, so the
+// operator has to be handed the record itself.
+describe('cnameInstruction', () => {
+  const project = { name: 'my-node', subdomain: 'my-node-3xq.pages.dev' }
+
+  it('gives the exact record for a domain that is not active yet', () => {
+    const lines = cnameInstruction(
+      { name: 'a.example.org', created: true, status: 'pending' },
+      project,
+    )
+    expect(lines).toContain('  a.example.org  CNAME  my-node-3xq.pages.dev')
+    expect(lines?.join('\n')).toContain('stays pending until the record exists')
+  })
+
+  it('treats a domain with no reported status as not active', () => {
+    expect(cnameInstruction({ name: 'a.example.org', created: true }, project)).not.toBeNull()
+  })
+
+  it('says nothing once the domain is active', () => {
+    expect(
+      cnameInstruction({ name: 'a.example.org', created: false, status: 'active' }, project),
+    ).toBeNull()
+  })
+
+  // A blocked or errored domain may have a cause a record won't fix.
+  it('names a status a missing record may not explain', () => {
+    const text = cnameInstruction(
+      { name: 'a.example.org', created: false, status: 'blocked' },
+      project,
+    )?.join('\n')
+    expect(text).toContain('"blocked"')
+    expect(text).not.toContain('stays pending')
+  })
+
+  it('flags the pages.dev hostname as a guess when the API leaves it out', () => {
+    const text = cnameInstruction(
+      { name: 'a.example.org', created: true, status: 'pending' },
+      { name: 'my-node' },
+    )?.join('\n')
+    expect(text).toContain('a.example.org  CNAME  my-node.pages.dev')
+    expect(text).toContain('is a guess')
   })
 })
 

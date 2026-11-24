@@ -7,6 +7,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   applyAnswer,
+  gateOpen,
   isAnswered,
   MANUAL_STEPS,
   pendingQuestions,
@@ -86,6 +87,28 @@ describe('pendingQuestions', () => {
       'staffEmailDomain',
       'trustedPublisherDomains',
     ])
+  })
+
+  // Zyra dispatches to the same repository video transcode does.
+  it('asks for the fork repo for Zyra as well as for video', () => {
+    const keys = (features: Set<'transcode' | 'zyra' | 'feeds'>) =>
+      pendingQuestions(defaultState(), {}, { features }).map(q => q.key)
+    expect(keys(new Set(['transcode']))).toContain('githubRepo')
+    expect(keys(new Set(['zyra']))).toContain('githubRepo')
+    expect(keys(new Set(['feeds']))).not.toContain('githubRepo')
+  })
+
+  // A viewer node's run leaves out the access step, and with it the
+  // questions about who may sign in to a portal it does not have.
+  it('asks the Access questions only when the access step runs', () => {
+    const keys = (steps?: Set<string>) =>
+      pendingQuestions(defaultState(), {}, { steps }).map(q => q.key)
+    const viewer = keys(new Set(['pages', 'resources', 'wrangler-toml', 'migrations', 'bindings']))
+    expect(viewer).not.toContain('staffEmailDomain')
+    expect(viewer).not.toContain('trustedPublisherDomains')
+    expect(viewer).toContain('hostname')
+    expect(keys(new Set(['access']))).toContain('staffEmailDomain')
+    expect(keys()).toContain('staffEmailDomain')
   })
 
   it('skips what the environment already supplies', () => {
@@ -490,5 +513,90 @@ describe('handoff report', () => {
   it('never prints a secret value', () => {
     const text = renderHandoff(buildHandoff(state, { features: new Set(['r2', 'transcode']) }))
     expect(text).not.toMatch(/SECRET\s*=/)
+  })
+
+  // The CLI and the transcode runner fall back to terraviz-assets on
+  // their own; the Pages variable the bindings step writes is not
+  // theirs to read.
+  it('asks for CATALOG_R2_BUCKET in the shell and on GitHub when the bucket was renamed', () => {
+    const renamed: SetupState = { ...state, r2Bucket: { name: 'node-assets' } }
+    const text = renderHandoff(
+      buildHandoff(renamed, { features: new Set(['r2', 'transcode']) }),
+    )
+    const lines = text.split('\n').filter(l => l.includes('CATALOG_R2_BUCKET = node-assets'))
+    expect(lines).toHaveLength(2)
+  })
+
+  // zyra-run.yml reads the secret too, so it is not a transcode-only item.
+  it('asks for the GitHub secret even without video transcode', () => {
+    const renamed: SetupState = { ...state, r2Bucket: { name: 'node-assets' } }
+    const text = renderHandoff(buildHandoff(renamed))
+    expect(text).toContain('CATALOG_R2_BUCKET = node-assets')
+    expect(text).toContain('Zyra')
+  })
+
+  it('marks the shell value done only when it names this bucket', () => {
+    const renamed: SetupState = { ...state, r2Bucket: { name: 'node-assets' } }
+    const shellLine = (shellBucket: string | undefined) =>
+      renderHandoff(buildHandoff(renamed, { features: new Set(['r2']), shellBucket }))
+        .split('\n')
+        .filter(l => l.includes('CATALOG_R2_BUCKET'))
+        .pop()
+    expect(shellLine('node-assets')).toContain('✓')
+    expect(shellLine('old-assets')).toContain('→')
+    expect(shellLine(undefined)).toContain('→')
+  })
+
+  // A secret on a workflow that is off does nothing, and forks start
+  // with scheduled workflows off.
+  it('names each workflow the chosen features run, once', () => {
+    const text = renderHandoff(
+      buildHandoff(state, { features: new Set(['r2', 'transcode', 'zyra', 'feeds']) }),
+    )
+    for (const file of ['transcode-hls.yml', 'zyra-run.yml', 'zyra-scheduler.yml', 'import-events.yml']) {
+      expect(text.split(file).length - 1, file).toBe(1)
+    }
+    expect(text).toContain('enable each scheduled')
+    expect(text).toContain('zyra-scheduler.yml\n       (Run scheduled data pipelines with Zyra · every 15 minutes · scheduled: enable it)')
+  })
+
+  it('lists the analytics archive setup does not create', () => {
+    const renamed: SetupState = { ...state, analyticsDataset: { name: 'node_events' } }
+    const text = renderHandoff(buildHandoff(renamed, { features: new Set(['analytics']) }))
+    expect(text).toContain('ANALYTICS_R2')
+    expect(text).toContain('ANALYTICS_SQL_TOKEN')
+    expect(text).toContain('analytics-export.yml')
+    expect(text).toContain('ANALYTICS_AE_DATASET = node_events')
+  })
+
+  it('gives the Zyra runner the bucket credentials video gets', () => {
+    const text = renderHandoff(buildHandoff(state, { features: new Set(['zyra']) }))
+    const github = text.slice(text.indexOf('Secrets and variables'))
+    expect(github).toContain('R2_S3_ENDPOINT')
+  })
+
+  // How far the node goes, said up front instead of by a 503.
+  it('lists what the run left out, and which of it needs Actions', () => {
+    const text = renderHandoff(buildHandoff(state, { features: new Set(['r2']) }))
+    expect(text).toContain('Not set up by this run')
+    expect(text).not.toContain('--with=r2')
+    expect(text).toMatch(/--with=transcode\n\s+\(Upload videos and image sequences; needs GitHub Actions/)
+  })
+
+  it('does not ask for CATALOG_R2_BUCKET when the bucket kept its default name', () => {
+    const text = renderHandoff(buildHandoff(state, { features: new Set(['r2', 'transcode']) }))
+    expect(text).not.toContain('CATALOG_R2_BUCKET')
+  })
+})
+
+describe('gateOpen', () => {
+  it('opens on any of several features', () => {
+    expect(gateOpen(['transcode', 'zyra'], new Set(['zyra']))).toBe(true)
+    expect(gateOpen(['transcode', 'zyra'], new Set(['feeds']))).toBe(false)
+  })
+
+  it('opens an ungated item for everyone, and a gated one for no one by default', () => {
+    expect(gateOpen(undefined, undefined)).toBe(true)
+    expect(gateOpen('r2', undefined)).toBe(false)
   })
 })

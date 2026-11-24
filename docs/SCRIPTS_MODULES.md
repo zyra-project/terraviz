@@ -49,6 +49,7 @@ Backs `npm run setup`. Each module maps to a numbered phase of
 | File | Responsibility |
 |---|---|
 | `scripts/lib/setup/access.ts` | Cloudflare Access provisioning (Phase 6) — creates the Access application the pre-2026 guide told operators to configure `ACCESS_AUD` for without ever creating |
+| `scripts/lib/setup/capabilities.ts` | What a node can do and what each capability needs (the publisher backend, an R2 public domain, GitHub Actions in a repository the operator controls, scheduled workflows, an analytics bucket, desktop signing), with the workflows it runs and how it fails without them. The one source the `/setup` questionnaire, `npm run setup -- --with=` and the guide's capability table read, because a tier says what you get and not what it needs: a node cloned from upstream and deployed by Direct Upload has the publisher portal and none of the Actions-backed features, and nothing up front said so |
 | `scripts/lib/setup/bindings-plan.ts` | Turns the declared binding manifest into a Pages PATCH body (Phase 8), sharing that manifest with the auditor so plan and audit cannot drift |
 | `scripts/lib/setup/cf-pages-write.ts` | Pages project **write** client (Phase 8) — the one thing wrangler cannot do; counterpart to the read client in `cf-pages-api.ts` |
 | `scripts/lib/setup/cf-request.ts` | Shared Cloudflare v4 transport — unwraps the common `{ success, result, errors }` envelope and normalizes failures so every caller does not re-implement it |

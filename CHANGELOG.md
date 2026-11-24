@@ -16,6 +16,71 @@ referenced in [`README.md`](README.md).
 
 ---
 
+## Unreleased - Self-hosting fixes from a fresh install
+
+Fixes [#538](https://github.com/zyra-project/terraviz/issues/538).
+
+- `npm run setup -- --apply --only=r2` no longer crashes with
+  `existing.some is not a function` when it attaches the R2 public domain.
+  It read the custom-domain list as a bare array; the API wraps it.
+- Setup now writes `CATALOG_R2_BUCKET` to both Pages environments with the
+  `CATALOG_R2` binding. Uploads, signed URLs, the thumbnail job, the
+  `upload` / `migrate-r2-*` CLI and the transcode and Zyra workflow runners
+  read the bucket name from that variable and fell back to `terraviz-assets`
+  without it, so a renamed bucket was addressed by two names. Setup refuses
+  to write when the shell exports a `CATALOG_R2_BUCKET` naming a different
+  bucket, and the handoff report asks for the value in the CLI's shell and
+  the runners' GitHub secrets.
+- Setup writes `ANALYTICS_AE_DATASET` with the `ANALYTICS` binding for the same
+  reason: the 14.2 export queries by that variable and fell back to
+  `terraviz_events`, so a renamed dataset was exported by the wrong name.
+- Setup checks a `CATALOG_R2_BUCKET` the shell contradicts before any step that
+  uses the bucket name, not at the bindings step after two have run.
+- A viewer node's `/setup` plan prints a setup command scoped to a viewer
+  (`--only=pages,resources,wrangler-toml,migrations,bindings`), and the
+  interview asks the Access questions only when the access step runs. Zyra's
+  workflows include `transcode-hls.yml`, which every run's output goes through.
+- `npm run check:pages-bindings` now fails when the `CATALOG_R2` binding and
+  `CATALOG_R2_BUCKET` name different buckets, and notes an environment whose
+  values it cannot read.
+- Setup prints the CNAME a Pages custom domain needs. Attaching a domain
+  through the API, as setup does, does not create the DNS record.
+- `docs/SELF_HOSTING.md`: the node needs a hostname of its own, not a path;
+  the setup token's permissions fill Cloudflare's ten-per-token limit; the
+  server's own `VIDEO_PROXY_BASE`; the CSP hosts every node needs
+  (`tiles.openfreemap.org` and two S3 hosts); and a troubleshooting entry
+  for a block page from an account-level WAF rule.
+- `/setup` now opens on what the node should do (a checkbox per capability)
+  and whether you can run GitHub Actions in a repository you control, before
+  the node-type picker. The plan beneath says what you will have, what is not
+  possible without Actions and why, what to set up, which workflows to turn
+  on, and the `npm run setup -- --with=` command; the picker follows the answers.
+  The line that matters is Actions, not the tier: video uploads, Zyra, the
+  feeds, analytics history and desktop builds all run there, and a node
+  deployed from a clone of upstream has none of them.
+- `npm run setup -- --with=` takes `zyra`, `feeds` and `analytics` as well as
+  `r2` and `transcode`. The handoff names the workflows each runs, to turn on
+  in the Actions tab, and ends with the features the run left out.
+- `docs/SELF_HOSTING.md` has a capability table under "Pick your node type
+  first", says a clone of upstream cannot run the workflows, and lists
+  `zyra-run.yml`, `zyra-scheduler.yml`, `import-events.yml` and
+  `refresh-video-sources.yml` in Reference B. The `/setup` add-ons card no
+  longer says the events feed runs with nothing to turn on.
+- **Operators:** if you never turned on your fork's scheduled workflows, the
+  events feed, Zyra schedules and the analytics export have not been running:
+  enable them in the Actions tab (Reference B). If you deployed from a clone of
+  upstream, there is no Actions tab of yours to do that in. Fork first and
+  point your checkout at it (§0.2), then set the workflow secrets and turn
+  them on. `/setup`'s questions show what your node needs.
+- **Operators:** if you renamed the R2 bucket, run
+  `npm run check:pages-bindings`. If it reports a mismatch, point the binding
+  and `CATALOG_R2_BUCKET` at the bucket that holds your assets in both Pages
+  environments, then redeploy: a Pages variable takes effect on the next
+  deployment. Set the same value in the shell you run the CLI from and, if
+  you use video transcode or Zyra workflows, as a GitHub secret. Then check
+  that nothing was uploaded to a `terraviz-assets` bucket in the same account,
+  such as an earlier install's or another node's.
+
 ## Unreleased - Feedback admin routes verify the Access token
 
 - The six feedback admin routes (`/api/feedback-admin` and the older

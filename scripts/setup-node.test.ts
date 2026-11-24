@@ -380,6 +380,72 @@ describe('runSetup — bindings step', () => {
     expect(h.out()).toContain('left unset')
   })
 
+  // Writing would put the default name in both the binding and the
+  // variable, a pair the audit then reads as consistent.
+  it('refuses to write when the shell names a different bucket', async () => {
+    let called = false
+    const h = harness({
+      argv: ['--only=bindings', '--apply'],
+      env: { CLOUDFLARE_API_TOKEN: 'tok', CATALOG_R2_BUCKET: 'node-assets' },
+      files: { '.terraviz-setup.json': state },
+      fetchImpl: (async () => {
+        called = true
+        return new Response(JSON.stringify({ success: true }), { status: 200 })
+      }) as unknown as typeof fetch,
+    })
+    expect(await runSetup(h.deps)).toBe(1)
+    expect(called).toBe(false)
+    expect(h.errOut()).toContain('export TERRAVIZ_R2_BUCKET=node-assets')
+  })
+
+  // The resources step creates the bucket and wrangler-toml rewrites
+  // its binding, both before bindings runs, so the check has to come
+  // first, and a run of either alone has to meet it.
+  it('refuses before any step that uses the bucket name, not at bindings', async () => {
+    const h = harness({
+      argv: ['--apply'],
+      env: { CLOUDFLARE_API_TOKEN: 'tok', CATALOG_R2_BUCKET: 'node-assets' },
+      files: { '.terraviz-setup.json': state },
+    })
+    expect(await runSetup(h.deps)).toBe(1)
+    expect(h.calls).toEqual([])
+    expect(h.out()).not.toContain('Phase 2')
+    expect(h.errOut()).toContain('export TERRAVIZ_R2_BUCKET=node-assets')
+  })
+
+  it('refuses a wrangler-toml run on its own', async () => {
+    const h = harness({
+      argv: ['--apply', '--only=wrangler-toml'],
+      env: { CATALOG_R2_BUCKET: 'node-assets' },
+      files: {
+        '.terraviz-setup.json': state,
+        'wrangler.toml': '[[r2_buckets]]\nbinding = "CATALOG_R2"\nbucket_name = "terraviz-assets"\n',
+      },
+    })
+    expect(await runSetup(h.deps)).toBe(1)
+    expect(h.writes.has('wrangler.toml')).toBe(false)
+  })
+
+  it('leaves a run that never touches the bucket alone', async () => {
+    const h = harness({
+      argv: ['--only=migrations'],
+      env: { CATALOG_R2_BUCKET: 'node-assets' },
+      files: { '.terraviz-setup.json': state },
+    })
+    await runSetup(h.deps)
+    expect(h.out()).not.toContain('--apply will refuse')
+  })
+
+  it('warns about the same conflict on a dry run without failing it', async () => {
+    const h = harness({
+      argv: ['--only=bindings'],
+      env: { CATALOG_R2_BUCKET: 'node-assets' },
+      files: { '.terraviz-setup.json': state },
+    })
+    expect(await runSetup(h.deps)).toBe(0)
+    expect(h.out()).toContain('--apply will refuse')
+  })
+
   it('surfaces an API failure rather than claiming success', async () => {
     const h = harness({
       argv: ['--only=bindings', '--apply'],
@@ -773,7 +839,10 @@ describe('runSetup — pages step', () => {
       env: { CLOUDFLARE_API_TOKEN: 'tok' },
       files: { '.terraviz-setup.json': state },
       fetchImpl: pagesFetch({
-        'POST /accounts/acct/pages/projects': { name: 'my-node' },
+        'POST /accounts/acct/pages/projects': {
+          name: 'my-node',
+          subdomain: 'my-node-3xq.pages.dev',
+        },
         'GET /accounts/acct/pages/projects/my-node/domains': [],
         'POST /accounts/acct/pages/projects/my-node/domains': {
           name: 'terraviz.example.org',
@@ -784,6 +853,9 @@ describe('runSetup — pages step', () => {
     expect(await runSetup(h.deps)).toBe(0)
     expect(h.out()).toContain('project  my-node  created')
     expect(h.out()).toContain('terraviz.example.org')
+    // The record comes from the project's own subdomain, which
+    // Cloudflare suffixes when the name is taken on pages.dev.
+    expect(h.out()).toContain('terraviz.example.org  CNAME  my-node-3xq.pages.dev')
   })
 
   // Direct Upload means Cloudflare never runs the build, so the
@@ -822,6 +894,7 @@ describe('runSetup — pages step', () => {
     })
     expect(await runSetup(h.deps)).toBe(0)
     expect(h.out()).not.toContain('Direct Upload')
+    expect(h.out()).not.toContain('CNAME')
   })
 })
 
@@ -926,8 +999,9 @@ describe('runSetup — interactive mode', () => {
       staffEmailDomain: 'example.org',
       trustedPublisherDomains: 'example.org',
     })
+    // The Access answers are asked when the access step runs.
     const h = harness({
-      argv: ['--interactive', '--only=bindings'],
+      argv: ['--interactive', '--only=access,bindings'],
       files: {},
       prompter: p.prompter,
     })
@@ -976,6 +1050,32 @@ describe('runSetup — interactive mode', () => {
     const h = harness({ argv: ['--interactive', '--only=bindings'], files: {}, prompter: p.prompter })
     await runSetup(h.deps)
     expect(p.said()).toContain('CLOUDFLARE_ACCOUNT_ID')
+  })
+
+  it('does not ask a viewer run the Access questions', async () => {
+    const p = scriptedPrompter({})
+    const h = harness({
+      argv: ['--interactive', '--only=pages,resources,wrangler-toml,migrations,bindings'],
+      files: {},
+      prompter: p.prompter,
+    })
+    await runSetup(h.deps)
+    expect(p.asked).toContain('hostname')
+    expect(p.asked).not.toContain('staffEmailDomain')
+  })
+
+  // transcode-hls.yml writes into the bucket, so asking for video
+  // uploads asks for the public bucket too.
+  it('asks for the R2 public origin under --with=transcode', async () => {
+    const p = scriptedPrompter({})
+    const h = harness({
+      argv: ['--interactive', '--with=transcode', '--only=bindings'],
+      files: {},
+      prompter: p.prompter,
+    })
+    await runSetup(h.deps)
+    expect(p.asked).toContain('r2PublicBase')
+    expect(p.asked).toContain('githubRepo')
   })
 
   it('includes feature-gated questions when --with is given', async () => {
@@ -1029,5 +1129,34 @@ describe('runSetup — handoff report', () => {
     await runSetup(h.deps)
     expect(h.out()).toContain('Values you need to paste elsewhere')
     expect(h.out()).toContain('VITE_API_ORIGIN = https://a.example.org')
+  })
+
+  // Zyra publishes frames into R2, so asking for it alone has to bring
+  // the bucket's credentials and the workflows it runs.
+  it('expands --with=zyra into the bucket and its workflows', async () => {
+    const h = harness({
+      argv: ['--only=bindings', '--with=zyra'],
+      files: { '.terraviz-setup.json': JSON.stringify({ hostname: 'a.example.org' }) },
+    })
+    await runSetup(h.deps)
+    expect(h.out()).toContain('r2/api-tokens')
+    expect(h.out()).toContain('zyra-run.yml')
+    expect(h.out()).toContain('zyra-scheduler.yml')
+    expect(h.out()).toContain('GITHUB_DISPATCH_TOKEN')
+    // Expansion, not the zyra gate alone: r2 is no longer "left out".
+    expect(h.out()).not.toContain('--with=r2\n')
+    expect(h.out()).not.toContain('--with=zyra')
+    expect(h.out()).toContain('--with=feeds')
+  })
+
+  it('rejects an empty --with=', async () => {
+    const h = harness({ argv: ['--with='] })
+    expect(await runSetup(h.deps)).toBe(2)
+    expect(h.errOut()).toContain('needs at least one feature')
+  })
+
+  it('accepts every feature the capability manifest names', async () => {
+    const h = harness({ argv: ['--only=bindings', '--with=r2,transcode,zyra,feeds,analytics'] })
+    expect(await runSetup(h.deps)).toBe(0)
   })
 })

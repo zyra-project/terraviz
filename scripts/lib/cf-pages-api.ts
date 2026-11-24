@@ -40,6 +40,13 @@ export interface EnvironmentBindings {
   vectorize: Set<string>
   ai: Set<string>
   analytics_engine: Set<string>
+  /**
+   * Bucket name per R2 binding, and value per plaintext variable, as
+   * far as the API returned them. Optional because only the bucket
+   * consistency check reads values; the diff works on names alone.
+   */
+  r2BucketNames?: Map<string, string>
+  plaintextValues?: Map<string, string>
 }
 
 export interface ProjectBindings {
@@ -115,13 +122,24 @@ function shellEnvironment(config: CfDeploymentConfig | undefined): EnvironmentBi
   const out = emptyEnv()
   if (!config) return out
 
+  const plaintextValues = new Map<string, string>()
   for (const [name, entry] of Object.entries(config.env_vars ?? {})) {
     if (entry && entry.type === 'secret_text') out.secret.add(name)
-    else out.plaintext.add(name)
+    else {
+      out.plaintext.add(name)
+      if (typeof entry?.value === 'string') plaintextValues.set(name, entry.value)
+    }
   }
+  out.plaintextValues = plaintextValues
   for (const name of Object.keys(config.d1_databases ?? {})) out.d1.add(name)
   for (const name of Object.keys(config.kv_namespaces ?? {})) out.kv.add(name)
-  for (const name of Object.keys(config.r2_buckets ?? {})) out.r2.add(name)
+  const r2BucketNames = new Map<string, string>()
+  for (const [name, entry] of Object.entries(config.r2_buckets ?? {})) {
+    out.r2.add(name)
+    const bucket = (entry as { name?: unknown } | null)?.name
+    if (typeof bucket === 'string') r2BucketNames.set(name, bucket)
+  }
+  out.r2BucketNames = r2BucketNames
   for (const name of Object.keys(config.vectorize_bindings ?? {})) out.vectorize.add(name)
   for (const name of Object.keys(config.ai_bindings ?? {})) out.ai.add(name)
   for (const name of Object.keys(config.analytics_engine_datasets ?? {})) {
@@ -386,4 +404,130 @@ function statusGlyph(s: DiffStatus): string {
     case 'wrong_type':
       return 'WRONG'
   }
+}
+
+/** The bucket the S3-API paths fall back to with `CATALOG_R2_BUCKET` unset. */
+export const DEFAULT_R2_BUCKET = 'terraviz-assets'
+
+export interface BucketMismatch {
+  environment: Environment
+  /** The bucket the `CATALOG_R2` binding names. */
+  bound: string
+  /** The bucket the S3-API paths will address. */
+  addressed: string
+  /** True when `CATALOG_R2_BUCKET` is unset and `addressed` is the default. */
+  fromDefault: boolean
+}
+
+/** Why an environment's bucket names could not be compared. */
+export type BucketUnverifiedReason =
+  /** `CATALOG_R2_BUCKET` is a secret, whose value the API never returns. */
+  | 'secret-variable'
+  /** The variable is plaintext but the API returned no value for it. */
+  | 'value-not-returned'
+  /** The binding exists but the API returned no bucket name for it. */
+  | 'binding-name-not-returned'
+
+export interface BucketUnverified {
+  environment: Environment
+  reason: BucketUnverifiedReason
+}
+
+export interface BucketCheck {
+  mismatches: BucketMismatch[]
+  unverified: BucketUnverified[]
+}
+
+/**
+ * Does the `CATALOG_R2` binding name the same bucket the S3-API paths
+ * address?
+ *
+ * The Worker reaches R2 two ways. Its own reads and writes go through
+ * the `CATALOG_R2` binding, which names the bucket. Presigned uploads,
+ * public-URL signing, the thumbnail job and the `upload` /
+ * `migrate-r2-*` CLI go through the S3 API instead, and take the
+ * bucket name from `CATALOG_R2_BUCKET`, falling back to
+ * `DEFAULT_R2_BUCKET` when it is unset or empty (the same
+ * `?.trim() || 'terraviz-assets'` everywhere in `functions/`). A
+ * renamed bucket with the variable unset is addressed by two names.
+ * R2 bucket names are scoped to the account, and the S3 endpoint
+ * names the account, so the fallback cannot reach another account:
+ * uploads fail (AccessDenied with a bucket-scoped token, NoSuchBucket
+ * with no bucket by that name), or land in another `terraviz-assets`
+ * in the same account, such as an earlier install's or another
+ * node's.
+ *
+ * Names alone cannot see this, so it reads values. An environment
+ * whose values the API did not return (a secret, a redacted entry) is
+ * reported as unverified rather than guessed at, so a run cannot read
+ * as all-clear for a pair it never compared.
+ *
+ * It does not say which side is wrong. A binding reverted to the
+ * default by an older setup run is as likely as a variable nobody set.
+ */
+export function checkBucketNames(
+  project: ProjectBindings,
+  defaultBucket: string = DEFAULT_R2_BUCKET,
+): BucketCheck {
+  const out: BucketCheck = { mismatches: [], unverified: [] }
+  for (const environment of ['production', 'preview'] as const) {
+    const env = project[environment]
+    if (!env.r2.has('CATALOG_R2')) continue // the diff reports it missing
+    const bound = env.r2BucketNames?.get('CATALOG_R2')
+    if (bound === undefined) {
+      out.unverified.push({ environment, reason: 'binding-name-not-returned' })
+      continue
+    }
+    if (env.secret.has('CATALOG_R2_BUCKET')) {
+      out.unverified.push({ environment, reason: 'secret-variable' })
+      continue
+    }
+    let declared = ''
+    if (env.plaintext.has('CATALOG_R2_BUCKET')) {
+      const value = env.plaintextValues?.get('CATALOG_R2_BUCKET')
+      if (value === undefined) {
+        out.unverified.push({ environment, reason: 'value-not-returned' })
+        continue
+      }
+      declared = value.trim()
+    }
+    const addressed = declared || defaultBucket
+    if (bound !== addressed) {
+      out.mismatches.push({ environment, bound, addressed, fromDefault: !declared })
+    }
+  }
+  return out
+}
+
+export function formatBucketMismatches(mismatches: BucketMismatch[]): string {
+  return mismatches
+    .map(m => {
+      const variable = m.fromDefault
+        ? 'CATALOG_R2_BUCKET is unset'
+        : `CATALOG_R2_BUCKET is "${m.addressed}"`
+      return (
+        `✘ ${m.environment}: the CATALOG_R2 binding names "${m.bound}", but ${variable}, ` +
+        `so uploads, asset migration and signed URLs go to "${m.addressed}".\n` +
+        '  Point both at the bucket that holds your assets: set CATALOG_R2_BUCKET to its\n' +
+        '  name, and rebind CATALOG_R2 if the binding is the one that is wrong.'
+      )
+    })
+    .join('\n')
+}
+
+const UNVERIFIED_WHY: Record<BucketUnverifiedReason, string> = {
+  'secret-variable':
+    'CATALOG_R2_BUCKET is a secret, so its value cannot be read. Make it a plaintext variable to have it checked',
+  'value-not-returned': 'the API returned no value for CATALOG_R2_BUCKET',
+  'binding-name-not-returned': 'the API returned no bucket name for the CATALOG_R2 binding',
+}
+
+export function formatBucketUnverified(unverified: BucketUnverified[]): string {
+  return unverified
+    .map(
+      u =>
+        `! ${u.environment}: could not check that CATALOG_R2 and CATALOG_R2_BUCKET name ` +
+        `the same bucket: ${UNVERIFIED_WHY[u.reason]}.`,
+    )
+    .join('\n')
 }

@@ -60,6 +60,7 @@ import {
   requiredNodeMajor,
 } from './lib/node-version.ts'
 import {
+  bucketEnvConflict,
   buildPatchBody,
   formatBindingsPlan,
   OPTIONAL_EXTRAS,
@@ -77,6 +78,13 @@ import {
 import { PagesProjectWriter } from './lib/setup/cf-pages-write.ts'
 import { CfApi, matchZone } from './lib/setup/cf-request.ts'
 import { renderGithubSecretsScript } from './lib/setup/github-secrets.ts'
+import {
+  CAPABILITIES,
+  expandFeatures,
+  isSetupFeature,
+  SETUP_FEATURES,
+  type SetupFeature,
+} from './lib/setup/capabilities.ts'
 import { buildHandoff, renderHandoff } from './lib/setup/handoff.ts'
 import {
   applyAnswer,
@@ -89,6 +97,7 @@ import {
   type Prompter,
 } from './lib/setup/prompt.ts'
 import {
+  cnameInstruction,
   ensureCustomDomain,
   ensurePagesProject,
   PagesProjectApi,
@@ -139,6 +148,9 @@ const STEPS = [
   'waf',
 ] as const
 type Step = (typeof STEPS)[number]
+
+/** Steps that use the R2 bucket's name, and so must agree on it. */
+const BUCKET_STEPS: readonly Step[] = ['resources', 'wrangler-toml', 'bindings', 'r2']
 
 /**
  * Steps a bare run performs. `waf` is excluded deliberately: it
@@ -220,7 +232,7 @@ interface Options {
   githubSecrets: boolean
   interactive: boolean
   manual: boolean
-  features: Set<'r2' | 'transcode'>
+  features: Set<SetupFeature>
   help: boolean
 }
 
@@ -246,13 +258,18 @@ function parseArgs(argv: string[]): Options | { error: string } {
     else if (arg === '--interactive' || arg === '-i') opts.interactive = true
     else if (arg === '--manual') opts.manual = true
     else if (arg.startsWith('--with=')) {
-      const wanted = arg.slice('--with='.length).split(',').map(s => s.trim())
-      const valid = ['r2', 'transcode']
-      const bad = wanted.filter(w => !valid.includes(w))
-      if (bad.length > 0) {
-        return { error: `unknown feature(s): ${bad.join(', ')}. Valid: ${valid.join(', ')}` }
+      const wanted = arg.slice('--with='.length).split(',').map(s => s.trim()).filter(Boolean)
+      if (wanted.length === 0) {
+        return { error: `--with= needs at least one feature: ${SETUP_FEATURES.join(', ')}` }
       }
-      opts.features = new Set(wanted as Array<'r2' | 'transcode'>)
+      const bad = wanted.filter(w => !isSetupFeature(w))
+      if (bad.length > 0) {
+        return {
+          error: `unknown feature(s): ${bad.join(', ')}. Valid: ${SETUP_FEATURES.join(', ')}`,
+        }
+      }
+      // Video and Zyra publish into R2, so either brings r2 with it.
+      opts.features = expandFeatures(wanted.filter(isSetupFeature))
     }
     else if (arg.startsWith('--only=')) {
       const wanted = arg.slice('--only='.length).split(',').map(s => s.trim())
@@ -267,6 +284,15 @@ function parseArgs(argv: string[]): Options | { error: string } {
   }
   return opts
 }
+
+/** `--with=` values for the help text, from the capability manifest. */
+const FEATURE_HELP = SETUP_FEATURES.map(f => {
+  const cap = CAPABILITIES.find(c => c.feature === f)
+  return `                            ${f.padEnd(10)} ${cap?.title ?? ''}`
+}).join('\n')
+const ACTIONS_FEATURES = SETUP_FEATURES.filter(f =>
+  CAPABILITIES.some(c => c.feature === f && c.needs.includes('github-actions')),
+).join(', ')
 
 const HELP = `
 npm run setup — provision a Terraviz node (docs/SELF_HOSTING.md)
@@ -297,7 +323,11 @@ Guided setup
                           (Workers Paid, DNS, Zero Trust, the API token)
                           with click-by-click instructions, and exit.
   --with=<features>       Include optional features in the interview and
-                          the handoff report: r2, transcode.
+                          the handoff report, comma-separated:
+${FEATURE_HELP}
+                          ${ACTIONS_FEATURES} run GitHub Actions
+                          in a repository you control. /setup's
+                          questions print the list for what you want.
 
 Options
   --apply                 Actually make changes. Off by default.
@@ -449,7 +479,10 @@ export async function runSetup(deps: SetupDeps): Promise<number> {
   // ── Interview ───────────────────────────────────────────────────
   if (opts.interactive) {
     const prompter = deps.prompter ?? new NonInteractivePrompter(deps.stdout.write)
-    const pending = pendingQuestions(state, deps.env, { features: opts.features })
+    const pending = pendingQuestions(state, deps.env, {
+      features: opts.features,
+      steps: opts.steps,
+    })
 
     prompter.say(
       '\nTerraviz node setup — interactive\n\n' +
@@ -519,6 +552,24 @@ export async function runSetup(deps: SetupDeps): Promise<number> {
   deps.stdout.write(`  state:   ${opts.statePath}\n`)
   deps.stdout.write(`  project: ${state.pagesProject}\n\n`)
 
+  // ── Bucket name ─────────────────────────────────────────────────
+  // Checked before any step, not in the bindings step: three steps use
+  // the bucket name before bindings writes CATALOG_R2_BUCKET (resources
+  // creates the bucket, wrangler-toml rewrites its binding, r2 sets its
+  // CORS and domain). Refusing at bindings left the first two already
+  // done against the wrong bucket, and `--only=wrangler-toml` never
+  // reached the check at all.
+  if (BUCKET_STEPS.some(step => opts.steps.has(step))) {
+    const bucketConflict = bucketEnvConflict(state, deps.env)
+    if (bucketConflict) {
+      if (opts.apply) {
+        deps.stderr.write(`  ✘ ${bucketConflict}\n\n`)
+        return 1
+      }
+      deps.stdout.write(`  ! ${bucketConflict} --apply will refuse.\n\n`)
+    }
+  }
+
   // Only known once the pages step has actually looked; undefined
   // means "we never checked", which the handoff report words
   // differently from either answer.
@@ -566,6 +617,12 @@ export async function runSetup(deps: SetupDeps): Promise<number> {
             `  domain   ${domain.name}  ${verb(domain.created)}` +
               `${domain.status ? ` (${domain.status})` : ''}\n`,
           )
+          const instruction = cnameInstruction(domain, res.project)
+          if (instruction) {
+            deps.stdout.write(
+              instruction.map((line, i) => `  ${i === 0 ? '!' : ' '} ${line}\n`).join(''),
+            )
+          }
         }
         deps.stdout.write('\n')
       } catch (e) {
@@ -890,6 +947,7 @@ export async function runSetup(deps: SetupDeps): Promise<number> {
     const plan = planBindings(state, secrets, [...EXPECTED_BINDINGS, ...OPTIONAL_EXTRAS])
     deps.stdout.write(formatBindingsPlan(plan) + '\n\n')
 
+
     // R2 / Vectorize / Analytics Engine / AI bindings address their
     // resource by name, so they "resolve" from defaults even on a
     // completely fresh state. Only the D1 and KV IDs prove the
@@ -1088,6 +1146,7 @@ export async function runSetup(deps: SetupDeps): Promise<number> {
             .filter(([, v]) => Boolean(v))
             .map(([k]) => k),
         ),
+        shellBucket: deps.env.CATALOG_R2_BUCKET?.trim(),
       }),
     ),
   )

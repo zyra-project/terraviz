@@ -42,6 +42,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { assertPlannerPresent } from './setup-page/planner'
 import { renderSetupPage, ContentDriftError } from './setup-page/render'
 import { WORKSHEET } from './setup-page/content'
 import {
@@ -106,6 +107,7 @@ function main(): void {
   try {
     assertSelfContained(html)
     assertValidatorsImplemented(WORKSHEET, html)
+    assertPlannerPresent(html)
   } catch (error) {
     process.stderr.write(`\n${(error as Error).message}\n`)
     process.exit(1)

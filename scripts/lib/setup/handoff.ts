@@ -26,8 +26,9 @@
  * already has it.
  */
 
+import { CAPABILITIES, type SetupFeature, type Workflow } from './capabilities'
 import { wrap } from './prompt'
-import type { SetupState } from './state'
+import { DEFAULT_NAMES, type SetupState } from './state'
 
 export type HandoffStatus = 'done' | 'todo' | 'optional'
 
@@ -51,7 +52,7 @@ export interface HandoffGroup {
 
 export interface HandoffOptions {
   /** Features the operator opted into; gates whole groups. */
-  features?: Set<'r2' | 'transcode'>
+  features?: Set<SetupFeature>
   /**
    * True when a Git remote drives the build, false for Direct Upload,
    * undefined when the run never checked. The three cases put the
@@ -61,6 +62,18 @@ export interface HandoffOptions {
   gitConnected?: boolean
   /** Names the current shell already exports. */
   available?: Set<string>
+  /**
+   * The shell's `CATALOG_R2_BUCKET`, trimmed. Compared by value, not
+   * name: an export left over from another bucket is not done.
+   */
+  shellBucket?: string
+}
+
+/** What it takes to start each kind of workflow. */
+const TRIGGER_NOTE: Record<Workflow['trigger'], string> = {
+  schedule: 'scheduled: enable it',
+  dispatch: 'starts by itself once Actions are on',
+  manual: 'run it from Run workflow',
 }
 
 function has(env: Set<string> | undefined, name: string): boolean {
@@ -71,6 +84,22 @@ export function buildHandoff(state: SetupState, opts: HandoffOptions = {}): Hand
   const groups: HandoffGroup[] = []
   const site = state.hostname ? `https://${state.hostname}` : null
   const features = opts.features ?? new Set()
+  // The bindings step writes CATALOG_R2_BUCKET to Pages, but the CLI
+  // and the GitHub workflow runners (transcode-hls.yml, zyra-run.yml)
+  // read their own copy, and without one they address
+  // terraviz-assets. Only a renamed bucket needs it.
+  const bucket = state.r2Bucket.name
+  const bucketItem = (writers: string, status: HandoffStatus): HandoffItem[] =>
+    bucket === DEFAULT_NAMES.r2Bucket
+      ? []
+      : [
+          {
+            name: 'CATALOG_R2_BUCKET',
+            status,
+            value: bucket,
+            why: `without it, ${writers} ${DEFAULT_NAMES.r2Bucket}, not your bucket`,
+          },
+        ]
 
   // ── Build variables ─────────────────────────────────────────────
   // VITE_* are baked in at build time. Changing one later needs a
@@ -151,13 +180,15 @@ export function buildHandoff(state: SetupState, opts: HandoffOptions = {}): Hand
       why: 'the URL workflows POST results back to',
     },
   ]
-  if (features.has('transcode')) {
+  // Both runners write into the bucket through the S3 API.
+  if (features.has('transcode') || features.has('zyra')) {
     githubItems.push(
       { name: 'R2_S3_ENDPOINT', status: 'todo', source: 'the R2 API token you minted' },
       { name: 'R2_ACCESS_KEY_ID', status: 'todo', source: 'same' },
       { name: 'R2_SECRET_ACCESS_KEY', status: 'todo', source: 'same' },
     )
   }
+  githubItems.push(...bucketItem('the transcode and Zyra workflow runners write to', 'todo'))
   groups.push({
     destination: `GitHub${repo ? ` (${repo})` : ''} → Settings → Secrets and variables → Actions`,
     intro:
@@ -167,8 +198,90 @@ export function buildHandoff(state: SetupState, opts: HandoffOptions = {}): Hand
     items: githubItems,
   })
 
+  // ── Workflows ───────────────────────────────────────────────────
+  // A secret set on a workflow that is turned off does nothing. Forks
+  // start with Actions off and scheduled workflows stay off after
+  // that, so each one the chosen features run is named here.
+  const chosen = CAPABILITIES.filter(c => c.feature && features.has(c.feature))
+  const workflowItems: HandoffItem[] = []
+  for (const cap of chosen) {
+    for (const w of cap.workflows) {
+      if (workflowItems.some(i => i.name === w.file)) continue
+      workflowItems.push({
+        name: w.file,
+        status: 'todo',
+        why: `${cap.title} · ${w.when} · ${TRIGGER_NOTE[w.trigger]}`,
+      })
+    }
+  }
+  if (workflowItems.length > 0) {
+    groups.push({
+      destination: `GitHub${repo ? ` (${repo})` : ''} → Actions`,
+      intro:
+        'Turn Actions on for the repository, then enable each scheduled ' +
+        'workflow below (Actions tab → the workflow → Enable workflow): a ' +
+        'fork keeps them off until you do, and one left off never runs, ' +
+        'with nothing on the node to say so. The others start by themselves ' +
+        'or from Run workflow.',
+      items: workflowItems,
+    })
+  }
+
+  // ── Dispatch token (Phase 8.6) ──────────────────────────────────
+  // Video and Zyra runs are started by the Worker firing a
+  // repository_dispatch, with a token only the operator can mint. The
+  // bindings step pushes it once it is exported; without it both answer
+  // 503 however well the workflows are set up.
+  if (features.has('transcode') || features.has('zyra')) {
+    groups.push({
+      destination: 'Your shell, then re-run `npm run setup -- --apply --only=bindings`',
+      url: 'https://github.com/settings/personal-access-tokens/new',
+      intro:
+        'The Pages secret the Worker dispatches with: a fine-grained token ' +
+        'with Contents: write on your fork, and nothing else (W22).',
+      items: [
+        {
+          name: 'GITHUB_DISPATCH_TOKEN',
+          status: has(opts.available, 'GITHUB_DISPATCH_TOKEN') ? 'done' : 'todo',
+          source: 'GitHub → Settings → Developer settings → Fine-grained tokens',
+        },
+      ],
+    })
+  }
+
+  // ── Analytics archive (Phase 14.2) ──────────────────────────────
+  if (features.has('analytics')) {
+    groups.push({
+      destination: 'Cloudflare Pages → Settings, Production (Phase 14.2)',
+      intro:
+        'Setup does not create the analytics archive yet. The nightly ' +
+        'export has nowhere to write until these exist; then redeploy.',
+      items: [
+        {
+          name: 'ANALYTICS_R2',
+          status: 'todo',
+          source: 'Bindings → R2: a bucket of its own, bound under this name',
+        },
+        { name: 'CF_ACCOUNT_ID', status: 'todo', value: state.accountId || undefined },
+        {
+          name: 'ANALYTICS_SQL_TOKEN',
+          status: 'todo',
+          source: 'a token with exactly Account → Account Analytics → Read',
+        },
+        {
+          name: 'ANALYTICS_AE_DATASET',
+          status: 'done',
+          value: state.analyticsDataset.name,
+          why:
+            'the bindings step writes it with the ANALYTICS binding, so the ' +
+            'export queries the dataset telemetry goes to; re-run it if you rename one',
+        },
+      ],
+    })
+  }
+
   // ── R2 credentials ──────────────────────────────────────────────
-  if (features.has('r2') || features.has('transcode')) {
+  if (features.has('r2') || features.has('transcode') || features.has('zyra')) {
     groups.push({
       destination: 'Your shell, then re-run `npm run setup -- --apply --only=bindings`',
       url: 'https://dash.cloudflare.com/?to=/:account/r2/api-tokens',
@@ -190,6 +303,10 @@ export function buildHandoff(state: SetupState, opts: HandoffOptions = {}): Hand
           status: has(opts.available, 'R2_SECRET_ACCESS_KEY') ? 'done' : 'todo',
           source: 'shown once at creation',
         },
+        ...bucketItem(
+          'upload and migrate-r2-* write to',
+          opts.shellBucket === bucket ? 'done' : 'todo',
+        ),
       ],
     })
   }
@@ -218,6 +335,24 @@ export function buildHandoff(state: SetupState, opts: HandoffOptions = {}): Hand
       why: 'the id is not secret; the matching secret is not stored anywhere',
     })
   }
+  // ── Left out ────────────────────────────────────────────────────
+  // What this run did not set up, so an operator can see how far the
+  // node goes rather than finding out from a 503 or a feed that never
+  // refreshes.
+  const leftOut = CAPABILITIES.filter(c => c.feature && !features.has(c.feature))
+  if (leftOut.length > 0) {
+    groups.push({
+      destination: 'Not set up by this run — re-run with --with=<feature> to add one',
+      items: leftOut.map(c => ({
+        name: `--with=${c.feature}`,
+        status: 'optional' as const,
+        why: c.needs.includes('github-actions')
+          ? `${c.title}; needs GitHub Actions in a repository you control`
+          : c.title,
+      })),
+    })
+  }
+
   if (recorded.length > 0) {
     groups.push({
       destination: 'Already handled — recorded in .terraviz-setup.json',

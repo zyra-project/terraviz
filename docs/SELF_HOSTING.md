@@ -55,6 +55,39 @@ exactly that reason.
 > first Tier 2 run. The bulk of the wall-clock is waiting on
 > deploys and DNS, not typing.
 
+### What each capability needs
+
+A tier says what a node gets. It does not say what each part needs.
+And the line that matters most is not the tier at all: it is
+**whether you can run GitHub Actions in a repository you control**. Video uploads,
+Zyra pipelines, the feeds, the analytics history and desktop builds
+all run as workflows in your copy of the repository (§0.2). A node
+deployed from a clone of upstream with Direct Upload gets the
+publisher portal and none of those. Video uploads and Zyra's Run
+now then answer 503; the feeds and the analytics export fail
+silently, since there is nothing to start them.
+
+| If you want to… | It needs | Without GitHub Actions |
+|---|---|---|
+| Show the globe, the SOS catalog and Orbit | A deployed node: Phases 0–5, the Tier 1 bindings in 8, the checks in 10, then 13. `npm run setup -- --interactive --only=pages,resources,wrangler-toml,migrations,bindings` runs the automated part and skips Access and the node keys | Works |
+| Publish your own datasets, tours and blog posts | The publisher backend (Phases 2–11) | Works |
+| Upload images and other files | + an R2 public domain and S3 token (8.5) | Works |
+| Upload videos and image sequences | + R2, and `transcode-hls.yml` (8.6) | Finishing an upload answers 503 |
+| Run scheduled data pipelines with Zyra | + R2, and `zyra-run.yml`, the scheduled `zyra-scheduler.yml`, and `transcode-hls.yml`, which turns each run's output into HLS even with no uploads (8.6) | Runs never start |
+| Keep current events and video suggestions coming in | The scheduled `import-events.yml` and `refresh-video-sources.yml` | Nothing refreshes; on `/publish/feeds`, press **Run all enabled feeds now** and **Index now** by hand |
+| Keep visitor analytics history in the portal | An analytics bucket (14.2), and the scheduled `analytics-export.yml` | The analytics tab stays empty |
+| Ship a branded desktop app | Signing keys and `release.yml` (Phase 15) | No installers, no update feed |
+
+A fork starts with Actions off, and its **scheduled** workflows stay
+off until you turn each one on in the Actions tab. Reference B lists
+the secrets each workflow reads.
+
+`/setup` asks these questions before anything else and prints the
+plan they add up to, including the `npm run setup -- --with=` command
+for your choices. The same list drives `npm run setup`: `--with=`
+takes `r2`, `transcode`, `zyra`, `feeds` and `analytics`, and the run
+ends by naming the workflows to turn on and what it left out.
+
 ---
 
 ## The worksheet
@@ -210,6 +243,13 @@ report. So `--with=r2 --only=r2` both asks you for the public asset
 origin and then configures it; `--with=transcode` adds no step at
 all, it just includes the transcode secrets in the handoff.
 
+`--with=` takes `r2`, `transcode`, `zyra`, `feeds` and `analytics`
+([What each capability needs](#what-each-capability-needs)). Every one
+but `r2` runs GitHub Actions in your repository, so the handoff names
+the workflows to turn on for each. `transcode` and `zyra` bring `r2`
+with them, since both publish into the bucket. A run also ends by
+listing the features it left out.
+
 `r2` and `waf` are opt-in via `--only=r2` / `--only=waf`, not part of
 a default run. The rulesets API replaces a zone's whole custom-rule
 list rather than appending to it. Rewriting your zone security config
@@ -235,6 +275,7 @@ so it cannot provision a deploy that
 |---|---|
 | **0** | Cloudflare account, Workers Paid, nameservers — billing and registrar actions. |
 | **5** (part) | *Connecting* the project to a Git remote. That handshake is an OAuth flow between Cloudflare and GitHub with no API — a token cannot grant Cloudflare access to your repos on your behalf. The tool creates the project; you either click Connect, or deploy from CI with `wrangler pages deploy dist/`. |
+| **5.4** (part) | The custom domain's DNS record. The API attach does not create it, and creating it needs Zone → DNS → Edit on a token already at Cloudflare's ten-permission limit. Setup prints the record to add. |
 | **6.1** | Zero Trust onboarding + choosing an identity provider. One-time, per account. |
 | **7** (half) | The node keypair — `npm run gen:node-key` owns it, because it also writes `node-public-key.txt` that Phase 9 reads and stamps your local D1. One command. |
 | **11** | The first single sign-on (SSO) sign-in, which is what makes you admin. |
@@ -301,6 +342,15 @@ These two are needed only for the step named beside each:
 Each step names the permission it is missing rather than failing
 with a bare `10000: Authentication error`.
 
+> **That is ten permissions, and ten is all one token can hold.** The
+> dashboard makes each row a separate policy on the token, and
+> Cloudflare refuses an eleventh with `policies must have a length
+> lower than or equal to 10`. A publisher node that runs both
+> optional steps has no room left. When you need more access,
+> usually read access to WAF rules or zone analytics while
+> troubleshooting, mint a second, read-only token rather than
+> widening this one.
+
 > **The two Zone rows are the ones people cannot find.** Each
 > permission row has three dropdowns, and the first one — the
 > scope — starts on **Account**. Zone permissions are not in the
@@ -344,6 +394,23 @@ Write your account ID (`W1`), your intended hostname (`W2`), and
 your Git remote (`W3`) on the worksheet now. The account ID is in
 the Cloudflare dashboard sidebar and in every dashboard URL.
 
+> **`W2` must be a hostname of its own, not a path.** The node is
+> served from `/`. The app calls `/api/…` and routes `/publish` and
+> `/dataset/…` from the root of its host, and the Access
+> destinations, `public/_headers` and `/.well-known/terraviz.json`
+> assume the same. A path under another site (`your-org.org/terraviz`)
+> is not supported. A base-path build alone does not get you there;
+> the only route is a proxy Worker rewriting paths on that site's
+> zone. Pick a subdomain (`terraviz.your-org.org`) instead.
+>
+> If your organisation's Cloudflare account restricts which
+> hostnames may serve traffic, ask for two allow-list entries before
+> you start: `W2`, **and** `W19`, the R2 assets hostname (e.g.
+> `assets.<W2>`). An account-level WAF ruleset is the usual way such
+> a list is kept.
+> [Reference D](#403-block-page-on-a-new-hostname) explains why this
+> one is hard to find after the fact.
+
 > **Can I skip Workers Paid?** More than you might expect. D1, KV,
 > R2, Vectorize, Analytics Engine and Workers AI all have free
 > allocations, so a free-plan node provisions and runs. What you give
@@ -356,10 +423,23 @@ the Cloudflare dashboard sidebar and in every dashboard URL.
 
 Everything after this assumes you are working from **your own copy**
 of `zyra-project/terraviz`, not from upstream. Phase 3 rewrites
-`wrangler.toml` with your resource IDs, Phase 5 points Cloudflare
-Pages at your remote, and Phase 8.6 runs the transcode workflow in
-your repo. None of that is possible against a repo you cannot push
-to.
+`wrangler.toml` with your resource IDs, and Phase 5 points Cloudflare
+Pages at your remote. Every GitHub Actions workflow a node uses runs
+in your repo too: video transcode, Zyra, the feeds, the analytics
+export and desktop releases. None of that is possible against a repo
+you cannot push to.
+
+> **A clone of `zyra-project/terraviz` is not your own copy.** It
+> builds and deploys, and nothing complains, because Direct Upload
+> needs no remote. But its workflows run for upstream, never for your
+> node, so the capabilities that need GitHub Actions are off
+> ([What each capability needs](#what-each-capability-needs)). If you
+> deployed from a clone, you can add them later. Fork, point your
+> checkout at the fork (`git remote set-url origin
+> https://github.com/<W3>.git`) and push, so Phase 3's `wrangler.toml`
+> lives there. Then set the workflow secrets and the Pages variables
+> (8.6), turn the workflows on, and redeploy the same `dist/`: no
+> `VITE_*` value changes, so nothing needs rebuilding.
 
 **Record the result as `W3`** — `owner/repo`. It is the value the
 `/setup` console reads to retarget its documentation links at your
@@ -786,6 +866,23 @@ Resource *names* (`sphere-feedback`, `terraviz-assets`,
 do, keep the dashboard bindings and the `CATALOG_R2_BUCKET` /
 `ANALYTICS_AE_DATASET` overrides in sync.
 
+> **A renamed bucket needs `CATALOG_R2_BUCKET` everywhere it is
+> addressed.** The `CATALOG_R2` binding names the bucket for the
+> Worker's own R2 calls. Everything else reaches it through the S3
+> API, by the name in `CATALOG_R2_BUCKET`: presigned uploads, signed
+> URLs, the `upload` and `migrate-r2-*` CLIs, and the transcode and
+> Zyra runners (`transcode-hls.yml`, `zyra-run.yml`). Unset, they
+> fall back to `terraviz-assets`. Unset, uploads fail
+> (`AccessDenied` with a bucket-scoped token, `NoSuchBucket` without
+> one) or, if your account also has a bucket by that name, land in
+> it. `npm run setup` writes the Pages variable with the binding, and
+> refuses to if your shell exports a `CATALOG_R2_BUCKET` that names a
+> different bucket. Its handoff lists the other two places: the shell
+> you run the CLI from, and the runners' GitHub secrets.
+> `npm run check:pages-bindings` fails when the binding and the
+> variable disagree. It checks Pages only; the shell and the GitHub
+> secrets are yours to keep in step.
+
 > **Your `wrangler.toml` now diverges from upstream, permanently.**
 > That is the intended end state, not drift to be tidied up. Expect a
 > conflict on this file every time you merge upstream — keep your IDs
@@ -980,8 +1077,17 @@ for a repo you control, and worth narrowing for one you share.
 ## 5.4 Custom domain
 
 Pages → your project → **Custom domains → Set up a custom domain**
-→ enter `W2`. Cloudflare creates the CNAME automatically when the
-zone is on its DNS.
+→ enter `W2`. When the zone is on Cloudflare DNS, this dashboard
+flow creates the CNAME for you.
+
+`npm run setup` attaches the domain through the API instead, and
+the API does **not** create the record: the domain stays `pending`
+with "CNAME record not set" until it exists. Setup prints the record
+to add: `W2` as a proxied CNAME to the project's `*.pages.dev`
+hostname. That is usually `<W10>.pages.dev`, but Cloudflare adds a
+suffix when the name is taken, so copy it from setup's output or the
+project's overview page rather than typing it. A domain attached by
+hand in the dashboard and then adopted by setup needs nothing more.
 
 **Gate:** `https://<W2>` serves the app over TLS.
 
@@ -1388,6 +1494,7 @@ Everything referenced below now exists. Pages → your project →
 | `ACCESS_AUD` | `W13` | |
 | `ACCESS_FEEDBACK_AUD` | 6.4's admin app AUD, `W13`, or `none` (see 6.4) | |
 | `TRUSTED_PUBLISHER_DOMAINS` | `your-org.org` (comma-separated, optional) | |
+| `CATALOG_R2_BUCKET` | `W7` — the same bucket the `CATALOG_R2` binding names. Optional only while the bucket keeps its default name (Phase 3) | |
 
 ## 8.3 Secrets (encrypted)
 
@@ -1522,11 +1629,13 @@ the content. Without the three bindings below, finalising a video
 upload returns 503 `github_dispatch_unconfigured` and rolls the
 dataset's transcoding state back. It does not degrade; it fails.
 
-Skip it for a node that publishes only images, tours or metadata.
-Skip it too for data-encoded video built by a Zyra pipeline, and for
-a mirror of the upstream catalog — those rows carry `vimeo:` refs
-and never touch this. As with 8.5 you can come back later, at the
-cost of another redeploy.
+Skip it for a node that publishes only single images, tours or
+metadata, and for a mirror of the upstream catalog, whose rows carry
+`vimeo:` refs and never touch this. Image sequences go through
+`transcode-hls.yml` too. A node running Zyra needs both halves even
+with no video uploads: Zyra runs are started by the same dispatch,
+and `zyra-run.yml` reads the same seven secrets. As with 8.5 you can
+come back later, at the cost of another redeploy.
 
 Publisher video uploads hand off to a GitHub Actions workflow that
 runs the ffmpeg 4K/1080p/720p 2:1 spherical HLS ladder, via
@@ -1546,8 +1655,8 @@ engine's `frameRate` task assumes 30).
 **GitHub side** (repo Settings → Secrets and variables → Actions):
 `R2_S3_ENDPOINT` (`W21`), `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`
 (`W20`), `TERRAVIZ_SERVER` (`https://<W2>`), `CF_ACCESS_CLIENT_ID`
-(`W14`), `CF_ACCESS_CLIENT_SECRET` (`W15`), and optionally
-`CATALOG_R2_BUCKET`.
+(`W14`), `CF_ACCESS_CLIENT_SECRET` (`W15`), and `CATALOG_R2_BUCKET`
+(`W7`), which is required if you renamed the bucket (Phase 3).
 
 `npm run setup -- --github-secrets` prints the exact `gh secret set`
 commands for all of them, annotated with what each is for and which
@@ -1997,12 +2106,36 @@ own, as an edge rule or a `Content-Security-Policy` line in
 `public/_headers`:
 
 - `connect-src`: `'self'`, `gibs.earthdata.nasa.gov`,
-  `s3.dualstack.us-east-1.amazonaws.com` (SOS snapshot), your video
-  and caption proxies, and `W19`.
-- `img-src` / `media-src`: `'self' data: blob:`, the SOS/CloudFront
-  asset hosts, and `W19`. The Earth basemap textures need no entry —
+  `tiles.openfreemap.org`, `s3.dualstack.us-east-1.amazonaws.com`,
+  `s3.amazonaws.com`, your video and caption proxies, and `W19`.
+- `img-src` / `media-src`: `'self' data: blob:`,
+  `s3.dualstack.us-east-1.amazonaws.com`, the SOS/CloudFront asset
+  hosts, and `W19`. The Earth basemap textures need no entry —
   they are served from your own origin, so `'self'` already covers
   them. Add a host here only if you set `VITE_EARTH_ASSET_BASE`.
+
+Three of those hosts are needed on **every** node, not only one
+that mirrored the SOS catalog, and none can be changed by
+configuration (Reference C):
+
+- `tiles.openfreemap.org` serves the vector source and fonts behind
+  labels, borders and coastlines. The map asks it for the source
+  description as soon as it loads, whichever layers are on.
+- `s3.dualstack.us-east-1.amazonaws.com` serves the cloud texture
+  (`clouds_4096.jpg` / `clouds_8192.jpg`) as well as the SOS
+  snapshot. The globe loads the clouds as an image and the output
+  page refreshes them with `fetch`, so the host belongs in both
+  lists.
+- `s3.amazonaws.com` serves the terrain elevation tiles, fetched
+  whenever terrain is switched on.
+
+Apply the policy as `Content-Security-Policy-Report-Only` first, with
+the console open. Load the globe, a dataset and a tour. Switch on
+terrain, labels and borders, since a host behind a toggle that is
+off never shows up. If you use the output page, open that too
+(`/output/output`).
+Each violation names a host the policy is missing, and nothing is
+blocked while you collect them.
 
 The app uses `blob:` for preview tours and screenshots — omitting
 it reproduces the "may not load data from blob:" failure. Test
@@ -2277,7 +2410,7 @@ with `root_selector: "data"`.
 | Realtime streaming STT | `CF_ACCOUNT_ID`, `CF_AI_GATEWAY`, `CF_AIG_TOKEN` (**secret**), optional `VOICE_STREAM_MODEL`; `VITE_VOICE_WS_STREAMING=true` (build-time) | Opt-in. Without the three server variables, `/api/voice/stream` sends a JSON error frame and the client falls back to batch Whisper. Set up the gateway as described under this table first. See [`ORBIT_VOICE_PLAN.md`](ORBIT_VOICE_PLAN.md) §3. |
 | Wake word | `VITE_VOICE_WAKEWORD_MODEL_URL` (build-time) | [`ORBIT_WAKEWORD.md`](ORBIT_WAKEWORD.md) |
 | YouTube media suggestions | `YOUTUBE_API_KEY` (**secret**) | Absent = source stays off, nothing errors. [`YOUTUBE_API_KEY.md`](YOUTUBE_API_KEY.md) |
-| Current events / blog | none beyond Phase 8 | Feeds console at `/publish/feeds`. [`CURRENT_EVENTS_PLAN.md`](CURRENT_EVENTS_PLAN.md) |
+| Current events / blog | The blog: none beyond Phase 8. The events feed: the scheduled `import-events.yml` and `refresh-video-sources.yml` (Reference B), or a refresh by hand on `/publish/feeds` | Feeds console at `/publish/feeds`. [`CURRENT_EVENTS_PLAN.md`](CURRENT_EVENTS_PLAN.md) |
 
 **The realtime gateway must not keep logs.** Visitors' microphone
 audio and its transcripts pass through it, and an AI Gateway logs
@@ -2550,14 +2683,15 @@ is [`scripts/lib/expected-bindings.ts`](../scripts/lib/expected-bindings.ts).
 | `ANALYTICS_R2` | R2 | 14.2 | Analytics archive |
 | `CF_ACCOUNT_ID` | plaintext | 14.2 / 14.5 | AE SQL API, voice gateway |
 | `ANALYTICS_SQL_TOKEN` | secret | 14.2 | AE SQL API |
-| `ANALYTICS_AE_DATASET` | plaintext | 14.2 | Renamed AE dataset |
+| `ANALYTICS_AE_DATASET` | plaintext | 14.2 | AE dataset the export queries; must match `ANALYTICS` (setup writes both) |
 | `CF_AI_GATEWAY` | plaintext | 14.5 | Realtime STT: a gateway of its own, Logs off |
 | `CF_AIG_TOKEN` | secret | 14.5 | Realtime STT |
 | `VOICE_STREAM_MODEL` | plaintext | 14.5 | STT model override |
 | `YOUTUBE_API_KEY` | secret | 14.5 | YouTube suggestions |
 | `KILL_VOICE` | plaintext | 14.5 | Stops the Cloud voice engine, not the browser's |
 | `FEEDBACK_ADMIN_TOKEN` | secret | 6.4 | Bearer fallback for legacy admin routes |
-| `CATALOG_R2_BUCKET` | plaintext | — | Bucket-name override |
+| `CATALOG_R2_BUCKET` | plaintext | 8.2 | Bucket name for the S3-API paths; must match `CATALOG_R2` |
+| `VIDEO_PROXY_BASE` | plaintext | Ref. C | Server-side resolution of legacy `vimeo:` refs |
 
 **Build-time (`VITE_*`, Pages → Environment variables):**
 `VITE_BUILD_CHANNEL`, `VITE_TELEMETRY_ENABLED`,
@@ -2578,7 +2712,10 @@ not just a redeploy.
 # Reference B — CI/CD workflow matrix
 
 Workflows travel with the fork; the secrets that make them run do
-not.
+not, and neither does their switch. A fork starts with Actions off,
+and each *scheduled* workflow stays off until you turn it on in the
+Actions tab. One left off never runs, and nothing on the node says
+so.
 
 | Workflow | Needs | Drop it if… |
 |---|---|---|
@@ -2587,7 +2724,11 @@ not.
 | `poster.yml` | same, plus `terraviz-poster` rename; envs `poster-*` | no poster sub-site |
 | `visual-report.yml` | smoke/report/diff: nothing. Optional report deploy: the two Cloudflare secrets + a `terraviz-visual` project; optional `vars.VISUAL_DEPLOY_URL` | **keep** the gating jobs; drop only the deploy step |
 | `transcode-hls.yml` | the seven Phase 8.6 GitHub secrets | no publisher video uploads |
-| `analytics-export.yml` / `analytics-backfill.yml` | `TERRAVIZ_SERVER`, `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` | you skipped 14.2 |
+| `zyra-run.yml` | the same seven secrets as `transcode-hls.yml` | no Zyra workflows |
+| `zyra-scheduler.yml` *(scheduled, every 15 min)* | `TERRAVIZ_SERVER`, `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` | no Zyra workflows on a schedule |
+| `import-events.yml` *(scheduled, every 6 h)* | `TERRAVIZ_SERVER`, `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` | you refresh events by hand (**Run all enabled feeds now** on `/publish/feeds`, or `npm run terraviz -- import-events --server=https://<W2>` from a scheduler of your own), or not at all |
+| `refresh-video-sources.yml` *(scheduled, every 12 h)* | `TERRAVIZ_SERVER`, `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` | no video sources in `/publish/feeds`, or you index them by hand (**Index now**) |
+| `analytics-export.yml` *(scheduled, daily)* / `analytics-backfill.yml` | `TERRAVIZ_SERVER`, `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` | you skipped 14.2 |
 | `release.yml` / `desktop.yml` | `TAURI_SIGNING_PRIVATE_KEY` + `_PASSWORD`, 6× `APPLE_*` | web-only node |
 | `sync-weblate.yml` | `WEBLATE_TOKEN` | no translation pipeline of your own |
 | `codeql.yml`, `mobile.yml` | nothing | **keep** — fork-safe |
@@ -2622,13 +2763,20 @@ quietly dependent on upstream infrastructure.
 |---|---|---|---|
 | `VITE_EARTH_ASSET_BASE` | *(unset — served from your own origin)* | Earth basemap textures (diffuse / night lights / normal / borders) for the photoreal Earth and 2D overlays — loaded by **every** node. | **Nothing to do.** The eleven files are committed under `public/assets/basemaps/`, so your clone has them and your build serves them itself — no install-time fetch, and it works air-gapped. Set this only to move them to a CDN. |
 | `VITE_VIDEO_PROXY_BASE` | `https://video-proxy.zyra-project.org/video` | Resolves **legacy SOS** `vimeo:` data refs into HLS/MP4. | Only if you ran `import-snapshot` and want video independent of upstream. The proxy worker isn't in this repo. |
+| `VIDEO_PROXY_BASE` | `https://video-proxy.zyra-project.org/video` | The same proxy, read by the **server**: `/api/v1/datasets/:id/manifest` resolves `vimeo:` refs through it, and the exhibit reads ask it for a video's length. A Pages variable, set at runtime, not a build variable. | Together with `VITE_VIDEO_PROXY_BASE`. Setting only the build variable moves the browser's lookups and leaves every manifest the node serves on upstream's proxy. `migrate-r2-hls` takes `--proxy-base` for the same reason. |
 | `VITE_CAPTION_PROXY_BASE` | `https://video-proxy.zyra-project.org/captions` | CORS shim for legacy `sos.noaa.gov` `.srt` captions. | Same. |
 | `VITE_SAMPLE_TOURS` | *(unset — the two bundled tours are shown)* | "Climate Connections" and "Climate Futures", the sample tours committed under `public/assets/`. They are injected into the catalog **client-side**, after `/api/v1/catalog` returns, so they appear even on a node that has published nothing — and they load SOS handles (`INTERNAL_SOS_25_VIDEO`, `INTERNAL_SOS_SSP_GA_19`, …) that only exist upstream. On your node the cards open a tour that can load nothing, and Orbit recommends them to newcomers besides. | **Set it to `false`** unless you ran `import-snapshot` and hold those datasets. It drops those two rows only — your own published tours are unaffected (that is the `tours` node-feature toggle, which is broader). If CI builds, it is a **GitHub Variable** (Settings → Secrets and variables → Actions → Variables, or the `production` Environment); `ci.yml` already passes it through. If Cloudflare builds, set it in Pages → Settings → Environment variables. |
 | `TERRAVIZ_DOCS_URL` | `https://github.com/zyra-project/terraviz/blob/main/docs/SELF_HOSTING.md` | Base for the 19 links the `/setup` console makes into this guide (17 anchored per phase). Read at **build** time by `npm run build:setup-page`. | Once your fork's copy of this guide diverges from upstream's. Set it to your own blob URL — including the branch, if yours isn't `main` — and rebuild. |
 
 Content you publish through the portal is transcoded to your own
 R2 (`r2:` data refs) and never touches either proxy — the proxies
-only matter for mirrored SOS rows.
+only matter for mirrored SOS rows. The proxy worker is not in this
+repo, so changing these only helps if you run a compatible proxy of
+your own. The other way to drop the dependency is to move those rows
+onto your own R2 with `migrate-r2-hls`, which rewrites each `vimeo:`
+ref as `r2:`. It skips the real-time rows by default, because NOAA
+re-uploads those daily and a one-off copy goes stale within a day.
+Those stay on the proxy.
 
 > `TERRAVIZ_DOCS_URL` only matters for people reading your node's
 > `/setup` without filling anything in. The console also retargets
@@ -2636,9 +2784,12 @@ only matter for mirrored SOS rows.
 > actually working through the install gets your fork's guide as soon
 > as they enter it, whether or not you set the variable.
 
-The SOS metadata snapshot, the cloud-texture bucket, and NASA GIBS
-tiles are third-party **public data sources** shared by all nodes,
-not upstream infrastructure. Leave them pointed at NOAA/NASA.
+Some hosts are third-party **public data sources** shared by all
+nodes, not upstream infrastructure. They are the SOS metadata
+snapshot, the cloud-texture bucket, NASA GIBS tiles, OpenFreeMap's
+vector tiles and fonts, and the terrain elevation tiles (AWS Open
+Data). There is nothing to repoint, and no setting to do it
+with, so your CSP (Phase 13) has to allow their hosts.
 
 Cosmetic, change at leisure: `src/ui/creditsPanel.ts` and
 `docs/PRIVACY.md` link to `github.com/zyra-project/terraviz` (after
@@ -2728,6 +2879,25 @@ The `ANALYTICS` binding is missing in the environment serving
 traffic. Check both Production and Preview.
 `functions/api/ingest.ts` reads `context.env.ANALYTICS` and
 silently skips the write when undefined.
+
+### 403 block page on a new hostname
+DNS resolves and the Pages domain is active, yet every request to
+`W2` gets a Cloudflare block page, and so does the R2 assets
+hostname. It happens in a browser and from `curl`, from any network. Your node never saw
+the request: a WAF rule refused it at the edge.
+
+If the zone's own **Security → WAF → Custom rules** list nothing
+that matches, look at the **account** level. On Enterprise plans an
+account can deploy custom rulesets that run on every zone it owns.
+An organisation often uses one as a hostname allow-list, blocking
+any subdomain not on it. Those rules are not shown
+among the zone's own, so a zone-level search finds nothing, and the
+token this guide prescribes cannot read them. Ask whoever runs the
+account to check the account-level rulesets and add both hostnames,
+or mint a separate read-only token that can see them. The setup
+token is already full (Shortcut, "Token scope"). Send them the Ray
+ID printed at the bottom of the block page: it identifies the
+request in their security events, and with it the rule that fired.
 
 ### `/api/ingest` returns 403
 The cross-origin (CORS) gate rejected it, for one of two reasons.
