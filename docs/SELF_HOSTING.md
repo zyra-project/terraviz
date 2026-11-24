@@ -71,7 +71,7 @@ and the rest fail silently.
 | Show the globe, the SOS catalog and Orbit | A deployed node (Phases 0–5, then 13) | Works |
 | Publish your own datasets, tours and blog posts | The publisher backend (Phases 2–11) | Works |
 | Upload images and other files | + an R2 public domain and S3 token (8.5) | Works |
-| Upload videos | + R2, and `transcode-hls.yml` (8.6) | Finishing an upload answers 503 |
+| Upload videos and image sequences | + R2, and `transcode-hls.yml` (8.6) | Finishing an upload answers 503 |
 | Run scheduled data pipelines with Zyra | + R2, and `zyra-run.yml` and the scheduled `zyra-scheduler.yml` (8.6) | Runs never start |
 | Keep current events and video suggestions coming in | The scheduled `import-events.yml` and `refresh-video-sources.yml` | Nothing refreshes; press Run now on `/publish/feeds` by hand |
 | Keep visitor analytics history in the portal | An analytics bucket (14.2), and the scheduled `analytics-export.yml` | The analytics tab stays empty |

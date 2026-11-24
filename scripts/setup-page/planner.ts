@@ -65,13 +65,6 @@ const esc = (s: string): string =>
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
 
-/** Backtick spans as `<code>`, everything else escaped. */
-const inline = (s: string): string =>
-  s
-    .split('`')
-    .map((part, i) => (i % 2 === 1 ? `<code style="${CODE}">${esc(part)}</code>` : esc(part)))
-    .join('')
-
 const EYEBROW =
   'font:600 10.5px/1.35 var(--tv-font-sans);letter-spacing:.13em;text-transform:uppercase;color:var(--tv-text-dim)'
 const CODE =
@@ -153,7 +146,7 @@ export function plannerSection(): string {
   <style>${PLANNER_STYLE}</style>
   <div style="${EYEBROW};margin:0 0 12px">Step one · what this node will do</div>
   <h2 id="tvp-title" style="font:600 20px/1.3 var(--tv-font-sans);color:var(--tv-text);margin:0 0 10px">What do you want this node to do?</h2>
-  <p style="${HELP}">Every node has ${esc(BASELINE.charAt(0).toLowerCase() + BASELINE.slice(1).replace(/\.$/, ''))}, with no publishing. Tick what you want on top, and say whether you can run GitHub Actions. The page works out your node type and what you will have to set up, before you start rather than halfway through.</p>
+  <p style="${HELP}">Every node has ${esc(BASELINE.charAt(0).toLowerCase() + BASELINE.slice(1))} Tick what you want on top, and say whether you can run GitHub Actions. The page works out your node type and what you will have to set up, before you start rather than halfway through.</p>
   <fieldset style="border:none;margin:0 0 22px;padding:0;min-width:0">
     <legend style="${LEGEND}">On top of the globe, I want to…</legend>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,260px),1fr));gap:10px;margin:8px 0 0">
@@ -309,7 +302,7 @@ ${PLAN_LOGIC}
     body.textContent = '';
     // Untouched, the export's picker still shows its own default, so
     // claiming a tier here would contradict the page.
-    if (!saved.caps.length && !saved.actions) {
+    if (untouched()) {
       body.appendChild(el('p', 'margin:0;font-size:13px;color:var(--tv-text-muted)',
         'Tick what you want above, and answer the GitHub Actions question, to see your plan.'));
       return;
@@ -363,7 +356,7 @@ ${PLAN_LOGIC}
     body.appendChild(el('h4', H, 'What you will set up'));
     if (!plan.requirements.length) {
       body.appendChild(el('p', 'margin:0;font-size:13px;color:var(--tv-text-muted)',
-        'Nothing beyond the deploy itself: Phases 0 to 5, then 13.'));
+        'Nothing beyond a viewer node: Phases 0 to 5, the five Tier 1 bindings in Phase 8, the checks in Phase 10, and a CSP before you go public (Phase 13).'));
     } else {
       body.appendChild(list(plan.requirements.map(function (r) {
         return function (li) {
@@ -375,9 +368,12 @@ ${PLAN_LOGIC}
     }
 
     if (plan.workflows.length) {
-      body.appendChild(el('h4', H, 'Workflows to turn on in your repository\\u2019s Actions tab'));
+      body.appendChild(el('h4', H, 'Workflows your plan uses'));
+      body.appendChild(el('p', 'margin:0 0 6px;font-size:13px;color:var(--tv-text-muted)',
+        'Turn Actions on for your repository, then enable each scheduled one in the Actions tab: a fork keeps them off until you do.'));
+      var HOW = { schedule: 'scheduled: enable it', dispatch: 'starts by itself once Actions are on', manual: 'run it from Run workflow' };
       body.appendChild(list(plan.workflows.map(function (w) {
-        return function (li) { inline(li, '\`' + w.file + '\` \\u2014 ' + w.when); };
+        return function (li) { inline(li, '\`' + w.file + '\` \\u2014 ' + w.when + ' (' + HOW[w.trigger] + ')'); };
       })));
     }
 
@@ -412,7 +408,9 @@ ${PLAN_LOGIC}
       return !lastEffective[id] && saved.caps.indexOf(id) === -1;
     });
     lastEffective = effective;
-    if (announce && status) {
+    if (announce && status && untouched()) {
+      announce('Plan cleared.');
+    } else if (announce && status) {
       var msg = 'Plan updated: Tier ' + plan.tier + ', ' + D.tiers[plan.tier] + '.';
       if (added.length) msg += ' Also includes: ' + added.map(function (id) { return byId[id].title; }).join(', ') + '.';
       var n = plan.blocked.length || plan.atRisk.length;
@@ -479,12 +477,20 @@ ${PLAN_LOGIC}
     persist();
     var plan = paint(announce);
     // The export's own picker owns what a tier shows; drive it rather
-    // than duplicate it.
-    var button = document.querySelector('button[data-tier="' + plan.tier + '"]');
-    if (button) button.click();
+    // than duplicate it. Only when the answers move the tier, so a tier
+    // the operator picked by hand survives a change that does not, and
+    // never for an untouched form, which claims no tier at all.
+    var tier = untouched() ? null : plan.tier;
+    if (tier !== null && tier !== lastTier) {
+      var button = document.querySelector('button[data-tier="' + tier + '"]');
+      if (button) button.click();
+    }
+    lastTier = tier;
   });
 
-  paint(null);
+  function untouched() { return !saved.caps.length && !saved.actions; }
+  var first = paint(null);
+  var lastTier = untouched() ? null : first.tier;
 })();
 `
 }

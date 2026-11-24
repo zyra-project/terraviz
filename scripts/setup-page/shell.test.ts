@@ -312,7 +312,11 @@ describe('the committed public/setup.html', () => {
     const planner = page.indexOf('data-tv-planner="1"')
     expect(planner).toBeGreaterThan(-1)
     expect(page.indexOf('data-tv-planner="1"', planner + 1)).toBe(-1)
-    expect(planner).toBeLessThan(page.search(/<button[^>]*\bdata-tier="1"/))
+    const picker = page.search(/<button[^>]*\bdata-tier="1"/)
+    expect(planner).toBeLessThan(picker)
+    // Directly in front: one <section> opens between them, the picker's.
+    const between = page.slice(page.indexOf('</section>', planner), picker)
+    expect(between.match(/<section/g)).toHaveLength(1)
     expect(page.match(/data-tv-injected="planner"/g)).toHaveLength(1)
   })
 

@@ -3,7 +3,7 @@
 
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import {
   CAPABILITIES,
   planNode,
@@ -17,6 +17,7 @@ import {
   EXPORT_STORAGE_KEY,
   PLAN_LOGIC,
   PLANNER_MARK,
+  PLANNER_STORAGE_KEY,
   plannerData,
   plannerRuntime,
   plannerSection,
@@ -177,5 +178,102 @@ describe('applyPlanner', () => {
   it('fails the build on a page without the questions', () => {
     expect(() => assertPlannerPresent('<body><p>no picker</p></body>')).toThrow(/tier\s+picker/)
     expect(() => assertPlannerPresent(applyPlanner(page, 'data-tv-injected').html)).not.toThrow()
+  })
+})
+
+// The runtime as the page runs it: the section's markup, three stub
+// tier buttons standing in for the export's picker, and the script.
+describe('the runtime, executed', () => {
+  let clicks: number[]
+
+  function mount(stored?: { caps: string[]; actions: string | null }): void {
+    localStorage.clear()
+    if (stored) localStorage.setItem(PLANNER_STORAGE_KEY, JSON.stringify(stored))
+    document.body.innerHTML =
+      plannerSection() +
+      [1, 2, 3].map(n => `<button data-tier="${n}">Tier ${n}</button>`).join('')
+    clicks = []
+    for (const b of Array.from(document.querySelectorAll('button[data-tier]'))) {
+      b.addEventListener('click', () => clicks.push(Number(b.getAttribute('data-tier'))))
+    }
+    new Function(plannerRuntime())()
+  }
+  const box = (id: string) => document.getElementById(`tvp-cap-${id}`) as HTMLInputElement
+  const radio = (v: string) => document.getElementById(`tvp-actions-${v}`) as HTMLInputElement
+  const change = (input: HTMLInputElement, checked: boolean): void => {
+    input.checked = checked
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+  }
+
+  beforeEach(() => mount())
+
+  it('ticks and locks what a choice implies, and frees it again', () => {
+    change(box('video'), true)
+    for (const id of ['publish', 'assets']) {
+      expect(box(id).checked, id).toBe(true)
+      expect(box(id).getAttribute('aria-disabled'), id).toBe('true')
+      expect(box(id).disabled, id).toBe(false)
+    }
+    expect(document.querySelector('[data-tvp-implied="publish"]')?.textContent).toContain(
+      'Included with',
+    )
+    change(box('video'), false)
+    expect(box('publish').checked).toBe(false)
+    expect(box('publish').hasAttribute('aria-disabled')).toBe(false)
+  })
+
+  it('refuses to untick an implied box', () => {
+    change(box('video'), true)
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true })
+    box('publish').dispatchEvent(click)
+    expect(click.defaultPrevented).toBe(true)
+  })
+
+  it('moves the tier picker when the answers move the tier, and only then', () => {
+    change(box('feeds'), true)
+    expect(clicks).toEqual([2])
+    // The operator overrides by hand; a change that keeps Tier 2 must
+    // not snap it back.
+    ;(document.querySelector('button[data-tier="3"]') as HTMLButtonElement).click()
+    change(radio('yes'), true)
+    change(box('zyra'), true)
+    expect(clicks).toEqual([2, 3])
+    change(box('desktop'), true)
+    expect(clicks).toEqual([2, 3, 3])
+  })
+
+  it('keeps the picker’s pressed state in step', () => {
+    change(box('desktop'), true)
+    const pressed = Array.from(document.querySelectorAll('button[data-tier]')).map(b =>
+      b.getAttribute('aria-pressed'),
+    )
+    expect(pressed).toEqual(['false', 'false', 'true'])
+  })
+
+  it('claims no tier for an untouched form, including one cleared again', () => {
+    expect(document.querySelector('[data-tvp-plan]')?.textContent).toContain('Tick what you want')
+    change(box('analytics'), true)
+    change(box('analytics'), false)
+    expect(clicks).toEqual([2])
+    expect(document.querySelector('[data-tvp-plan]')?.textContent).toContain('Tick what you want')
+  })
+
+  it('restores saved answers without moving the picker', () => {
+    mount({ caps: ['zyra'], actions: 'no' })
+    expect(box('zyra').checked).toBe(true)
+    expect(radio('no').checked).toBe(true)
+    expect(document.querySelector('[data-tvp-blocked="zyra"]')?.textContent).toContain(
+      'Not possible without GitHub Actions',
+    )
+    expect(document.querySelector('[data-tvp-plan]')?.textContent).toContain(
+      'Not possible without GitHub Actions',
+    )
+    expect(clicks).toEqual([])
+  })
+
+  it('ignores stored ids it does not know', () => {
+    mount({ caps: ['teleport', 'feeds'], actions: 'sideways' })
+    expect(box('feeds').checked).toBe(true)
+    expect(radio('yes').checked || radio('no').checked || radio('unsure').checked).toBe(false)
   })
 })

@@ -454,7 +454,7 @@ code{overflow-wrap:anywhere}
   <style>[data-tv-planner] input:focus-visible{outline:2px solid var(--tv-accent);outline-offset:2px}[data-tv-planner] label:has(input:focus-visible){border-color:var(--tv-accent)!important}[data-tv-planner] label:has(input[aria-disabled="true"]){opacity:.72;cursor:default}</style>
   <div style="font:600 10.5px/1.35 var(--tv-font-sans);letter-spacing:.13em;text-transform:uppercase;color:var(--tv-text-dim);margin:0 0 12px">Step one · what this node will do</div>
   <h2 id="tvp-title" style="font:600 20px/1.3 var(--tv-font-sans);color:var(--tv-text);margin:0 0 10px">What do you want this node to do?</h2>
-  <p style="margin:0 0 12px;max-width:64ch;font-size:13px;color:var(--tv-text-muted);text-wrap:pretty">Every node has the globe, the Science On a Sphere catalog and Orbit, with no publishing. Tick what you want on top, and say whether you can run GitHub Actions. The page works out your node type and what you will have to set up, before you start rather than halfway through.</p>
+  <p style="margin:0 0 12px;max-width:64ch;font-size:13px;color:var(--tv-text-muted);text-wrap:pretty">Every node has the globe, the Science On a Sphere catalog and Orbit. Tick what you want on top, and say whether you can run GitHub Actions. The page works out your node type and what you will have to set up, before you start rather than halfway through.</p>
   <fieldset style="border:none;margin:0 0 22px;padding:0;min-width:0">
     <legend style="font:600 14px/1.4 var(--tv-font-sans);color:var(--tv-text);padding:0;margin:0 0 6px">On top of the globe, I want to…</legend>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,260px),1fr));gap:10px;margin:8px 0 0">
@@ -481,8 +481,8 @@ code{overflow-wrap:anywhere}
     <label for="tvp-cap-video" style="display:flex;gap:10px;align-items:flex-start;cursor:pointer;border-radius:8px;padding:12px 14px;background:var(--tv-surface-3);border:1px solid var(--tv-border)">
       <input type="checkbox" id="tvp-cap-video" data-tvp-cap="video" aria-labelledby="tvp-cap-video-title" aria-describedby="tvp-cap-video-sum tvp-cap-video-needs tvp-cap-video-implied tvp-cap-video-blocked" style="margin:3px 0 0;flex:none;width:16px;height:16px;accent-color:var(--tv-accent)"/>
       <span style="display:block">
-        <span id="tvp-cap-video-title" style="display:block;font:600 13.5px/1.35 var(--tv-font-sans);color:var(--tv-text)">Upload videos</span>
-        <span id="tvp-cap-video-sum" style="display:block;font-size:12.5px;line-height:1.5;color:var(--tv-text-muted);margin:3px 0 0;text-wrap:pretty">Publishers upload a video and the node transcodes it to adaptive HLS in your bucket.</span>
+        <span id="tvp-cap-video-title" style="display:block;font:600 13.5px/1.35 var(--tv-font-sans);color:var(--tv-text)">Upload videos and image sequences</span>
+        <span id="tvp-cap-video-sum" style="display:block;font-size:12.5px;line-height:1.5;color:var(--tv-text-muted);margin:3px 0 0;text-wrap:pretty">Publishers upload a video, or a sequence of frames, and the node turns it into adaptive HLS in your bucket.</span>
         <span id="tvp-cap-video-needs" style="display:block;font:500 11px/1.5 var(--tv-font-mono);color:var(--tv-text-dim);margin:6px 0 0">Needs: R2 public bucket · GitHub Actions</span>
         <span id="tvp-cap-video-implied" data-tvp-implied="video" style="display:block;font-size:12px;color:var(--tv-accent);margin:4px 0 0"></span>
         <span id="tvp-cap-video-blocked" data-tvp-blocked="video" style="display:block;font-size:12px;color:var(--tv-warn);margin:4px 0 0"></span>
@@ -2839,7 +2839,7 @@ repaint();
 (function () {
   var root = document.querySelector('[data-tv-planner]');
   if (!root) return;
-  var D = {"caps":[{"id":"publish","title":"Publish your own datasets, tours and blog posts","needs":["backend"],"implies":[],"workflows":[],"feature":null,"tier":2,"withoutActions":null,"byHand":null},{"id":"assets","title":"Upload images and other files","needs":["backend","r2-public"],"implies":["publish"],"workflows":[],"feature":"r2","tier":2,"withoutActions":null,"byHand":null},{"id":"video","title":"Upload videos","needs":["backend","r2-public","github-actions"],"implies":["publish","assets"],"workflows":[{"file":"transcode-hls.yml","trigger":"dispatch","when":"on each video upload"}],"feature":"transcode","tier":2,"withoutActions":"Finishing a video upload answers 503 github_dispatch_unconfigured. The source file stays in R2.","byHand":null},{"id":"zyra","title":"Run scheduled data pipelines with Zyra","needs":["backend","r2-public","github-actions","scheduled-workflows"],"implies":["publish","assets"],"workflows":[{"file":"zyra-run.yml","trigger":"dispatch","when":"on each workflow run"},{"file":"zyra-scheduler.yml","trigger":"schedule","when":"every 15 minutes"}],"feature":"zyra","tier":2,"withoutActions":"A workflow’s Run now has nowhere to dispatch to, and scheduled runs never start.","byHand":null},{"id":"feeds","title":"Keep current events and video suggestions coming in","needs":["backend","github-actions","scheduled-workflows"],"implies":["publish"],"workflows":[{"file":"import-events.yml","trigger":"schedule","when":"every 6 hours"},{"file":"refresh-video-sources.yml","trigger":"schedule","when":"every 12 hours"}],"feature":"feeds","tier":2,"withoutActions":"Nothing refreshes on its own: new events and video suggestions stop arriving, and nothing says so.","byHand":"Press Run now on /publish/feeds when you want a refresh, or run `npm run terraviz -- import-events`."},{"id":"analytics","title":"Keep visitor analytics history in the portal","needs":["backend","analytics-bucket","github-actions","scheduled-workflows"],"implies":["publish"],"workflows":[{"file":"analytics-export.yml","trigger":"schedule","when":"daily, 00:25 UTC"},{"file":"analytics-backfill.yml","trigger":"manual","when":"once, by hand, at first setup"}],"feature":"analytics","tier":2,"withoutActions":"The analytics tab stays empty: it reads rollups only the export writes, and a day Analytics Engine has dropped cannot be exported later.","byHand":null},{"id":"desktop","title":"Ship a branded desktop app","needs":["backend","github-actions","desktop-signing"],"implies":["publish"],"workflows":[{"file":"release.yml","trigger":"manual","when":"when you cut a release"}],"feature":null,"tier":3,"withoutActions":"No installers and no update feed: release.yml builds and signs them.","byHand":null}],"requirements":{"backend":{"label":"The publisher backend","short":"Publisher backend","detail":"D1, KV, Vectorize, Cloudflare Access and the node keys.","where":"Phases 2–11"},"r2-public":{"label":"R2 public domain and S3 token","short":"R2 public bucket","detail":"A public hostname for the asset bucket, its CORS policy, and an S3 API token for uploads.","where":"Phase 8.5"},"github-actions":{"label":"GitHub Actions in a repository you control","short":"GitHub Actions","detail":"A fork, or your own copy, that you can push to, with Actions turned on and the workflow secrets set. A clone of upstream cannot run them.","where":"Phases 0.2 and 8.6"},"scheduled-workflows":{"label":"Its scheduled workflows turned on","short":"Scheduled workflows","detail":"GitHub starts a fork with scheduled workflows off. Turn each one on in the Actions tab; until then it never runs, and nothing says so.","where":"Reference B"},"analytics-bucket":{"label":"An analytics archive bucket and SQL token","short":"Analytics bucket","detail":"A second R2 bucket bound as ANALYTICS_R2, plus a read-only Analytics Engine SQL token.","where":"Phase 14.2"},"desktop-signing":{"label":"Desktop signing keys","short":"Signing keys","detail":"A Tauri updater key pair, and Apple signing secrets if you notarize.","where":"Phase 15"}},"requirementOrder":["backend","r2-public","github-actions","scheduled-workflows","analytics-bucket","desktop-signing"],"features":["r2","transcode","zyra","feeds","analytics"],"tiers":{"1":"Viewer node","2":"Publisher node","3":"Publisher node + desktop app"},"baseline":"The globe, the Science On a Sphere catalog and Orbit."};
+  var D = {"caps":[{"id":"publish","title":"Publish your own datasets, tours and blog posts","needs":["backend"],"implies":[],"workflows":[],"feature":null,"tier":2,"withoutActions":null,"byHand":null},{"id":"assets","title":"Upload images and other files","needs":["backend","r2-public"],"implies":["publish"],"workflows":[],"feature":"r2","tier":2,"withoutActions":null,"byHand":null},{"id":"video","title":"Upload videos and image sequences","needs":["backend","r2-public","github-actions"],"implies":["publish","assets"],"workflows":[{"file":"transcode-hls.yml","trigger":"dispatch","when":"on each video upload"}],"feature":"transcode","tier":2,"withoutActions":"Finishing a video or image-sequence upload answers 503 github_dispatch_unconfigured. The uploaded files stay in R2.","byHand":null},{"id":"zyra","title":"Run scheduled data pipelines with Zyra","needs":["backend","r2-public","github-actions","scheduled-workflows"],"implies":["publish","assets"],"workflows":[{"file":"zyra-run.yml","trigger":"dispatch","when":"on each workflow run"},{"file":"zyra-scheduler.yml","trigger":"schedule","when":"every 15 minutes"}],"feature":"zyra","tier":2,"withoutActions":"Run now answers 503 dispatch_unconfigured and records a failed run, and scheduled runs never start.","byHand":null},{"id":"feeds","title":"Keep current events and video suggestions coming in","needs":["backend","github-actions","scheduled-workflows"],"implies":["publish"],"workflows":[{"file":"import-events.yml","trigger":"schedule","when":"every 6 hours"},{"file":"refresh-video-sources.yml","trigger":"schedule","when":"every 12 hours"}],"feature":"feeds","tier":2,"withoutActions":"Nothing refreshes on its own: new events never arrive and video sitemaps are never indexed, and nothing says so.","byHand":"On /publish/feeds, press Run all enabled feeds now (News feeds) and Index now (Media channels). Or schedule `npm run terraviz -- import-events --server=https://\u003cyour node>` yourself, with `TERRAVIZ_ACCESS_CLIENT_ID` and `TERRAVIZ_ACCESS_CLIENT_SECRET` set; without `--server` it reaches another node."},{"id":"analytics","title":"Keep visitor analytics history in the portal","needs":["backend","analytics-bucket","github-actions","scheduled-workflows"],"implies":["publish"],"workflows":[{"file":"analytics-export.yml","trigger":"schedule","when":"daily, 00:25 UTC"},{"file":"analytics-backfill.yml","trigger":"manual","when":"once, by hand, at first setup"}],"feature":"analytics","tier":2,"withoutActions":"The analytics tab stays empty: it reads rollups only the export writes, and a day Analytics Engine has dropped cannot be exported later.","byHand":null},{"id":"desktop","title":"Ship a branded desktop app","needs":["backend","github-actions","desktop-signing"],"implies":["publish"],"workflows":[{"file":"release.yml","trigger":"manual","when":"when you cut a release"}],"feature":null,"tier":3,"withoutActions":"No installers and no update feed: release.yml builds and signs them.","byHand":null}],"requirements":{"backend":{"label":"The publisher backend","short":"Publisher backend","detail":"D1, KV, Vectorize, Cloudflare Access and the node keys.","where":"Phases 2–11"},"r2-public":{"label":"R2 public domain and S3 token","short":"R2 public bucket","detail":"A public hostname for the asset bucket, its CORS policy, and an S3 API token for uploads.","where":"Phase 8.5"},"github-actions":{"label":"GitHub Actions in a repository you control","short":"GitHub Actions","detail":"A fork, or your own copy, that you can push to, with Actions turned on and the workflow secrets set. A clone of upstream cannot run them.","where":"Phases 0.2 and 8.6"},"scheduled-workflows":{"label":"Scheduled workflows turned on","short":"Scheduled workflows","detail":"GitHub starts a fork with scheduled workflows off. Turn each one on in the Actions tab; until then it never runs, and nothing says so.","where":"Reference B"},"analytics-bucket":{"label":"An analytics archive bucket and SQL token","short":"Analytics bucket","detail":"A second R2 bucket bound as ANALYTICS_R2, plus a read-only Analytics Engine SQL token.","where":"Phase 14.2"},"desktop-signing":{"label":"Desktop signing keys","short":"Signing keys","detail":"A Tauri updater key pair, and Apple signing secrets if you notarize.","where":"Phase 15"}},"requirementOrder":["backend","r2-public","github-actions","scheduled-workflows","analytics-bucket","desktop-signing"],"features":["r2","transcode","zyra","feeds","analytics"],"tiers":{"1":"Viewer node","2":"Publisher node","3":"Publisher node + desktop app"},"baseline":"The globe, the Science On a Sphere catalog and Orbit."};
   var KEY = "terraviz-setup-planner-v1";
 
 function tvpPlan(D, selected, actions) {
@@ -2927,7 +2927,7 @@ function tvpCommand(features) {
     body.textContent = '';
     // Untouched, the export's picker still shows its own default, so
     // claiming a tier here would contradict the page.
-    if (!saved.caps.length && !saved.actions) {
+    if (untouched()) {
       body.appendChild(el('p', 'margin:0;font-size:13px;color:var(--tv-text-muted)',
         'Tick what you want above, and answer the GitHub Actions question, to see your plan.'));
       return;
@@ -2981,7 +2981,7 @@ function tvpCommand(features) {
     body.appendChild(el('h4', H, 'What you will set up'));
     if (!plan.requirements.length) {
       body.appendChild(el('p', 'margin:0;font-size:13px;color:var(--tv-text-muted)',
-        'Nothing beyond the deploy itself: Phases 0 to 5, then 13.'));
+        'Nothing beyond a viewer node: Phases 0 to 5, the five Tier 1 bindings in Phase 8, the checks in Phase 10, and a CSP before you go public (Phase 13).'));
     } else {
       body.appendChild(list(plan.requirements.map(function (r) {
         return function (li) {
@@ -2993,9 +2993,12 @@ function tvpCommand(features) {
     }
 
     if (plan.workflows.length) {
-      body.appendChild(el('h4', H, 'Workflows to turn on in your repository\u2019s Actions tab'));
+      body.appendChild(el('h4', H, 'Workflows your plan uses'));
+      body.appendChild(el('p', 'margin:0 0 6px;font-size:13px;color:var(--tv-text-muted)',
+        'Turn Actions on for your repository, then enable each scheduled one in the Actions tab: a fork keeps them off until you do.'));
+      var HOW = { schedule: 'scheduled: enable it', dispatch: 'starts by itself once Actions are on', manual: 'run it from Run workflow' };
       body.appendChild(list(plan.workflows.map(function (w) {
-        return function (li) { inline(li, '`' + w.file + '` \u2014 ' + w.when); };
+        return function (li) { inline(li, '`' + w.file + '` \u2014 ' + w.when + ' (' + HOW[w.trigger] + ')'); };
       })));
     }
 
@@ -3030,7 +3033,9 @@ function tvpCommand(features) {
       return !lastEffective[id] && saved.caps.indexOf(id) === -1;
     });
     lastEffective = effective;
-    if (announce && status) {
+    if (announce && status && untouched()) {
+      announce('Plan cleared.');
+    } else if (announce && status) {
       var msg = 'Plan updated: Tier ' + plan.tier + ', ' + D.tiers[plan.tier] + '.';
       if (added.length) msg += ' Also includes: ' + added.map(function (id) { return byId[id].title; }).join(', ') + '.';
       var n = plan.blocked.length || plan.atRisk.length;
@@ -3097,12 +3102,20 @@ function tvpCommand(features) {
     persist();
     var plan = paint(announce);
     // The export's own picker owns what a tier shows; drive it rather
-    // than duplicate it.
-    var button = document.querySelector('button[data-tier="' + plan.tier + '"]');
-    if (button) button.click();
+    // than duplicate it. Only when the answers move the tier, so a tier
+    // the operator picked by hand survives a change that does not, and
+    // never for an untouched form, which claims no tier at all.
+    var tier = untouched() ? null : plan.tier;
+    if (tier !== null && tier !== lastTier) {
+      var button = document.querySelector('button[data-tier="' + tier + '"]');
+      if (button) button.click();
+    }
+    lastTier = tier;
   });
 
-  paint(null);
+  function untouched() { return !saved.caps.length && !saved.actions; }
+  var first = paint(null);
+  var lastTier = untouched() ? null : first.tier;
 })();
 </script>
 <script data-tv-injected="doc-links">

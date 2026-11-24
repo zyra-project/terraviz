@@ -256,6 +256,9 @@ function parseArgs(argv: string[]): Options | { error: string } {
     else if (arg === '--manual') opts.manual = true
     else if (arg.startsWith('--with=')) {
       const wanted = arg.slice('--with='.length).split(',').map(s => s.trim()).filter(Boolean)
+      if (wanted.length === 0) {
+        return { error: `--with= needs at least one feature: ${SETUP_FEATURES.join(', ')}` }
+      }
       const bad = wanted.filter(w => !isSetupFeature(w))
       if (bad.length > 0) {
         return {

@@ -1013,6 +1013,20 @@ describe('runSetup — interactive mode', () => {
     expect(p.said()).toContain('CLOUDFLARE_ACCOUNT_ID')
   })
 
+  // transcode-hls.yml writes into the bucket, so asking for video
+  // uploads asks for the public bucket too.
+  it('asks for the R2 public origin under --with=transcode', async () => {
+    const p = scriptedPrompter({})
+    const h = harness({
+      argv: ['--interactive', '--with=transcode', '--only=bindings'],
+      files: {},
+      prompter: p.prompter,
+    })
+    await runSetup(h.deps)
+    expect(p.asked).toContain('r2PublicBase')
+    expect(p.asked).toContain('githubRepo')
+  })
+
   it('includes feature-gated questions when --with is given', async () => {
     const p = scriptedPrompter({})
     const h = harness({
@@ -1077,8 +1091,17 @@ describe('runSetup — handoff report', () => {
     expect(h.out()).toContain('r2/api-tokens')
     expect(h.out()).toContain('zyra-run.yml')
     expect(h.out()).toContain('zyra-scheduler.yml')
+    expect(h.out()).toContain('GITHUB_DISPATCH_TOKEN')
+    // Expansion, not the zyra gate alone: r2 is no longer "left out".
+    expect(h.out()).not.toContain('--with=r2\n')
     expect(h.out()).not.toContain('--with=zyra')
     expect(h.out()).toContain('--with=feeds')
+  })
+
+  it('rejects an empty --with=', async () => {
+    const h = harness({ argv: ['--with='] })
+    expect(await runSetup(h.deps)).toBe(2)
+    expect(h.errOut()).toContain('needs at least one feature')
   })
 
   it('accepts every feature the capability manifest names', async () => {

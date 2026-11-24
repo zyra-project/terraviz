@@ -26,7 +26,7 @@
  * already has it.
  */
 
-import { CAPABILITIES, type SetupFeature } from './capabilities'
+import { CAPABILITIES, type SetupFeature, type Workflow } from './capabilities'
 import { wrap } from './prompt'
 import { DEFAULT_NAMES, type SetupState } from './state'
 
@@ -67,6 +67,13 @@ export interface HandoffOptions {
    * name: an export left over from another bucket is not done.
    */
   shellBucket?: string
+}
+
+/** What it takes to start each kind of workflow. */
+const TRIGGER_NOTE: Record<Workflow['trigger'], string> = {
+  schedule: 'scheduled: enable it',
+  dispatch: 'starts by itself once Actions are on',
+  manual: 'run it from Run workflow',
 }
 
 function has(env: Set<string> | undefined, name: string): boolean {
@@ -200,29 +207,61 @@ export function buildHandoff(state: SetupState, opts: HandoffOptions = {}): Hand
   for (const cap of chosen) {
     for (const w of cap.workflows) {
       if (workflowItems.some(i => i.name === w.file)) continue
-      workflowItems.push({ name: w.file, status: 'todo', why: `${cap.title} · ${w.when}` })
+      workflowItems.push({
+        name: w.file,
+        status: 'todo',
+        why: `${cap.title} · ${w.when} · ${TRIGGER_NOTE[w.trigger]}`,
+      })
     }
   }
   if (workflowItems.length > 0) {
     groups.push({
       destination: `GitHub${repo ? ` (${repo})` : ''} → Actions`,
       intro:
-        'Turn each of these on. A fork starts with Actions off, and its ' +
-        'scheduled workflows stay off until you enable them one by one. A ' +
-        'workflow that is off never runs, and nothing on the node says so.',
+        'Turn Actions on for the repository, then enable each scheduled ' +
+        'workflow below (Actions tab → the workflow → Enable workflow): a ' +
+        'fork keeps them off until you do, and one left off never runs, ' +
+        'with nothing on the node to say so. The others start by themselves ' +
+        'or from Run workflow.',
       items: workflowItems,
+    })
+  }
+
+  // ── Dispatch token (Phase 8.6) ──────────────────────────────────
+  // Video and Zyra runs are started by the Worker firing a
+  // repository_dispatch, with a token only the operator can mint. The
+  // bindings step pushes it once it is exported; without it both answer
+  // 503 however well the workflows are set up.
+  if (features.has('transcode') || features.has('zyra')) {
+    groups.push({
+      destination: 'Your shell, then re-run `npm run setup -- --apply --only=bindings`',
+      url: 'https://github.com/settings/personal-access-tokens/new',
+      intro:
+        'The Pages secret the Worker dispatches with: a fine-grained token ' +
+        'with Contents: write on your fork, and nothing else (W22).',
+      items: [
+        {
+          name: 'GITHUB_DISPATCH_TOKEN',
+          status: has(opts.available, 'GITHUB_DISPATCH_TOKEN') ? 'done' : 'todo',
+          source: 'GitHub → Settings → Developer settings → Fine-grained tokens',
+        },
+      ],
     })
   }
 
   // ── Analytics archive (Phase 14.2) ──────────────────────────────
   if (features.has('analytics')) {
     groups.push({
-      destination: 'Cloudflare Pages → Settings → Variables and Secrets (Phase 14.2)',
+      destination: 'Cloudflare Pages → Settings, Production (Phase 14.2)',
       intro:
         'Setup does not create the analytics archive yet. The nightly ' +
         'export has nowhere to write until these exist; then redeploy.',
       items: [
-        { name: 'ANALYTICS_R2', status: 'todo', source: 'an R2 bucket of its own, bound under this name' },
+        {
+          name: 'ANALYTICS_R2',
+          status: 'todo',
+          source: 'Bindings → R2: a bucket of its own, bound under this name',
+        },
         { name: 'CF_ACCOUNT_ID', status: 'todo', value: state.accountId || undefined },
         {
           name: 'ANALYTICS_SQL_TOKEN',

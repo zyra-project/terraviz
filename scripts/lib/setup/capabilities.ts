@@ -21,7 +21,7 @@
  * So this module states, once, what each capability needs. Three
  * surfaces read it and must not disagree:
  *
- *   - `npm run setup`: `--with=` takes `SETUP_FEATURES`, and the
+ *   - `npm run setup -- --with=`: takes `SETUP_FEATURES`, and the
  *     handoff lists the workflows to turn on and what was left out.
  *   - `/setup`: the questionnaire `shell.ts` injects asks which
  *     capabilities the operator wants and whether they can run
@@ -33,7 +33,7 @@
  * Pure data and pure functions: no I/O, no DOM.
  */
 
-/** Optional features `npm run setup --with=` understands. */
+/** Optional features `npm run setup -- --with=` understands. */
 export const SETUP_FEATURES = ['r2', 'transcode', 'zyra', 'feeds', 'analytics'] as const
 export type SetupFeature = (typeof SETUP_FEATURES)[number]
 
@@ -80,7 +80,7 @@ export const REQUIREMENTS: Record<Requirement, RequirementInfo> = {
     where: 'Phases 0.2 and 8.6',
   },
   'scheduled-workflows': {
-    label: 'Its scheduled workflows turned on',
+    label: 'Scheduled workflows turned on',
     short: 'Scheduled workflows',
     detail:
       'GitHub starts a fork with scheduled workflows off. Turn each one on in the ' +
@@ -166,8 +166,9 @@ export const CAPABILITIES: readonly Capability[] = [
   },
   {
     id: 'video',
-    title: 'Upload videos',
-    summary: 'Publishers upload a video and the node transcodes it to adaptive HLS in your bucket.',
+    title: 'Upload videos and image sequences',
+    summary:
+      'Publishers upload a video, or a sequence of frames, and the node turns it into adaptive HLS in your bucket.',
     needs: ['backend', 'r2-public', 'github-actions'],
     implies: ['publish', 'assets'],
     workflows: [
@@ -176,7 +177,8 @@ export const CAPABILITIES: readonly Capability[] = [
     feature: 'transcode',
     tier: 2,
     withoutActions:
-      'Finishing a video upload answers 503 github_dispatch_unconfigured. The source file stays in R2.',
+      'Finishing a video or image-sequence upload answers 503 github_dispatch_unconfigured. ' +
+      'The uploaded files stay in R2.',
   },
   {
     id: 'zyra',
@@ -192,7 +194,7 @@ export const CAPABILITIES: readonly Capability[] = [
     feature: 'zyra',
     tier: 2,
     withoutActions:
-      'A workflow’s Run now has nowhere to dispatch to, and scheduled runs never start.',
+      'Run now answers 503 dispatch_unconfigured and records a failed run, and scheduled runs never start.',
   },
   {
     id: 'feeds',
@@ -208,9 +210,13 @@ export const CAPABILITIES: readonly Capability[] = [
     feature: 'feeds',
     tier: 2,
     withoutActions:
-      'Nothing refreshes on its own: new events and video suggestions stop arriving, and nothing says so.',
+      'Nothing refreshes on its own: new events never arrive and video sitemaps are never indexed, ' +
+      'and nothing says so.',
     byHand:
-      'Press Run now on /publish/feeds when you want a refresh, or run `npm run terraviz -- import-events`.',
+      'On /publish/feeds, press Run all enabled feeds now (News feeds) and Index now (Media channels). ' +
+      'Or schedule `npm run terraviz -- import-events --server=https://<your node>` yourself, with ' +
+      '`TERRAVIZ_ACCESS_CLIENT_ID` and `TERRAVIZ_ACCESS_CLIENT_SECRET` set; without `--server` it ' +
+      'reaches another node.',
   },
   {
     id: 'analytics',
@@ -339,21 +345,16 @@ export function setupCommand(features: readonly SetupFeature[]): string {
 }
 
 /**
- * The features a set of `--with=` values amounts to. Video and Zyra
- * both publish into R2, so either brings `r2` with it: asking for
- * video uploads without the public bucket they land in would set up a
- * node that accepts an upload and cannot show it.
+ * The features a set of `--with=` values amounts to: everything the
+ * capabilities behind them imply, through `planNode` so the closure is
+ * computed once. Video and Zyra both publish into R2, so either brings
+ * `r2`: asking for uploads without the public bucket they land in
+ * would set up a node that accepts an upload and cannot show it.
  */
 export function expandFeatures(features: Iterable<SetupFeature>): Set<SetupFeature> {
-  const out = new Set(features)
-  for (const cap of CAPABILITIES) {
-    if (!cap.feature || !out.has(cap.feature)) continue
-    for (const id of cap.implies) {
-      const implied = capabilityById(id).feature
-      if (implied) out.add(implied)
-    }
-  }
-  return out
+  const wanted = new Set(features)
+  const ids = CAPABILITIES.filter(c => c.feature && wanted.has(c.feature)).map(c => c.id)
+  return new Set([...wanted, ...planNode(ids, 'yes').features])
 }
 
 /** Capabilities a set of features sets up. */

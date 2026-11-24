@@ -70,14 +70,22 @@ describe('the capability manifest', () => {
     }
   })
 
-  it('implies only capabilities it lists, without cycles back to itself', () => {
+  it('implies only capabilities it lists', () => {
     const ids = new Set(CAPABILITIES.map(c => c.id))
     for (const cap of CAPABILITIES) {
-      for (const dep of cap.implies) {
-        expect(ids.has(dep), `${cap.id} → ${dep}`).toBe(true)
-        expect(dep).not.toBe(cap.id)
-      }
+      for (const dep of cap.implies) expect(ids.has(dep), `${cap.id} → ${dep}`).toBe(true)
     }
+  })
+
+  // A loop of any length would lock every box in it on the page, with
+  // none of them able to be unticked.
+  it('has no cycle of implications, of any length', () => {
+    const byId = new Map(CAPABILITIES.map(c => [c.id, c]))
+    const visit = (id: CapabilityId, path: CapabilityId[]): void => {
+      expect(path, `${[...path, id].join(' → ')}`).not.toContain(id)
+      for (const dep of byId.get(id)?.implies ?? []) visit(dep, [...path, id])
+    }
+    for (const cap of CAPABILITIES) visit(cap.id, [])
   })
 })
 
@@ -150,6 +158,17 @@ describe('expandFeatures', () => {
 
   it('adds nothing to a feature that needs no bucket', () => {
     expect([...expandFeatures(['feeds'])]).toEqual(['feeds'])
+  })
+
+  // The CLI and the page must agree on what a choice brings with it.
+  it('agrees with planNode for every set of features', () => {
+    for (let mask = 0; mask < 1 << SETUP_FEATURES.length; mask++) {
+      const features = SETUP_FEATURES.filter((_, i) => mask & (1 << i))
+      const ids = CAPABILITIES.filter(c => c.feature && features.includes(c.feature)).map(c => c.id)
+      expect([...expandFeatures(features)].sort(), features.join(',')).toEqual(
+        [...planNode(ids, 'yes').features].sort(),
+      )
+    }
   })
 })
 

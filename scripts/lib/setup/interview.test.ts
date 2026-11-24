@@ -543,7 +543,8 @@ describe('handoff report', () => {
     for (const file of ['transcode-hls.yml', 'zyra-run.yml', 'zyra-scheduler.yml', 'import-events.yml']) {
       expect(text.split(file).length - 1, file).toBe(1)
     }
-    expect(text).toContain('scheduled workflows stay off')
+    expect(text).toContain('enable each scheduled')
+    expect(text).toContain('zyra-scheduler.yml\n       (Run scheduled data pipelines with Zyra · every 15 minutes · scheduled: enable it)')
   })
 
   it('lists the analytics archive setup does not create', () => {
@@ -564,7 +565,7 @@ describe('handoff report', () => {
     const text = renderHandoff(buildHandoff(state, { features: new Set(['r2']) }))
     expect(text).toContain('Not set up by this run')
     expect(text).not.toContain('--with=r2')
-    expect(text).toMatch(/--with=transcode\n\s+\(Upload videos; needs GitHub Actions/)
+    expect(text).toMatch(/--with=transcode\n\s+\(Upload videos and image sequences; needs GitHub Actions/)
   })
 
   it('does not ask for CATALOG_R2_BUCKET when the bucket kept its default name', () => {
