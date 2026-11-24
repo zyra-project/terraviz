@@ -481,8 +481,8 @@ function costPanel(): string {
 
 function tierPicker(): string {
   return `<section data-noprint="1" style="margin:0 0 44px">
-  <div style="${EYEBROW};margin:0 0 12px">Step one · pick your node type</div>
-  <p style="margin:0 0 16px;max-width:62ch;color:var(--tv-text-muted);text-wrap:pretty">This is the only decision that changes the shape of the install. Pick one and the rest of the page shows you only the phases, bindings and variables that node type needs.</p>
+  <div style="${EYEBROW};margin:0 0 12px">Step two · your node type</div>
+  <p style="margin:0 0 16px;max-width:62ch;color:var(--tv-text-muted);text-wrap:pretty">Your answers above pick one; choose another to override them. The rest of the page then shows only the phases, bindings and variables that node type needs.</p>
   <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px">
     ${TIERS.map(
       t => `<button data-tier="${t.n}" style="text-align:left;cursor:pointer;border-radius:8px;padding:18px;font-family:var(--tv-font-sans)">

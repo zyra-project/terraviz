@@ -450,9 +450,121 @@ code{overflow-wrap:anywhere}
   </div>
   <p style="margin:0;font-size:13.5px;color:var(--tv-text-dim)">This page is a front door. The canonical text — every click path, every caveat — is <a data-doc="" href="https://github.com/zyra-project/terraviz/blob/main/docs/SELF_HOSTING.md">SELF_HOSTING.md</a>, and each phase links straight into it.</p>
 </section>
+<section data-tv-planner="1" data-noprint="1" aria-labelledby="tvp-title" style="margin:0 0 44px">
+  <div style="font:600 10.5px/1.35 var(--tv-font-sans);letter-spacing:.13em;text-transform:uppercase;color:var(--tv-text-dim);margin:0 0 12px">Step one · what this node will do</div>
+  <h2 id="tvp-title" style="font:600 20px/1.3 var(--tv-font-sans);color:var(--tv-text);margin:0 0 10px">What do you want this node to do?</h2>
+  <p style="margin:0 0 12px;max-width:64ch;font-size:13px;color:var(--tv-text-muted);text-wrap:pretty">Every node has the globe, the Science On a Sphere catalog and Orbit, with no publishing. Tick what you want on top, and say whether you can run GitHub Actions. The page works out your node type and what you will have to set up, before you start rather than halfway through.</p>
+  <fieldset style="border:none;margin:0 0 22px;padding:0;min-width:0">
+    <legend style="font:600 14px/1.4 var(--tv-font-sans);color:var(--tv-text);padding:0;margin:0 0 6px">On top of the globe, I want to…</legend>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,260px),1fr));gap:10px;margin:8px 0 0">
+    <label for="tvp-cap-publish" style="display:flex;gap:10px;align-items:flex-start;cursor:pointer;border-radius:8px;padding:12px 14px;background:var(--tv-surface-3);border:1px solid var(--tv-border)">
+      <input type="checkbox" id="tvp-cap-publish" data-tvp-cap="publish" aria-labelledby="tvp-cap-publish-title" aria-describedby="tvp-cap-publish-sum tvp-cap-publish-implied tvp-cap-publish-blocked" style="margin:3px 0 0;flex:none;width:16px;height:16px;accent-color:var(--tv-accent)"/>
+      <span style="display:block">
+        <span id="tvp-cap-publish-title" style="display:block;font:600 13.5px/1.35 var(--tv-font-sans);color:var(--tv-text)">Publish your own datasets, tours and blog posts</span>
+        <span id="tvp-cap-publish-sum" style="display:block;font-size:12.5px;line-height:1.5;color:var(--tv-text-muted);margin:3px 0 0;text-wrap:pretty">The publisher portal: metadata, tours, the blog, semantic search and the events review queue.</span>
+        
+        <span id="tvp-cap-publish-implied" data-tvp-implied="publish" style="display:block;font-size:12px;color:var(--tv-accent);margin:4px 0 0"></span>
+        <span id="tvp-cap-publish-blocked" data-tvp-blocked="publish" style="display:block;font-size:12px;color:var(--tv-warn);margin:4px 0 0"></span>
+      </span>
+    </label>
+    <label for="tvp-cap-assets" style="display:flex;gap:10px;align-items:flex-start;cursor:pointer;border-radius:8px;padding:12px 14px;background:var(--tv-surface-3);border:1px solid var(--tv-border)">
+      <input type="checkbox" id="tvp-cap-assets" data-tvp-cap="assets" aria-labelledby="tvp-cap-assets-title" aria-describedby="tvp-cap-assets-sum tvp-cap-assets-needs tvp-cap-assets-implied tvp-cap-assets-blocked" style="margin:3px 0 0;flex:none;width:16px;height:16px;accent-color:var(--tv-accent)"/>
+      <span style="display:block">
+        <span id="tvp-cap-assets-title" style="display:block;font:600 13.5px/1.35 var(--tv-font-sans);color:var(--tv-text)">Upload images and other files</span>
+        <span id="tvp-cap-assets-sum" style="display:block;font-size:12.5px;line-height:1.5;color:var(--tv-text-muted);margin:3px 0 0;text-wrap:pretty">Thumbnails, legends, still-image datasets and tour media, stored in your R2 bucket.</span>
+        <span id="tvp-cap-assets-needs" style="display:block;font:500 11px/1.5 var(--tv-font-mono);color:var(--tv-text-dim);margin:6px 0 0">Needs: R2 public bucket</span>
+        <span id="tvp-cap-assets-implied" data-tvp-implied="assets" style="display:block;font-size:12px;color:var(--tv-accent);margin:4px 0 0"></span>
+        <span id="tvp-cap-assets-blocked" data-tvp-blocked="assets" style="display:block;font-size:12px;color:var(--tv-warn);margin:4px 0 0"></span>
+      </span>
+    </label>
+    <label for="tvp-cap-video" style="display:flex;gap:10px;align-items:flex-start;cursor:pointer;border-radius:8px;padding:12px 14px;background:var(--tv-surface-3);border:1px solid var(--tv-border)">
+      <input type="checkbox" id="tvp-cap-video" data-tvp-cap="video" aria-labelledby="tvp-cap-video-title" aria-describedby="tvp-cap-video-sum tvp-cap-video-needs tvp-cap-video-implied tvp-cap-video-blocked" style="margin:3px 0 0;flex:none;width:16px;height:16px;accent-color:var(--tv-accent)"/>
+      <span style="display:block">
+        <span id="tvp-cap-video-title" style="display:block;font:600 13.5px/1.35 var(--tv-font-sans);color:var(--tv-text)">Upload videos</span>
+        <span id="tvp-cap-video-sum" style="display:block;font-size:12.5px;line-height:1.5;color:var(--tv-text-muted);margin:3px 0 0;text-wrap:pretty">Publishers upload a video and the node transcodes it to adaptive HLS in your bucket.</span>
+        <span id="tvp-cap-video-needs" style="display:block;font:500 11px/1.5 var(--tv-font-mono);color:var(--tv-text-dim);margin:6px 0 0">Needs: R2 public bucket · GitHub Actions</span>
+        <span id="tvp-cap-video-implied" data-tvp-implied="video" style="display:block;font-size:12px;color:var(--tv-accent);margin:4px 0 0"></span>
+        <span id="tvp-cap-video-blocked" data-tvp-blocked="video" style="display:block;font-size:12px;color:var(--tv-warn);margin:4px 0 0"></span>
+      </span>
+    </label>
+    <label for="tvp-cap-zyra" style="display:flex;gap:10px;align-items:flex-start;cursor:pointer;border-radius:8px;padding:12px 14px;background:var(--tv-surface-3);border:1px solid var(--tv-border)">
+      <input type="checkbox" id="tvp-cap-zyra" data-tvp-cap="zyra" aria-labelledby="tvp-cap-zyra-title" aria-describedby="tvp-cap-zyra-sum tvp-cap-zyra-needs tvp-cap-zyra-implied tvp-cap-zyra-blocked" style="margin:3px 0 0;flex:none;width:16px;height:16px;accent-color:var(--tv-accent)"/>
+      <span style="display:block">
+        <span id="tvp-cap-zyra-title" style="display:block;font:600 13.5px/1.35 var(--tv-font-sans);color:var(--tv-text)">Run scheduled data pipelines with Zyra</span>
+        <span id="tvp-cap-zyra-sum" style="display:block;font-size:12.5px;line-height:1.5;color:var(--tv-text-muted);margin:3px 0 0;text-wrap:pretty">Fetch model output on a schedule and publish it as a dataset, with no one at the keyboard.</span>
+        <span id="tvp-cap-zyra-needs" style="display:block;font:500 11px/1.5 var(--tv-font-mono);color:var(--tv-text-dim);margin:6px 0 0">Needs: R2 public bucket · GitHub Actions · Scheduled workflows</span>
+        <span id="tvp-cap-zyra-implied" data-tvp-implied="zyra" style="display:block;font-size:12px;color:var(--tv-accent);margin:4px 0 0"></span>
+        <span id="tvp-cap-zyra-blocked" data-tvp-blocked="zyra" style="display:block;font-size:12px;color:var(--tv-warn);margin:4px 0 0"></span>
+      </span>
+    </label>
+    <label for="tvp-cap-feeds" style="display:flex;gap:10px;align-items:flex-start;cursor:pointer;border-radius:8px;padding:12px 14px;background:var(--tv-surface-3);border:1px solid var(--tv-border)">
+      <input type="checkbox" id="tvp-cap-feeds" data-tvp-cap="feeds" aria-labelledby="tvp-cap-feeds-title" aria-describedby="tvp-cap-feeds-sum tvp-cap-feeds-needs tvp-cap-feeds-implied tvp-cap-feeds-blocked" style="margin:3px 0 0;flex:none;width:16px;height:16px;accent-color:var(--tv-accent)"/>
+      <span style="display:block">
+        <span id="tvp-cap-feeds-title" style="display:block;font:600 13.5px/1.35 var(--tv-font-sans);color:var(--tv-text)">Keep current events and video suggestions coming in</span>
+        <span id="tvp-cap-feeds-sum" style="display:block;font-size:12.5px;line-height:1.5;color:var(--tv-text-muted);margin:3px 0 0;text-wrap:pretty">Poll your news and hazard feeds for events to pair with datasets, and index video sources for media suggestions.</span>
+        <span id="tvp-cap-feeds-needs" style="display:block;font:500 11px/1.5 var(--tv-font-mono);color:var(--tv-text-dim);margin:6px 0 0">Needs: GitHub Actions · Scheduled workflows</span>
+        <span id="tvp-cap-feeds-implied" data-tvp-implied="feeds" style="display:block;font-size:12px;color:var(--tv-accent);margin:4px 0 0"></span>
+        <span id="tvp-cap-feeds-blocked" data-tvp-blocked="feeds" style="display:block;font-size:12px;color:var(--tv-warn);margin:4px 0 0"></span>
+      </span>
+    </label>
+    <label for="tvp-cap-analytics" style="display:flex;gap:10px;align-items:flex-start;cursor:pointer;border-radius:8px;padding:12px 14px;background:var(--tv-surface-3);border:1px solid var(--tv-border)">
+      <input type="checkbox" id="tvp-cap-analytics" data-tvp-cap="analytics" aria-labelledby="tvp-cap-analytics-title" aria-describedby="tvp-cap-analytics-sum tvp-cap-analytics-needs tvp-cap-analytics-implied tvp-cap-analytics-blocked" style="margin:3px 0 0;flex:none;width:16px;height:16px;accent-color:var(--tv-accent)"/>
+      <span style="display:block">
+        <span id="tvp-cap-analytics-title" style="display:block;font:600 13.5px/1.35 var(--tv-font-sans);color:var(--tv-text)">Keep visitor analytics history in the portal</span>
+        <span id="tvp-cap-analytics-sum" style="display:block;font-size:12.5px;line-height:1.5;color:var(--tv-text-muted);margin:3px 0 0;text-wrap:pretty">A nightly export archives each day of telemetry and fills the portal’s analytics tab.</span>
+        <span id="tvp-cap-analytics-needs" style="display:block;font:500 11px/1.5 var(--tv-font-mono);color:var(--tv-text-dim);margin:6px 0 0">Needs: Analytics bucket · GitHub Actions · Scheduled workflows</span>
+        <span id="tvp-cap-analytics-implied" data-tvp-implied="analytics" style="display:block;font-size:12px;color:var(--tv-accent);margin:4px 0 0"></span>
+        <span id="tvp-cap-analytics-blocked" data-tvp-blocked="analytics" style="display:block;font-size:12px;color:var(--tv-warn);margin:4px 0 0"></span>
+      </span>
+    </label>
+    <label for="tvp-cap-desktop" style="display:flex;gap:10px;align-items:flex-start;cursor:pointer;border-radius:8px;padding:12px 14px;background:var(--tv-surface-3);border:1px solid var(--tv-border)">
+      <input type="checkbox" id="tvp-cap-desktop" data-tvp-cap="desktop" aria-labelledby="tvp-cap-desktop-title" aria-describedby="tvp-cap-desktop-sum tvp-cap-desktop-needs tvp-cap-desktop-implied tvp-cap-desktop-blocked" style="margin:3px 0 0;flex:none;width:16px;height:16px;accent-color:var(--tv-accent)"/>
+      <span style="display:block">
+        <span id="tvp-cap-desktop-title" style="display:block;font:600 13.5px/1.35 var(--tv-font-sans);color:var(--tv-text)">Ship a branded desktop app</span>
+        <span id="tvp-cap-desktop-sum" style="display:block;font-size:12.5px;line-height:1.5;color:var(--tv-text-muted);margin:3px 0 0;text-wrap:pretty">Signed Windows, macOS and Linux builds of your node, with an update feed you control.</span>
+        <span id="tvp-cap-desktop-needs" style="display:block;font:500 11px/1.5 var(--tv-font-mono);color:var(--tv-text-dim);margin:6px 0 0">Needs: GitHub Actions · Signing keys</span>
+        <span id="tvp-cap-desktop-implied" data-tvp-implied="desktop" style="display:block;font-size:12px;color:var(--tv-accent);margin:4px 0 0"></span>
+        <span id="tvp-cap-desktop-blocked" data-tvp-blocked="desktop" style="display:block;font-size:12px;color:var(--tv-warn);margin:4px 0 0"></span>
+      </span>
+    </label>
+    </div>
+  </fieldset>
+  <fieldset aria-describedby="tvp-actions-help" style="border:none;margin:0 0 22px;padding:0;min-width:0">
+    <legend style="font:600 14px/1.4 var(--tv-font-sans);color:var(--tv-text);padding:0;margin:0 0 6px">Can you run GitHub Actions in a repository you control?</legend>
+    <p id="tvp-actions-help" style="margin:0 0 12px;max-width:64ch;font-size:13px;color:var(--tv-text-muted);text-wrap:pretty">Video uploads, Zyra pipelines, the feeds, analytics history and desktop builds run as GitHub Actions workflows in your copy of the repository. A clone you cannot push to has nowhere to run them.</p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,220px),1fr));gap:10px">
+    <label for="tvp-actions-yes" style="display:flex;gap:10px;align-items:flex-start;cursor:pointer;border-radius:8px;padding:12px 14px;background:var(--tv-surface-3);border:1px solid var(--tv-border)">
+      <input type="radio" name="tvp-actions" id="tvp-actions-yes" value="yes" data-tvp-actions="1" aria-describedby="tvp-actions-yes-hint" style="margin:3px 0 0;flex:none;width:16px;height:16px;accent-color:var(--tv-accent)"/>
+      <span style="display:block">
+        <span style="display:block;font:600 13.5px/1.35 var(--tv-font-sans);color:var(--tv-text)">Yes</span>
+        <span id="tvp-actions-yes-hint" style="display:block;font-size:12.5px;line-height:1.5;color:var(--tv-text-muted);margin:3px 0 0">A fork, or your own copy, that you can push to, with Actions turned on.</span>
+      </span>
+    </label>
+    <label for="tvp-actions-no" style="display:flex;gap:10px;align-items:flex-start;cursor:pointer;border-radius:8px;padding:12px 14px;background:var(--tv-surface-3);border:1px solid var(--tv-border)">
+      <input type="radio" name="tvp-actions" id="tvp-actions-no" value="no" data-tvp-actions="1" aria-describedby="tvp-actions-no-hint" style="margin:3px 0 0;flex:none;width:16px;height:16px;accent-color:var(--tv-accent)"/>
+      <span style="display:block">
+        <span style="display:block;font:600 13.5px/1.35 var(--tv-font-sans);color:var(--tv-text)">No</span>
+        <span id="tvp-actions-no-hint" style="display:block;font-size:12.5px;line-height:1.5;color:var(--tv-text-muted);margin:3px 0 0">A clone of upstream deployed straight to Cloudflare, or Actions are not allowed where you work.</span>
+      </span>
+    </label>
+    <label for="tvp-actions-unsure" style="display:flex;gap:10px;align-items:flex-start;cursor:pointer;border-radius:8px;padding:12px 14px;background:var(--tv-surface-3);border:1px solid var(--tv-border)">
+      <input type="radio" name="tvp-actions" id="tvp-actions-unsure" value="unsure" data-tvp-actions="1" aria-describedby="tvp-actions-unsure-hint" style="margin:3px 0 0;flex:none;width:16px;height:16px;accent-color:var(--tv-accent)"/>
+      <span style="display:block">
+        <span style="display:block;font:600 13.5px/1.35 var(--tv-font-sans);color:var(--tv-text)">Not sure yet</span>
+        <span id="tvp-actions-unsure-hint" style="display:block;font-size:12.5px;line-height:1.5;color:var(--tv-text-muted);margin:3px 0 0">The plan flags what depends on it.</span>
+      </span>
+    </label>
+    </div>
+  </fieldset>
+  <div role="region" aria-labelledby="tvp-plan-title" style="background:var(--tv-surface-2);border:1px solid var(--tv-border);border-radius:8px;padding:20px 22px">
+    <h3 id="tvp-plan-title" style="font:600 15px/1.3 var(--tv-font-sans);color:var(--tv-text);margin:0 0 10px">Your plan</h3>
+    <div data-tvp-plan="1"><p style="margin:0 0 12px;max-width:64ch;font-size:13px;color:var(--tv-text-muted);text-wrap:pretty">Tick what you want above to see your plan.</p></div>
+  </div>
+  <p data-tvp-status="1" aria-live="polite" style="position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0"></p>
+</section>
 <section data-noprint="1" style="margin:0 0 44px">
-  <div style="font:600 10.5px/1.35 var(--tv-font-sans);letter-spacing:.13em;text-transform:uppercase;color:var(--tv-text-dim);margin:0 0 12px">Step one · pick your node type</div>
-  <p style="margin:0 0 16px;max-width:62ch;color:var(--tv-text-muted);text-wrap:pretty">This is the only decision that changes the shape of the install. Pick one and the rest of the page shows you only the phases, bindings and variables that node type needs.</p>
+  <div style="font:600 10.5px/1.35 var(--tv-font-sans);letter-spacing:.13em;text-transform:uppercase;color:var(--tv-text-dim);margin:0 0 12px">Step two · your node type</div>
+  <p style="margin:0 0 16px;max-width:62ch;color:var(--tv-text-muted);text-wrap:pretty">Your answers above pick one; choose another to override them. The rest of the page then shows only the phases, bindings and variables that node type needs.</p>
   <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px">
     <button data-tier="1" style="text-align:left;cursor:pointer;border-radius:8px;padding:18px;font-family:var(--tv-font-sans)">
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin:0 0 8px">
@@ -468,7 +580,7 @@ code{overflow-wrap:anywhere}
         <span style="font:500 11px/1 var(--tv-font-mono);opacity:.7">2–3 h</span>
       </div>
       <div style="font:600 16px/1.3 var(--tv-font-sans);margin:0 0 8px">Publisher node</div>
-      <div style="font:400 12.5px/1.5;opacity:.78;text-wrap:pretty">Your own datasets and tours, the publisher portal, semantic search, events, blog. The usual choice.</div>
+      <div style="font:400 12.5px/1.5;opacity:.78;text-wrap:pretty">Your own datasets and tours, the publisher portal, semantic search, events, blog. Video uploads, Zyra, the feeds and analytics history also need GitHub Actions in a repository you control.</div>
     </button>
     <button data-tier="3" style="text-align:left;cursor:pointer;border-radius:8px;padding:18px;font-family:var(--tv-font-sans)">
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin:0 0 8px">
@@ -1995,7 +2107,7 @@ npm run terraviz -- import-snapshot \
           <span style="flex:none;font:500 11px/1 var(--tv-font-mono);color:var(--tv-accent)">per-feature</span>
         </div>
         <p style="margin:0;font-size:13.5px;line-height:1.55;color:var(--tv-text-muted);text-wrap:pretty">Orbit voice runs on the <code style="font-family:var(--tv-font-mono);font-size:.92em;background:var(--tv-surface-3);padding:1px 5px;border-radius:3px">AI</code> binding with nothing set. Realtime streaming STT, the wake word and YouTube media suggestions each want their own variables. Each degrades quietly when those are absent rather than erroring, so turning one on is additive and turning it off is safe.</p>
-        <p style="margin:8px 0 0;font-size:13.5px;line-height:1.55;color:var(--tv-text-muted);text-wrap:pretty"><b style="font-weight:600;color:var(--tv-text)">What it takes:</b> nothing for Orbit voice or the events/blog feeds — both already run. Realtime streaming STT wants three variables plus an AI Gateway token. Give it a gateway of its own with <b style="font-weight:600;color:var(--tv-text)">Logs</b> turned off: visitors' microphone audio passes through it, and a gateway logs by default. The wake word wants a build-time model URL, and YouTube suggestions want an API key. Each is independent, and each stays off rather than erroring when its variables are absent.</p>
+        <p style="margin:8px 0 0;font-size:13.5px;line-height:1.55;color:var(--tv-text-muted);text-wrap:pretty"><b style="font-weight:600;color:var(--tv-text)">What it takes:</b> nothing for Orbit voice or the blog. The events feed refreshes only when <code style="font-family:var(--tv-font-mono);font-size:.92em;background:var(--tv-surface-3);padding:1px 5px;border-radius:3px">import-events.yml</code> runs, and a fork starts with its scheduled workflows off, so turn it on in your repository’s Actions tab, or press Run now on /publish/feeds. Realtime streaming STT wants three variables plus an AI Gateway token. Give it a gateway of its own with <b style="font-weight:600;color:var(--tv-text)">Logs</b> turned off: visitors' microphone audio passes through it, and a gateway logs by default. The wake word wants a build-time model URL, and YouTube suggestions want an API key. Each is independent, and each stays off rather than erroring when its variables are absent.</p>
       </div></div>
   <div style="background:var(--tv-accent-bg);border:1px solid var(--tv-accent-border);border-left:3px solid var(--tv-accent);border-radius:6px;padding:14px 16px;margin:0 0 14px">
     <div style="font:600 10.5px/1.35 var(--tv-font-sans);letter-spacing:.13em;text-transform:uppercase;color:var(--tv-accent);margin:0 0 7px">Gate</div>
@@ -2721,6 +2833,225 @@ document.addEventListener('click', e => {
 });
 
 repaint();
+</script>
+<script data-tv-injected="planner">
+(function () {
+  var root = document.querySelector('[data-tv-planner]');
+  if (!root) return;
+  var D = {"caps":[{"id":"publish","title":"Publish your own datasets, tours and blog posts","needs":["backend"],"implies":[],"workflows":[],"feature":null,"tier":2,"withoutActions":null,"byHand":null},{"id":"assets","title":"Upload images and other files","needs":["backend","r2-public"],"implies":["publish"],"workflows":[],"feature":"r2","tier":2,"withoutActions":null,"byHand":null},{"id":"video","title":"Upload videos","needs":["backend","r2-public","github-actions"],"implies":["publish","assets"],"workflows":[{"file":"transcode-hls.yml","trigger":"dispatch","when":"on each video upload"}],"feature":"transcode","tier":2,"withoutActions":"Finishing a video upload answers 503 github_dispatch_unconfigured. The source file stays in R2.","byHand":null},{"id":"zyra","title":"Run scheduled data pipelines with Zyra","needs":["backend","r2-public","github-actions","scheduled-workflows"],"implies":["publish","assets"],"workflows":[{"file":"zyra-run.yml","trigger":"dispatch","when":"on each workflow run"},{"file":"zyra-scheduler.yml","trigger":"schedule","when":"every 15 minutes"}],"feature":"zyra","tier":2,"withoutActions":"A workflow’s Run now has nowhere to dispatch to, and scheduled runs never start.","byHand":null},{"id":"feeds","title":"Keep current events and video suggestions coming in","needs":["backend","github-actions","scheduled-workflows"],"implies":["publish"],"workflows":[{"file":"import-events.yml","trigger":"schedule","when":"every 6 hours"},{"file":"refresh-video-sources.yml","trigger":"schedule","when":"every 12 hours"}],"feature":"feeds","tier":2,"withoutActions":"Nothing refreshes on its own: new events and video suggestions stop arriving, and nothing says so.","byHand":"Press Run now on /publish/feeds when you want a refresh, or run `npm run terraviz -- import-events`."},{"id":"analytics","title":"Keep visitor analytics history in the portal","needs":["backend","analytics-bucket","github-actions","scheduled-workflows"],"implies":["publish"],"workflows":[{"file":"analytics-export.yml","trigger":"schedule","when":"daily, 00:25 UTC"},{"file":"analytics-backfill.yml","trigger":"manual","when":"once, by hand, at first setup"}],"feature":"analytics","tier":2,"withoutActions":"The analytics tab stays empty: it reads rollups only the export writes, and a day Analytics Engine has dropped cannot be exported later.","byHand":null},{"id":"desktop","title":"Ship a branded desktop app","needs":["backend","github-actions","desktop-signing"],"implies":["publish"],"workflows":[{"file":"release.yml","trigger":"manual","when":"when you cut a release"}],"feature":null,"tier":3,"withoutActions":"No installers and no update feed: release.yml builds and signs them.","byHand":null}],"requirements":{"backend":{"label":"The publisher backend","short":"Publisher backend","detail":"D1, KV, Vectorize, Cloudflare Access and the node keys.","where":"Phases 2–11"},"r2-public":{"label":"R2 public domain and S3 token","short":"R2 public bucket","detail":"A public hostname for the asset bucket, its CORS policy, and an S3 API token for uploads.","where":"Phase 8.5"},"github-actions":{"label":"GitHub Actions in a repository you control","short":"GitHub Actions","detail":"A fork, or your own copy, that you can push to, with Actions turned on and the workflow secrets set. A clone of upstream cannot run them.","where":"Phases 0.2 and 8.6"},"scheduled-workflows":{"label":"Its scheduled workflows turned on","short":"Scheduled workflows","detail":"GitHub starts a fork with scheduled workflows off. Turn each one on in the Actions tab; until then it never runs, and nothing says so.","where":"Reference B"},"analytics-bucket":{"label":"An analytics archive bucket and SQL token","short":"Analytics bucket","detail":"A second R2 bucket bound as ANALYTICS_R2, plus a read-only Analytics Engine SQL token.","where":"Phase 14.2"},"desktop-signing":{"label":"Desktop signing keys","short":"Signing keys","detail":"A Tauri updater key pair, and Apple signing secrets if you notarize.","where":"Phase 15"}},"requirementOrder":["backend","r2-public","github-actions","scheduled-workflows","analytics-bucket","desktop-signing"],"features":["r2","transcode","zyra","feeds","analytics"],"tiers":{"1":"Viewer node","2":"Publisher node","3":"Publisher node + desktop app"},"baseline":"The globe, the Science On a Sphere catalog and Orbit."};
+  var KEY = "terraviz-setup-planner-v1";
+
+function tvpPlan(D, selected, actions) {
+  var byId = {};
+  D.caps.forEach(function (c) { byId[c.id] = c; });
+  var wanted = {};
+  function add(id) {
+    if (wanted[id] || !byId[id]) return;
+    wanted[id] = true;
+    byId[id].implies.forEach(add);
+  }
+  selected.forEach(add);
+  var plan = { tier: 1, have: [], blocked: [], atRisk: [], requirements: [], workflows: [], features: [] };
+  var reqs = {}, feats = {};
+  D.caps.forEach(function (c) {
+    if (!wanted[c.id]) return;
+    var needsActions = c.needs.indexOf('github-actions') !== -1;
+    if (needsActions && actions === 'no') { plan.blocked.push(c.id); return; }
+    if (needsActions && actions === 'unsure') plan.atRisk.push(c.id); else plan.have.push(c.id);
+    c.needs.forEach(function (r) { reqs[r] = true; });
+    c.workflows.forEach(function (w) {
+      if (!plan.workflows.some(function (x) { return x.file === w.file; })) plan.workflows.push(w);
+    });
+    if (c.feature) feats[c.feature] = true;
+    if (c.tier > plan.tier) plan.tier = c.tier;
+  });
+  plan.requirements = D.requirementOrder.filter(function (r) { return reqs[r]; });
+  plan.features = D.features.filter(function (f) { return feats[f]; });
+  return plan;
+}
+function tvpCommand(features) {
+  return features.length === 0
+    ? 'npm run setup -- --interactive'
+    : 'npm run setup -- --interactive --with=' + features.join(',');
+}
+
+  var byId = {};
+  D.caps.forEach(function (c) { byId[c.id] = c; });
+  var saved = { caps: [], actions: null };
+  try {
+    var raw = localStorage.getItem(KEY);
+    if (raw) {
+      var s = JSON.parse(raw);
+      if (Array.isArray(s.caps)) saved.caps = s.caps.filter(function (id) { return byId[id]; });
+      if (s.actions === 'yes' || s.actions === 'no' || s.actions === 'unsure') saved.actions = s.actions;
+    }
+  } catch (e) {}
+  function persist() { try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch (e) {} }
+
+  var boxes = Array.prototype.slice.call(root.querySelectorAll('[data-tvp-cap]'));
+  var radios = Array.prototype.slice.call(root.querySelectorAll('[data-tvp-actions]'));
+  var body = root.querySelector('[data-tvp-plan]');
+  var status = root.querySelector('[data-tvp-status]');
+
+  function el(tag, style, text) {
+    var n = document.createElement(tag);
+    if (style) n.style.cssText = style;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  // Backtick spans as <code>, the rest as text.
+  function inline(parent, text) {
+    String(text).split('`').forEach(function (part, i) {
+      if (i % 2 === 1) parent.appendChild(el('code', "font:500 12px/1.4 var(--tv-font-mono);background:var(--tv-surface-code);padding:1px 5px;border-radius:3px", part));
+      else if (part) parent.appendChild(document.createTextNode(part));
+    });
+    return parent;
+  }
+  var H = 'font:600 13px/1.4 var(--tv-font-sans);color:var(--tv-text);margin:16px 0 6px';
+  var LIST = 'margin:0;padding-inline-start:20px;font-size:13px;line-height:1.55;color:var(--tv-text-muted)';
+  var WARN = 'background:var(--tv-warn-bg);border:1px solid var(--tv-warn-border);border-radius:6px;padding:12px 14px;margin:14px 0 0';
+  function list(items) {
+    var ul = el('ul', LIST);
+    items.forEach(function (fill) { var li = el('li', 'margin:0 0 4px'); fill(li); ul.appendChild(li); });
+    return ul;
+  }
+  function closure(ids) {
+    var out = {};
+    function add(id) { if (out[id] || !byId[id]) return; out[id] = true; byId[id].implies.forEach(add); }
+    ids.forEach(add);
+    return out;
+  }
+
+  function paintPlan(plan) {
+    body.textContent = '';
+    // Untouched, the export's picker still shows its own default, so
+    // claiming a tier here would contradict the page.
+    if (!saved.caps.length && !saved.actions) {
+      body.appendChild(el('p', 'margin:0;font-size:13px;color:var(--tv-text-muted)',
+        'Tick what you want above, and answer the GitHub Actions question, to see your plan.'));
+      return;
+    }
+    var lead = el('p', 'margin:0;font-size:13.5px;color:var(--tv-text)');
+    lead.appendChild(el('strong', '', 'Tier ' + plan.tier + ' \u00b7 ' + D.tiers[plan.tier] + '. '));
+    lead.appendChild(document.createTextNode('The node-type picker below follows your answers; pick another there to override it.'));
+    body.appendChild(lead);
+    if (!saved.actions) {
+      body.appendChild(el('p', 'margin:8px 0 0;font-size:13px;color:var(--tv-warn)',
+        'Answer the GitHub Actions question to see which of these will work.'));
+    }
+
+    body.appendChild(el('h4', H, 'You will have'));
+    var have = [function (li) { li.textContent = D.baseline; }];
+    plan.have.forEach(function (id) { have.push(function (li) { li.textContent = byId[id].title; }); });
+    plan.atRisk.forEach(function (id) {
+      have.push(function (li) { li.textContent = byId[id].title + ' (if you can run GitHub Actions)'; });
+    });
+    body.appendChild(list(have));
+
+    if (plan.blocked.length) {
+      var box = el('div', WARN);
+      box.appendChild(el('h4', H.replace('margin:16px 0 6px', 'margin:0 0 6px'), 'Not possible without GitHub Actions'));
+      box.appendChild(list(plan.blocked.map(function (id) {
+        return function (li) {
+          var c = byId[id];
+          li.appendChild(el('strong', 'color:var(--tv-text)', c.title + ': '));
+          inline(li, c.withoutActions || '');
+          if (c.byHand) { li.appendChild(document.createTextNode(' By hand: ')); inline(li, c.byHand); }
+        };
+      })));
+      box.appendChild(el('p', 'margin:8px 0 0;font-size:13px;color:var(--tv-text-muted)',
+        'To have these, install from a fork or your own copy of the repository with Actions turned on (SELF_HOSTING.md \u00a7 0.2). You can add them later; nothing here has to be redone.'));
+      body.appendChild(box);
+    }
+    if (plan.atRisk.length) {
+      var risk = el('div', WARN);
+      risk.appendChild(el('h4', H.replace('margin:16px 0 6px', 'margin:0 0 6px'), 'Check before you start: these need GitHub Actions'));
+      risk.appendChild(list(plan.atRisk.map(function (id) {
+        return function (li) {
+          var c = byId[id];
+          li.appendChild(el('strong', 'color:var(--tv-text)', c.title + '. '));
+          li.appendChild(document.createTextNode('Without Actions: '));
+          inline(li, c.withoutActions || '');
+        };
+      })));
+      body.appendChild(risk);
+    }
+
+    body.appendChild(el('h4', H, 'What you will set up'));
+    if (!plan.requirements.length) {
+      body.appendChild(el('p', 'margin:0;font-size:13px;color:var(--tv-text-muted)',
+        'Nothing beyond the deploy itself: Phases 0 to 5, then 13.'));
+    } else {
+      body.appendChild(list(plan.requirements.map(function (r) {
+        return function (li) {
+          var info = D.requirements[r];
+          li.appendChild(el('strong', 'color:var(--tv-text)', info.label));
+          li.appendChild(document.createTextNode(' (' + info.where + '). ' + info.detail));
+        };
+      })));
+    }
+
+    if (plan.workflows.length) {
+      body.appendChild(el('h4', H, 'Workflows to turn on in your repository\u2019s Actions tab'));
+      body.appendChild(list(plan.workflows.map(function (w) {
+        return function (li) { inline(li, '`' + w.file + '` \u2014 ' + w.when); };
+      })));
+    }
+
+    body.appendChild(el('h4', H, 'Then run'));
+    body.appendChild(el('pre', 'margin:0;padding:10px 12px;background:var(--tv-surface-code);border-radius:6px;overflow-x:auto;font:500 12.5px/1.5 var(--tv-font-mono);color:var(--tv-text)',
+      tvpCommand(plan.features)));
+  }
+
+  function paint(announce) {
+    var effective = closure(saved.caps);
+    boxes.forEach(function (box) {
+      var id = box.getAttribute('data-tvp-cap');
+      var by = saved.caps.filter(function (other) { return other !== id && closure([other])[id]; });
+      box.checked = !!effective[id];
+      box.disabled = by.length > 0;
+      var note = root.querySelector('[data-tvp-implied="' + id + '"]');
+      if (note) note.textContent = by.length ? 'Included with: ' + by.map(function (o) { return byId[o].title; }).join(', ') : '';
+      var blocked = root.querySelector('[data-tvp-blocked="' + id + '"]');
+      var needsActions = byId[id].needs.indexOf('github-actions') !== -1;
+      if (blocked) blocked.textContent = effective[id] && needsActions && saved.actions === 'no'
+        ? 'Not possible without GitHub Actions. Your plan says why.' : '';
+    });
+    radios.forEach(function (r) { r.checked = r.value === saved.actions; });
+    var plan = tvpPlan(D, saved.caps, saved.actions || 'unsure');
+    paintPlan(plan);
+    if (announce && status) {
+      var msg = 'Plan updated: Tier ' + plan.tier + ', ' + D.tiers[plan.tier] + '.';
+      var n = plan.blocked.length || plan.atRisk.length;
+      var choices = n === 1 ? '1 of your choices ' : n + ' of your choices ';
+      if (plan.blocked.length) msg += ' ' + choices + (n === 1 ? 'needs' : 'need') + ' GitHub Actions you do not have.';
+      else if (plan.atRisk.length) msg += ' ' + choices + (n === 1 ? 'depends' : 'depend') + ' on GitHub Actions.';
+      status.textContent = msg;
+    }
+    return plan;
+  }
+
+  root.addEventListener('change', function (e) {
+    var t = e.target;
+    if (t.hasAttribute('data-tvp-cap')) {
+      var id = t.getAttribute('data-tvp-cap');
+      saved.caps = saved.caps.filter(function (x) { return x !== id; });
+      if (t.checked) saved.caps.push(id);
+    } else if (t.hasAttribute('data-tvp-actions')) {
+      saved.actions = t.value;
+    } else {
+      return;
+    }
+    persist();
+    var plan = paint(true);
+    // The export's own picker owns what a tier shows; drive it rather
+    // than duplicate it.
+    var button = document.querySelector('button[data-tier="' + plan.tier + '"]');
+    if (button) button.click();
+  });
+
+  paint(false);
+})();
 </script>
 <script data-tv-injected="doc-links">
 

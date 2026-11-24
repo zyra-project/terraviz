@@ -304,6 +304,28 @@ describe('assertValidatorsImplemented', () => {
 })
 
 describe('the committed public/setup.html', () => {
+  // The questions that say what each capability needs come before the
+  // tier picker they drive. An export that moved the picker would
+  // otherwise ship a page that opens on a tier again.
+  it('asks what the node will do before the tier picker, once', () => {
+    const page = html()
+    const planner = page.indexOf('data-tv-planner="1"')
+    expect(planner).toBeGreaterThan(-1)
+    expect(page.indexOf('data-tv-planner="1"', planner + 1)).toBe(-1)
+    expect(planner).toBeLessThan(page.search(/<button[^>]*\bdata-tier="1"/))
+    expect(page.match(/data-tv-injected="planner"/g)).toHaveLength(1)
+  })
+
+  // Copy an export could bring back, each of which contradicts what
+  // the questions established.
+  it('does not call the tier the only decision', () => {
+    expect(html()).not.toContain('This is the only decision that changes the shape of the install')
+  })
+
+  it('does not say the events feed runs with nothing to turn on', () => {
+    expect(html()).not.toMatch(/events\/blog feeds\s+—\s+both already run/)
+  })
+
   it('is self-contained', () => {
     expect(() => assertSelfContained(html())).not.toThrow()
   })

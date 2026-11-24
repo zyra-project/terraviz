@@ -51,6 +51,8 @@ export type Requirement =
 
 export interface RequirementInfo {
   label: string
+  /** A few words, for a badge beside a capability. */
+  short: string
   detail: string
   /** Where in `SELF_HOSTING.md` it is set up. */
   where: string
@@ -59,16 +61,19 @@ export interface RequirementInfo {
 export const REQUIREMENTS: Record<Requirement, RequirementInfo> = {
   backend: {
     label: 'The publisher backend',
+    short: 'Publisher backend',
     detail: 'D1, KV, Vectorize, Cloudflare Access and the node keys.',
     where: 'Phases 2–11',
   },
   'r2-public': {
     label: 'R2 public domain and S3 token',
+    short: 'R2 public bucket',
     detail: 'A public hostname for the asset bucket, its CORS policy, and an S3 API token for uploads.',
     where: 'Phase 8.5',
   },
   'github-actions': {
     label: 'GitHub Actions in a repository you control',
+    short: 'GitHub Actions',
     detail:
       'A fork, or your own copy, that you can push to, with Actions turned on and the ' +
       'workflow secrets set. A clone of upstream cannot run them.',
@@ -76,6 +81,7 @@ export const REQUIREMENTS: Record<Requirement, RequirementInfo> = {
   },
   'scheduled-workflows': {
     label: 'Its scheduled workflows turned on',
+    short: 'Scheduled workflows',
     detail:
       'GitHub starts a fork with scheduled workflows off. Turn each one on in the ' +
       'Actions tab; until then it never runs, and nothing says so.',
@@ -83,11 +89,13 @@ export const REQUIREMENTS: Record<Requirement, RequirementInfo> = {
   },
   'analytics-bucket': {
     label: 'An analytics archive bucket and SQL token',
+    short: 'Analytics bucket',
     detail: 'A second R2 bucket bound as ANALYTICS_R2, plus a read-only Analytics Engine SQL token.',
     where: 'Phase 14.2',
   },
   'desktop-signing': {
     label: 'Desktop signing keys',
+    short: 'Signing keys',
     detail: 'A Tauri updater key pair, and Apple signing secrets if you notarize.',
     where: 'Phase 15',
   },
@@ -133,8 +141,7 @@ export interface Capability {
 }
 
 /** Every node has these, whatever else it does. */
-export const BASELINE =
-  'The globe, the Science On a Sphere catalog and Orbit, with no publishing.'
+export const BASELINE = 'The globe, the Science On a Sphere catalog and Orbit.'
 
 export const CAPABILITIES: readonly Capability[] = [
   {
@@ -268,7 +275,8 @@ export interface NodePlan {
   features: SetupFeature[]
 }
 
-const REQUIREMENT_ORDER = Object.keys(REQUIREMENTS) as Requirement[]
+/** Install order: the order `REQUIREMENTS` declares them in. */
+export const REQUIREMENT_ORDER = Object.keys(REQUIREMENTS) as Requirement[]
 
 /**
  * What a node with these capabilities needs, given whether the

@@ -649,7 +649,7 @@ export const ADDONS: Array<{
     flag: 'per-feature',
     body: 'Orbit voice runs on the `AI` binding with nothing set. Realtime streaming STT, the wake word and YouTube media suggestions each want their own variables. Each degrades quietly when those are absent rather than erroring, so turning one on is additive and turning it off is safe.',
     extra:
-      '**What it takes:** nothing for Orbit voice or the events/blog feeds — both already run. Realtime streaming STT wants three variables plus an AI Gateway token. Give it a gateway of its own with **Logs** turned off: visitors\' microphone audio passes through it, and a gateway logs by default. The wake word wants a build-time model URL, and YouTube suggestions want an API key. Each is independent, and each stays off rather than erroring when its variables are absent.',
+      '**What it takes:** nothing for Orbit voice or the blog. The events feed refreshes only when `import-events.yml` runs, and a fork starts with its scheduled workflows off, so turn it on in your repository\u2019s Actions tab, or press Run now on /publish/feeds. Realtime streaming STT wants three variables plus an AI Gateway token. Give it a gateway of its own with **Logs** turned off: visitors\' microphone audio passes through it, and a gateway logs by default. The wake word wants a build-time model URL, and YouTube suggestions want an API key. Each is independent, and each stays off rather than erroring when its variables are absent.',
   },
 ]
 
@@ -841,7 +841,7 @@ export const TIERS = [
     n: 2 as Tier,
     name: 'Publisher node',
     duration: '2–3 h',
-    body: 'Your own datasets and tours, the publisher portal, semantic search, events, blog. The usual choice.',
+    body: 'Your own datasets and tours, the publisher portal, semantic search, events, blog. Video uploads, Zyra, the feeds and analytics history also need GitHub Actions in a repository you control.',
   },
   {
     n: 3 as Tier,
