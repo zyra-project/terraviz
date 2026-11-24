@@ -57,9 +57,9 @@ exactly that reason.
 
 ### What each capability needs
 
-A tier says what a node gets. It does not say what each part needs,
-and the line that matters most is not the tier: it is **whether you
-can run GitHub Actions in a repository you control**. Video uploads,
+A tier says what a node gets. It does not say what each part needs.
+And the line that matters most is not the tier at all: it is
+**whether you can run GitHub Actions in a repository you control**. Video uploads,
 Zyra pipelines, the feeds, the analytics history and desktop builds
 all run as workflows in your copy of the repository (§0.2). A node
 deployed from a clone of upstream with Direct Upload gets the
@@ -346,10 +346,10 @@ with a bare `10000: Authentication error`.
 > dashboard makes each row a separate policy on the token, and
 > Cloudflare refuses an eleventh with `policies must have a length
 > lower than or equal to 10`. A publisher node that runs both
-> optional steps has no room left, so when you need more access,
+> optional steps has no room left. When you need more access,
 > usually read access to WAF rules or zone analytics while
-> troubleshooting, mint a second, read-only token for it rather
-> than widening this one.
+> troubleshooting, mint a second, read-only token rather than
+> widening this one.
 
 > **The two Zone rows are the ones people cannot find.** Each
 > permission row has three dropdowns, and the first one — the
@@ -399,14 +399,15 @@ the Cloudflare dashboard sidebar and in every dashboard URL.
 > `/dataset/…` from the root of its host, and the Access
 > destinations, `public/_headers` and `/.well-known/terraviz.json`
 > assume the same. A path under another site (`your-org.org/terraviz`)
-> is not supported: a base-path build alone does not get you there,
-> and a proxy Worker rewriting paths on that site's zone is the only
-> route. Pick a subdomain (`terraviz.your-org.org`) instead.
+> is not supported. A base-path build alone does not get you there;
+> the only route is a proxy Worker rewriting paths on that site's
+> zone. Pick a subdomain (`terraviz.your-org.org`) instead.
 >
 > If your organisation's Cloudflare account restricts which
-> hostnames may serve traffic (an allow-list in an account-level WAF
-> ruleset, say), ask for `W2` **and** `W19`, the R2 assets hostname
-> (e.g. `assets.<W2>`), to be added before you start.
+> hostnames may serve traffic, ask for two allow-list entries before
+> you start: `W2`, **and** `W19`, the R2 assets hostname (e.g.
+> `assets.<W2>`). An account-level WAF ruleset is the usual way such
+> a list is kept.
 > [Reference D](#403-block-page-on-a-new-hostname) explains why this
 > one is hard to find after the fact.
 
@@ -422,10 +423,10 @@ the Cloudflare dashboard sidebar and in every dashboard URL.
 
 Everything after this assumes you are working from **your own copy**
 of `zyra-project/terraviz`, not from upstream. Phase 3 rewrites
-`wrangler.toml` with your resource IDs, Phase 5 points Cloudflare
-Pages at your remote, and every GitHub Actions workflow a node uses
-(video transcode, Zyra, the feeds, the analytics export, desktop
-releases) runs in your repo. None of that is possible against a repo
+`wrangler.toml` with your resource IDs, and Phase 5 points Cloudflare
+Pages at your remote. Every GitHub Actions workflow a node uses runs
+in your repo too: video transcode, Zyra, the feeds, the analytics
+export and desktop releases. None of that is possible against a repo
 you cannot push to.
 
 > **A clone of `zyra-project/terraviz` is not your own copy.** It
@@ -867,11 +868,11 @@ do, keep the dashboard bindings and the `CATALOG_R2_BUCKET` /
 
 > **A renamed bucket needs `CATALOG_R2_BUCKET` everywhere it is
 > addressed.** The `CATALOG_R2` binding names the bucket for the
-> Worker's own R2 calls, but presigned uploads, signed URLs, the
-> `upload` and `migrate-r2-*` CLIs and the transcode and Zyra
-> workflow runners (`transcode-hls.yml`, `zyra-run.yml`) reach it
-> through the S3 API by the name in `CATALOG_R2_BUCKET`, and fall
-> back to `terraviz-assets` when it is unset. Unset, uploads fail
+> Worker's own R2 calls. Everything else reaches it through the S3
+> API, by the name in `CATALOG_R2_BUCKET`: presigned uploads, signed
+> URLs, the `upload` and `migrate-r2-*` CLIs, and the transcode and
+> Zyra runners (`transcode-hls.yml`, `zyra-run.yml`). Unset, they
+> fall back to `terraviz-assets`. Unset, uploads fail
 > (`AccessDenied` with a bucket-scoped token, `NoSuchBucket` without
 > one) or, if your account also has a bucket by that name, land in
 > it. `npm run setup` writes the Pages variable with the binding, and
@@ -2129,10 +2130,10 @@ configuration (Reference C):
   whenever terrain is switched on.
 
 Apply the policy as `Content-Security-Policy-Report-Only` first, with
-the console open. Load the globe, a dataset and a tour; switch on
+the console open. Load the globe, a dataset and a tour. Switch on
 terrain, labels and borders, since a host behind a toggle that is
-off never shows up; and open the output page (`/output/output`) if
-you use it.
+off never shows up. If you use the output page, open that too
+(`/output/output`).
 Each violation names a host the policy is missing, and nothing is
 blocked while you collect them.
 
@@ -2773,9 +2774,9 @@ only matter for mirrored SOS rows. The proxy worker is not in this
 repo, so changing these only helps if you run a compatible proxy of
 your own. The other way to drop the dependency is to move those rows
 onto your own R2 with `migrate-r2-hls`, which rewrites each `vimeo:`
-ref as `r2:`, except the real-time rows it skips by default: NOAA
-re-uploads those daily, so a one-off copy goes stale within a day.
-They stay on the proxy.
+ref as `r2:`. It skips the real-time rows by default, because NOAA
+re-uploads those daily and a one-off copy goes stale within a day.
+Those stay on the proxy.
 
 > `TERRAVIZ_DOCS_URL` only matters for people reading your node's
 > `/setup` without filling anything in. The console also retargets
@@ -2783,11 +2784,11 @@ They stay on the proxy.
 > actually working through the install gets your fork's guide as soon
 > as they enter it, whether or not you set the variable.
 
-The SOS metadata snapshot, the cloud-texture bucket, NASA GIBS
-tiles, OpenFreeMap's vector tiles and fonts, and the terrain
-elevation tiles (AWS Open Data) are third-party
-**public data sources** shared by all nodes, not upstream
-infrastructure. There is nothing to repoint, and no setting to do it
+Some hosts are third-party **public data sources** shared by all
+nodes, not upstream infrastructure. They are the SOS metadata
+snapshot, the cloud-texture bucket, NASA GIBS tiles, OpenFreeMap's
+vector tiles and fonts, and the terrain elevation tiles (AWS Open
+Data). There is nothing to repoint, and no setting to do it
 with, so your CSP (Phase 13) has to allow their hosts.
 
 Cosmetic, change at leisure: `src/ui/creditsPanel.ts` and
@@ -2880,16 +2881,16 @@ traffic. Check both Production and Preview.
 silently skips the write when undefined.
 
 ### 403 block page on a new hostname
-DNS resolves, the Pages domain is active, and every request to `W2`
-(or to the R2 assets hostname) still gets a Cloudflare block page,
-in a browser and from `curl`, from any network. Your node never saw
+DNS resolves and the Pages domain is active, yet every request to
+`W2` gets a Cloudflare block page, and so does the R2 assets
+hostname. It happens in a browser and from `curl`, from any network. Your node never saw
 the request: a WAF rule refused it at the edge.
 
 If the zone's own **Security → WAF → Custom rules** list nothing
 that matches, look at the **account** level. On Enterprise plans an
-account can deploy custom rulesets that run on every zone it owns,
-and an organisation often uses one as a hostname allow-list: any
-subdomain not on the list is blocked. Those rules are not shown
+account can deploy custom rulesets that run on every zone it owns.
+An organisation often uses one as a hostname allow-list, blocking
+any subdomain not on it. Those rules are not shown
 among the zone's own, so a zone-level search finds nothing, and the
 token this guide prescribes cannot read them. Ask whoever runs the
 account to check the account-level rulesets and add both hostnames,
