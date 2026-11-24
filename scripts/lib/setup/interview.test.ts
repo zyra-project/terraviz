@@ -504,6 +504,26 @@ describe('handoff report', () => {
     expect(lines).toHaveLength(2)
   })
 
+  // zyra-run.yml reads the secret too, so it is not a transcode-only item.
+  it('asks for the GitHub secret even without video transcode', () => {
+    const renamed: SetupState = { ...state, r2Bucket: { name: 'node-assets' } }
+    const text = renderHandoff(buildHandoff(renamed))
+    expect(text).toContain('CATALOG_R2_BUCKET = node-assets')
+    expect(text).toContain('Zyra')
+  })
+
+  it('marks the shell value done only when it names this bucket', () => {
+    const renamed: SetupState = { ...state, r2Bucket: { name: 'node-assets' } }
+    const shellLine = (shellBucket: string | undefined) =>
+      renderHandoff(buildHandoff(renamed, { features: new Set(['r2']), shellBucket }))
+        .split('\n')
+        .filter(l => l.includes('CATALOG_R2_BUCKET'))
+        .pop()
+    expect(shellLine('node-assets')).toContain('✓')
+    expect(shellLine('old-assets')).toContain('→')
+    expect(shellLine(undefined)).toContain('→')
+  })
+
   it('does not ask for CATALOG_R2_BUCKET when the bucket kept its default name', () => {
     const text = renderHandoff(buildHandoff(state, { features: new Set(['r2', 'transcode']) }))
     expect(text).not.toContain('CATALOG_R2_BUCKET')

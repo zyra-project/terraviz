@@ -380,6 +380,34 @@ describe('runSetup — bindings step', () => {
     expect(h.out()).toContain('left unset')
   })
 
+  // Writing would put the default name in both the binding and the
+  // variable, a pair the audit then reads as consistent.
+  it('refuses to write when the shell names a different bucket', async () => {
+    let called = false
+    const h = harness({
+      argv: ['--only=bindings', '--apply'],
+      env: { CLOUDFLARE_API_TOKEN: 'tok', CATALOG_R2_BUCKET: 'node-assets' },
+      files: { '.terraviz-setup.json': state },
+      fetchImpl: (async () => {
+        called = true
+        return new Response(JSON.stringify({ success: true }), { status: 200 })
+      }) as unknown as typeof fetch,
+    })
+    expect(await runSetup(h.deps)).toBe(1)
+    expect(called).toBe(false)
+    expect(h.errOut()).toContain('export TERRAVIZ_R2_BUCKET=node-assets')
+  })
+
+  it('warns about the same conflict on a dry run without failing it', async () => {
+    const h = harness({
+      argv: ['--only=bindings'],
+      env: { CATALOG_R2_BUCKET: 'node-assets' },
+      files: { '.terraviz-setup.json': state },
+    })
+    expect(await runSetup(h.deps)).toBe(0)
+    expect(h.out()).toContain('--apply will refuse')
+  })
+
   it('surfaces an API failure rather than claiming success', async () => {
     const h = harness({
       argv: ['--only=bindings', '--apply'],

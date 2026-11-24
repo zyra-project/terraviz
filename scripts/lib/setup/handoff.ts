@@ -61,6 +61,11 @@ export interface HandoffOptions {
   gitConnected?: boolean
   /** Names the current shell already exports. */
   available?: Set<string>
+  /**
+   * The shell's `CATALOG_R2_BUCKET`, trimmed. Compared by value, not
+   * name: an export left over from another bucket is not done.
+   */
+  shellBucket?: string
 }
 
 function has(env: Set<string> | undefined, name: string): boolean {
@@ -72,8 +77,9 @@ export function buildHandoff(state: SetupState, opts: HandoffOptions = {}): Hand
   const site = state.hostname ? `https://${state.hostname}` : null
   const features = opts.features ?? new Set()
   // The bindings step writes CATALOG_R2_BUCKET to Pages, but the CLI
-  // and the transcode runner read their own copy, and without one
-  // they address terraviz-assets. Only a renamed bucket needs it.
+  // and the GitHub workflow runners (transcode-hls.yml, zyra-run.yml)
+  // read their own copy, and without one they address
+  // terraviz-assets. Only a renamed bucket needs it.
   const bucket = state.r2Bucket.name
   const bucketItem = (writers: string, status: HandoffStatus): HandoffItem[] =>
     bucket === DEFAULT_NAMES.r2Bucket
@@ -172,8 +178,8 @@ export function buildHandoff(state: SetupState, opts: HandoffOptions = {}): Hand
       { name: 'R2_ACCESS_KEY_ID', status: 'todo', source: 'same' },
       { name: 'R2_SECRET_ACCESS_KEY', status: 'todo', source: 'same' },
     )
-    githubItems.push(...bucketItem('the transcode runner writes to', 'todo'))
   }
+  githubItems.push(...bucketItem('the transcode and Zyra workflow runners write to', 'todo'))
   groups.push({
     destination: `GitHub${repo ? ` (${repo})` : ''} → Settings → Secrets and variables → Actions`,
     intro:
@@ -208,7 +214,7 @@ export function buildHandoff(state: SetupState, opts: HandoffOptions = {}): Hand
         },
         ...bucketItem(
           'upload and migrate-r2-* write to',
-          has(opts.available, 'CATALOG_R2_BUCKET') ? 'done' : 'todo',
+          opts.shellBucket === bucket ? 'done' : 'todo',
         ),
       ],
     })

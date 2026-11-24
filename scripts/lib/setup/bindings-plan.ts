@@ -92,6 +92,36 @@ export const OPTIONAL_EXTRAS: ExpectedBinding[] = [
   },
 ]
 
+/**
+ * The bindings step writes `CATALOG_R2_BUCKET` from setup's own bucket
+ * name, which comes from `.terraviz-setup.json` or
+ * `TERRAVIZ_R2_BUCKET`, never from `CATALOG_R2_BUCKET` itself. An
+ * operator who exported `CATALOG_R2_BUCKET` for the CLI, as the
+ * handoff asks, and then runs setup from a fresh checkout would have
+ * the binding and the variable both written with the default name.
+ * The two would agree, so the audit could not see it, and the node
+ * would point at the wrong bucket. A message to refuse with, or
+ * `null` when the shell agrees or says nothing.
+ *
+ * Refused rather than adopted: an export left over from another node
+ * would otherwise rebind this one, and the resources step would
+ * create a bucket by that name.
+ */
+export function bucketEnvConflict(
+  state: Pick<SetupState, 'r2Bucket'>,
+  env: Readonly<Record<string, string | undefined>>,
+): string | null {
+  const shell = env.CATALOG_R2_BUCKET?.trim()
+  const ours = state.r2Bucket.name
+  if (!shell || shell === ours) return null
+  return (
+    `CATALOG_R2_BUCKET is "${shell}" in this shell, but setup's bucket is "${ours}", ` +
+    `and writing would point the node at "${ours}". If your bucket is "${shell}", ` +
+    `export TERRAVIZ_R2_BUCKET=${shell} (the name setup creates, binds and writes); ` +
+    'otherwise unset CATALOG_R2_BUCKET.'
+  )
+}
+
 /** Cloudflare's per-binding payload shapes, keyed by binding type. */
 export type BindingPayload =
   | { type: 'plain_text'; value: string }

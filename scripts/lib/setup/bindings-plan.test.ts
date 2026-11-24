@@ -4,6 +4,7 @@
 import { describe, expect, it } from 'vitest'
 import { EXPECTED_BINDINGS } from '../expected-bindings'
 import {
+  bucketEnvConflict,
   buildPatchBody,
   formatBindingsPlan,
   OPTIONAL_EXTRAS,
@@ -158,5 +159,27 @@ describe('buildPatchBody', () => {
   it('emits no environment at all when nothing resolved', () => {
     const empty = { resolutions: [], resolved: [], skipped: [] }
     expect(buildPatchBody(empty).deployment_configs).toEqual({})
+  })
+})
+
+// The bindings step writes the bucket name from setup's state. A shell
+// that names another bucket would otherwise be overwritten in both
+// places at once, leaving a pair the audit reads as consistent.
+describe('bucketEnvConflict', () => {
+  const state = { r2Bucket: { name: 'terraviz-assets' } }
+
+  it('refuses when the shell names a different bucket', () => {
+    const message = bucketEnvConflict(state, { CATALOG_R2_BUCKET: 'node-assets' })
+    expect(message).toContain('"node-assets"')
+    expect(message).toContain('export TERRAVIZ_R2_BUCKET=node-assets')
+  })
+
+  it('is satisfied when the shell agrees, after trimming as the Worker does', () => {
+    expect(bucketEnvConflict(state, { CATALOG_R2_BUCKET: ' terraviz-assets\n' })).toBeNull()
+  })
+
+  it('says nothing when the shell does not set it', () => {
+    expect(bucketEnvConflict(state, {})).toBeNull()
+    expect(bucketEnvConflict(state, { CATALOG_R2_BUCKET: '  ' })).toBeNull()
   })
 })

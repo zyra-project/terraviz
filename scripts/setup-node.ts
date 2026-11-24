@@ -60,6 +60,7 @@ import {
   requiredNodeMajor,
 } from './lib/node-version.ts'
 import {
+  bucketEnvConflict,
   buildPatchBody,
   formatBindingsPlan,
   OPTIONAL_EXTRAS,
@@ -898,6 +899,15 @@ export async function runSetup(deps: SetupDeps): Promise<number> {
     const plan = planBindings(state, secrets, [...EXPECTED_BINDINGS, ...OPTIONAL_EXTRAS])
     deps.stdout.write(formatBindingsPlan(plan) + '\n\n')
 
+    const bucketConflict = bucketEnvConflict(state, deps.env)
+    if (bucketConflict) {
+      if (opts.apply) {
+        deps.stderr.write(`  ✘ ${bucketConflict}\n\n`)
+        return 1
+      }
+      deps.stdout.write(`  ! ${bucketConflict} --apply will refuse.\n\n`)
+    }
+
     // R2 / Vectorize / Analytics Engine / AI bindings address their
     // resource by name, so they "resolve" from defaults even on a
     // completely fresh state. Only the D1 and KV IDs prove the
@@ -1096,6 +1106,7 @@ export async function runSetup(deps: SetupDeps): Promise<number> {
             .filter(([, v]) => Boolean(v))
             .map(([k]) => k),
         ),
+        shellBucket: deps.env.CATALOG_R2_BUCKET?.trim(),
       }),
     ),
   )
