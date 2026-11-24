@@ -80,8 +80,9 @@ export const OPTIONAL_EXTRAS: ExpectedBinding[] = [
     // signing, the thumbnail job) reads the name from this variable
     // and falls back to `terraviz-assets` without it. Written from the
     // same state as the binding, always, so the two cannot disagree:
-    // a renamed bucket with this unset sends those paths to a bucket
-    // the node may not own. `check-pages-bindings` flags a mismatch.
+    // a renamed bucket with this unset sends those paths to another
+    // bucket in the account, or to none. `check-pages-bindings` flags
+    // a mismatch.
     name: 'CATALOG_R2_BUCKET',
     type: 'plaintext',
     environments: ['production', 'preview'],

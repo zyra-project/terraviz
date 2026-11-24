@@ -419,6 +419,25 @@ export interface BucketMismatch {
   fromDefault: boolean
 }
 
+/** Why an environment's bucket names could not be compared. */
+export type BucketUnverifiedReason =
+  /** `CATALOG_R2_BUCKET` is a secret, whose value the API never returns. */
+  | 'secret-variable'
+  /** The variable is plaintext but the API returned no value for it. */
+  | 'value-not-returned'
+  /** The binding exists but the API returned no bucket name for it. */
+  | 'binding-name-not-returned'
+
+export interface BucketUnverified {
+  environment: Environment
+  reason: BucketUnverifiedReason
+}
+
+export interface BucketCheck {
+  mismatches: BucketMismatch[]
+  unverified: BucketUnverified[]
+}
+
 /**
  * Does the `CATALOG_R2` binding name the same bucket the S3-API paths
  * address?
@@ -430,33 +449,51 @@ export interface BucketMismatch {
  * bucket name from `CATALOG_R2_BUCKET`, falling back to
  * `DEFAULT_R2_BUCKET` when it is unset or empty (the same
  * `?.trim() || 'terraviz-assets'` everywhere in `functions/`). A
- * renamed bucket with the variable unset is addressed by two names:
- * uploads fail with AccessDenied when the token is scoped to the real
- * bucket, and land in someone else's bucket when it is not.
+ * renamed bucket with the variable unset is addressed by two names.
+ * R2 bucket names are scoped to the account, and the S3 endpoint
+ * names the account, so the fallback cannot reach another account:
+ * uploads fail (AccessDenied with a bucket-scoped token, NoSuchBucket
+ * with no bucket by that name), or land in another `terraviz-assets`
+ * in the same account, such as an earlier install's or another
+ * node's.
  *
  * Names alone cannot see this, so it reads values. An environment
- * whose binding or variable value the API did not return (a secret,
- * a redacted entry) is skipped rather than guessed at.
+ * whose values the API did not return (a secret, a redacted entry) is
+ * reported as unverified rather than guessed at, so a run cannot read
+ * as all-clear for a pair it never compared.
+ *
+ * It does not say which side is wrong. A binding reverted to the
+ * default by an older setup run is as likely as a variable nobody set.
  */
-export function findBucketMismatches(
+export function checkBucketNames(
   project: ProjectBindings,
   defaultBucket: string = DEFAULT_R2_BUCKET,
-): BucketMismatch[] {
-  const out: BucketMismatch[] = []
+): BucketCheck {
+  const out: BucketCheck = { mismatches: [], unverified: [] }
   for (const environment of ['production', 'preview'] as const) {
     const env = project[environment]
+    if (!env.r2.has('CATALOG_R2')) continue // the diff reports it missing
     const bound = env.r2BucketNames?.get('CATALOG_R2')
-    if (bound === undefined) continue
-    if (env.secret.has('CATALOG_R2_BUCKET')) continue
+    if (bound === undefined) {
+      out.unverified.push({ environment, reason: 'binding-name-not-returned' })
+      continue
+    }
+    if (env.secret.has('CATALOG_R2_BUCKET')) {
+      out.unverified.push({ environment, reason: 'secret-variable' })
+      continue
+    }
     let declared = ''
     if (env.plaintext.has('CATALOG_R2_BUCKET')) {
       const value = env.plaintextValues?.get('CATALOG_R2_BUCKET')
-      if (value === undefined) continue
+      if (value === undefined) {
+        out.unverified.push({ environment, reason: 'value-not-returned' })
+        continue
+      }
       declared = value.trim()
     }
     const addressed = declared || defaultBucket
     if (bound !== addressed) {
-      out.push({ environment, bound, addressed, fromDefault: !declared })
+      out.mismatches.push({ environment, bound, addressed, fromDefault: !declared })
     }
   }
   return out
@@ -469,10 +506,28 @@ export function formatBucketMismatches(mismatches: BucketMismatch[]): string {
         ? 'CATALOG_R2_BUCKET is unset'
         : `CATALOG_R2_BUCKET is "${m.addressed}"`
       return (
-        `✘ ${m.environment}: CATALOG_R2 is bound to "${m.bound}", but ${variable}, so ` +
-        `uploads, asset migration and signed URLs go to "${m.addressed}".\n` +
-        `  Set CATALOG_R2_BUCKET=${m.bound} in this environment.`
+        `✘ ${m.environment}: the CATALOG_R2 binding names "${m.bound}", but ${variable}, ` +
+        `so uploads, asset migration and signed URLs go to "${m.addressed}".\n` +
+        '  Point both at the bucket that holds your assets: set CATALOG_R2_BUCKET to its\n' +
+        '  name, and rebind CATALOG_R2 if the binding is the one that is wrong.'
       )
     })
+    .join('\n')
+}
+
+const UNVERIFIED_WHY: Record<BucketUnverifiedReason, string> = {
+  'secret-variable':
+    'CATALOG_R2_BUCKET is a secret, so its value cannot be read. Make it a plaintext variable to have it checked',
+  'value-not-returned': 'the API returned no value for CATALOG_R2_BUCKET',
+  'binding-name-not-returned': 'the API returned no bucket name for the CATALOG_R2 binding',
+}
+
+export function formatBucketUnverified(unverified: BucketUnverified[]): string {
+  return unverified
+    .map(
+      u =>
+        `! ${u.environment}: could not check that CATALOG_R2 and CATALOG_R2_BUCKET name ` +
+        `the same bucket: ${UNVERIFIED_WHY[u.reason]}.`,
+    )
     .join('\n')
 }

@@ -25,7 +25,7 @@
  *       declares (extras are informational, not a failure).
  *   1 — at least one required binding is missing somewhere, or the
  *       CATALOG_R2 binding and CATALOG_R2_BUCKET name different
- *       buckets (`findBucketMismatches`).
+ *       buckets (`checkBucketNames`).
  *   2 — usage / configuration error (missing env vars, bad token,
  *       network failure).
  *
@@ -41,9 +41,10 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { EXPECTED_BINDINGS } from './lib/expected-bindings.ts'
 import {
+  checkBucketNames,
   diffBindings,
-  findBucketMismatches,
   formatBucketMismatches,
+  formatBucketUnverified,
   formatDiffTable,
   RestApiSource,
   type DiffEntry,
@@ -113,7 +114,10 @@ export async function runCheck(deps: RunDeps): Promise<number> {
   // A binding can be present by name and still point somewhere else:
   // the CATALOG_R2 binding and the S3-API paths each name the bucket,
   // and disagreeing is a broken deploy even with nothing missing.
-  const mismatches = findBucketMismatches(actual)
+  const { mismatches, unverified } = checkBucketNames(actual)
+  if (unverified.length > 0) {
+    deps.stdout.write(`\n${formatBucketUnverified(unverified)}\n`)
+  }
   if (broken.length === 0 && mismatches.length === 0) {
     deps.stdout.write(
       '\nAll required bindings present in both Production and Preview. ✓\n',
