@@ -15,6 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   diffBindings,
+  findBucketMismatches,
   formatDiffTable,
   RestApiSource,
   type ProjectBindings,
@@ -349,20 +350,131 @@ describe('runCheck', () => {
   })
 })
 
+describe('findBucketMismatches', () => {
+  // Round-trip through RestApiSource so the values are read the way
+  // the real audit reads them, not set on the struct by hand.
+  async function project(
+    bucket: string,
+    values: Record<string, string> = {},
+    shape: (env: ReturnType<typeof emptyEnv>) => void = () => {},
+  ): Promise<ProjectBindings> {
+    const proj = fullyConfigured()
+    shape(proj.production)
+    shape(proj.preview)
+    const fetchImpl: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({
+          success: true,
+          result: {
+            deployment_configs: {
+              production: serialise(proj.production, { bucket, values }),
+              preview: serialise(proj.preview, { bucket, values }),
+            },
+          },
+        }),
+        { status: 200 },
+      )
+    return new RestApiSource({ apiToken: 't', accountId: 'a', projectName: 'p', fetchImpl })
+      .fetchProject()
+  }
+
+  it('passes the default bucket with CATALOG_R2_BUCKET unset', async () => {
+    expect(findBucketMismatches(await project('terraviz-assets'))).toEqual([])
+  })
+
+  it('flags a renamed bucket with CATALOG_R2_BUCKET unset, in both environments', async () => {
+    const found = findBucketMismatches(await project('node-assets'))
+    expect(found).toEqual([
+      { environment: 'production', bound: 'node-assets', addressed: 'terraviz-assets', fromDefault: true },
+      { environment: 'preview', bound: 'node-assets', addressed: 'terraviz-assets', fromDefault: true },
+    ])
+  })
+
+  it('passes a renamed bucket whose CATALOG_R2_BUCKET agrees', async () => {
+    const proj = await project('node-assets', { CATALOG_R2_BUCKET: 'node-assets' }, env =>
+      env.plaintext.add('CATALOG_R2_BUCKET'),
+    )
+    expect(findBucketMismatches(proj)).toEqual([])
+  })
+
+  it('flags a CATALOG_R2_BUCKET that names a different bucket', async () => {
+    const proj = await project('node-assets', { CATALOG_R2_BUCKET: 'other-assets' }, env =>
+      env.plaintext.add('CATALOG_R2_BUCKET'),
+    )
+    expect(findBucketMismatches(proj)[0]).toMatchObject({
+      bound: 'node-assets',
+      addressed: 'other-assets',
+      fromDefault: false,
+    })
+  })
+
+  // `functions/` reads `env.CATALOG_R2_BUCKET?.trim() || 'terraviz-assets'`.
+  it('reads a blank CATALOG_R2_BUCKET as unset, as the Worker does', async () => {
+    const proj = await project('node-assets', { CATALOG_R2_BUCKET: '  ' }, env =>
+      env.plaintext.add('CATALOG_R2_BUCKET'),
+    )
+    expect(findBucketMismatches(proj)[0]).toMatchObject({ fromDefault: true })
+  })
+
+  it('skips an environment whose value it cannot read', async () => {
+    const proj = await project('node-assets', {}, env => env.secret.add('CATALOG_R2_BUCKET'))
+    expect(findBucketMismatches(proj)).toEqual([])
+  })
+})
+
+describe('runCheck bucket consistency', () => {
+  it('exits 1 when every binding is present but the bucket names disagree', async () => {
+    const proj = fullyConfigured()
+    const fetchImpl: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({
+          success: true,
+          result: {
+            deployment_configs: {
+              production: serialise(proj.production, { bucket: 'node-assets' }),
+              preview: serialise(proj.preview, { bucket: 'node-assets' }),
+            },
+          },
+        }),
+        { status: 200 },
+      )
+    let out = ''
+    const code = await runCheck({
+      env: { CLOUDFLARE_API_TOKEN: 'tok', CLOUDFLARE_ACCOUNT_ID: 'acct' },
+      stdout: { write: s => (out += s) },
+      stderr: { write: () => {} },
+      fetchImpl,
+    })
+    expect(code).toBe(1)
+    expect(out).not.toMatch(/All required bindings present/)
+    expect(out).toContain('Set CATALOG_R2_BUCKET=node-assets')
+  })
+})
+
 /**
  * Inverse of `shellEnvironment` — turn one environment's typed
  * sets back into the Cloudflare deployment_config shape so the
  * test can feed it through fetch -> RestApiSource -> diffBindings.
  */
-function serialise(env: ReturnType<typeof emptyEnv>): Record<string, unknown> {
+function serialise(
+  env: ReturnType<typeof emptyEnv>,
+  opts: { bucket?: string; values?: Record<string, string> } = {},
+): Record<string, unknown> {
   const env_vars: Record<string, { value: string | null; type: string }> = {}
-  for (const name of env.plaintext) env_vars[name] = { value: 'x', type: 'plain_text' }
+  for (const name of env.plaintext) {
+    env_vars[name] = { value: opts.values?.[name] ?? 'x', type: 'plain_text' }
+  }
   for (const name of env.secret) env_vars[name] = { value: null, type: 'secret_text' }
   return {
     env_vars,
     d1_databases: Object.fromEntries([...env.d1].map(n => [n, { id: 'x' }])),
     kv_namespaces: Object.fromEntries([...env.kv].map(n => [n, { namespace_id: 'x' }])),
-    r2_buckets: Object.fromEntries([...env.r2].map(n => [n, { name: 'x' }])),
+    // The bucket name is read by the CATALOG_R2_BUCKET consistency
+    // check, so the default has to be a name that agrees with an
+    // unset variable.
+    r2_buckets: Object.fromEntries(
+      [...env.r2].map(n => [n, { name: opts.bucket ?? 'terraviz-assets' }]),
+    ),
     vectorize_bindings: Object.fromEntries(
       [...env.vectorize].map(n => [n, { index_name: 'x' }]),
     ),

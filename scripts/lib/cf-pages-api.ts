@@ -40,6 +40,13 @@ export interface EnvironmentBindings {
   vectorize: Set<string>
   ai: Set<string>
   analytics_engine: Set<string>
+  /**
+   * Bucket name per R2 binding, and value per plaintext variable, as
+   * far as the API returned them. Optional because only the bucket
+   * consistency check reads values; the diff works on names alone.
+   */
+  r2BucketNames?: Map<string, string>
+  plaintextValues?: Map<string, string>
 }
 
 export interface ProjectBindings {
@@ -115,13 +122,24 @@ function shellEnvironment(config: CfDeploymentConfig | undefined): EnvironmentBi
   const out = emptyEnv()
   if (!config) return out
 
+  const plaintextValues = new Map<string, string>()
   for (const [name, entry] of Object.entries(config.env_vars ?? {})) {
     if (entry && entry.type === 'secret_text') out.secret.add(name)
-    else out.plaintext.add(name)
+    else {
+      out.plaintext.add(name)
+      if (typeof entry?.value === 'string') plaintextValues.set(name, entry.value)
+    }
   }
+  out.plaintextValues = plaintextValues
   for (const name of Object.keys(config.d1_databases ?? {})) out.d1.add(name)
   for (const name of Object.keys(config.kv_namespaces ?? {})) out.kv.add(name)
-  for (const name of Object.keys(config.r2_buckets ?? {})) out.r2.add(name)
+  const r2BucketNames = new Map<string, string>()
+  for (const [name, entry] of Object.entries(config.r2_buckets ?? {})) {
+    out.r2.add(name)
+    const bucket = (entry as { name?: unknown } | null)?.name
+    if (typeof bucket === 'string') r2BucketNames.set(name, bucket)
+  }
+  out.r2BucketNames = r2BucketNames
   for (const name of Object.keys(config.vectorize_bindings ?? {})) out.vectorize.add(name)
   for (const name of Object.keys(config.ai_bindings ?? {})) out.ai.add(name)
   for (const name of Object.keys(config.analytics_engine_datasets ?? {})) {
@@ -386,4 +404,75 @@ function statusGlyph(s: DiffStatus): string {
     case 'wrong_type':
       return 'WRONG'
   }
+}
+
+/** The bucket the S3-API paths fall back to with `CATALOG_R2_BUCKET` unset. */
+export const DEFAULT_R2_BUCKET = 'terraviz-assets'
+
+export interface BucketMismatch {
+  environment: Environment
+  /** The bucket the `CATALOG_R2` binding names. */
+  bound: string
+  /** The bucket the S3-API paths will address. */
+  addressed: string
+  /** True when `CATALOG_R2_BUCKET` is unset and `addressed` is the default. */
+  fromDefault: boolean
+}
+
+/**
+ * Does the `CATALOG_R2` binding name the same bucket the S3-API paths
+ * address?
+ *
+ * The Worker reaches R2 two ways. Its own reads and writes go through
+ * the `CATALOG_R2` binding, which names the bucket. Presigned uploads,
+ * public-URL signing, the thumbnail job and the `upload` /
+ * `migrate-r2-*` CLI go through the S3 API instead, and take the
+ * bucket name from `CATALOG_R2_BUCKET`, falling back to
+ * `DEFAULT_R2_BUCKET` when it is unset or empty (the same
+ * `?.trim() || 'terraviz-assets'` everywhere in `functions/`). A
+ * renamed bucket with the variable unset is addressed by two names:
+ * uploads fail with AccessDenied when the token is scoped to the real
+ * bucket, and land in someone else's bucket when it is not.
+ *
+ * Names alone cannot see this, so it reads values. An environment
+ * whose binding or variable value the API did not return (a secret,
+ * a redacted entry) is skipped rather than guessed at.
+ */
+export function findBucketMismatches(
+  project: ProjectBindings,
+  defaultBucket: string = DEFAULT_R2_BUCKET,
+): BucketMismatch[] {
+  const out: BucketMismatch[] = []
+  for (const environment of ['production', 'preview'] as const) {
+    const env = project[environment]
+    const bound = env.r2BucketNames?.get('CATALOG_R2')
+    if (bound === undefined) continue
+    if (env.secret.has('CATALOG_R2_BUCKET')) continue
+    let declared = ''
+    if (env.plaintext.has('CATALOG_R2_BUCKET')) {
+      const value = env.plaintextValues?.get('CATALOG_R2_BUCKET')
+      if (value === undefined) continue
+      declared = value.trim()
+    }
+    const addressed = declared || defaultBucket
+    if (bound !== addressed) {
+      out.push({ environment, bound, addressed, fromDefault: !declared })
+    }
+  }
+  return out
+}
+
+export function formatBucketMismatches(mismatches: BucketMismatch[]): string {
+  return mismatches
+    .map(m => {
+      const variable = m.fromDefault
+        ? 'CATALOG_R2_BUCKET is unset'
+        : `CATALOG_R2_BUCKET is "${m.addressed}"`
+      return (
+        `✘ ${m.environment}: CATALOG_R2 is bound to "${m.bound}", but ${variable}, so ` +
+        `uploads, asset migration and signed URLs go to "${m.addressed}".\n` +
+        `  Set CATALOG_R2_BUCKET=${m.bound} in this environment.`
+      )
+    })
+    .join('\n')
 }
