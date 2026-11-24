@@ -639,7 +639,7 @@ export const ADDONS: Array<{
     id: '14.4',
     title: 'Grafana',
     flag: 'probably skip',
-    body: 'The in-app analytics tab is the primary surface and needs no external service. Grafana is here for ad-hoc SQL against the raw stream; there is no native Analytics Engine plugin, so the shipped dashboards post SQL over HTTP through Infinity.',
+    body: 'The in-app analytics tab is the primary surface and needs no external service, only the 14.2 export to fill it. Grafana is here for ad-hoc SQL against the raw stream; there is no native Analytics Engine plugin, so the shipped dashboards post SQL over HTTP through Infinity.',
     extra:
       '**What it takes:** import the four dashboard JSONs from `grafana/dashboards/` and point an Infinity datasource at the Analytics Engine SQL endpoint. There is no native plugin, so the dashboards post SQL over HTTP with `root_selector: "data"`.',
   },
@@ -649,7 +649,7 @@ export const ADDONS: Array<{
     flag: 'per-feature',
     body: 'Orbit voice runs on the `AI` binding with nothing set. Realtime streaming STT, the wake word and YouTube media suggestions each want their own variables. Each degrades quietly when those are absent rather than erroring, so turning one on is additive and turning it off is safe.',
     extra:
-      '**What it takes:** nothing for Orbit voice or the blog. The events feed refreshes only when `import-events.yml` runs, and a fork starts with its scheduled workflows off, so turn it on in your repository\u2019s Actions tab, or press Run now on /publish/feeds. Realtime streaming STT wants three variables plus an AI Gateway token. Give it a gateway of its own with **Logs** turned off: visitors\' microphone audio passes through it, and a gateway logs by default. The wake word wants a build-time model URL, and YouTube suggestions want an API key. Each is independent, and each stays off rather than erroring when its variables are absent.',
+      '**What it takes:** nothing for Orbit voice or the blog. The events feed refreshes only when `import-events.yml` runs, and a fork starts with its scheduled workflows off, so turn it on in your repository\u2019s Actions tab, or press Run all enabled feeds now on /publish/feeds. Realtime streaming STT wants three variables plus an AI Gateway token. Give it a gateway of its own with **Logs** turned off: visitors\' microphone audio passes through it, and a gateway logs by default. The wake word wants a build-time model URL, and YouTube suggestions want an API key. Each is independent, and each stays off rather than erroring when its variables are absent.',
   },
 ]
 
@@ -847,7 +847,7 @@ export const TIERS = [
     n: 3 as Tier,
     name: 'Publisher + desktop',
     duration: '+1 h',
-    body: 'Everything in Tier 2, plus branded Tauri desktop builds with your own update feed.',
+    body: 'Everything in Tier 2, plus branded Tauri desktop builds with your own update feed, built and signed by a GitHub Actions workflow in your repository.',
   },
 ]
 

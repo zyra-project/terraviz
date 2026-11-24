@@ -63,8 +63,9 @@ can run GitHub Actions in a repository you control**. Video uploads,
 Zyra pipelines, the feeds, the analytics history and desktop builds
 all run as workflows in your copy of the repository (§0.2). A node
 deployed from a clone of upstream with Direct Upload gets the
-publisher portal and none of those. Video uploads then answer 503,
-and the rest fail silently.
+publisher portal and none of those. Video uploads and Zyra's Run
+now then answer 503; the feeds and the analytics export fail
+silently, since there is nothing to start them.
 
 | If you want to… | It needs | Without GitHub Actions |
 |---|---|---|
@@ -73,7 +74,7 @@ and the rest fail silently.
 | Upload images and other files | + an R2 public domain and S3 token (8.5) | Works |
 | Upload videos and image sequences | + R2, and `transcode-hls.yml` (8.6) | Finishing an upload answers 503 |
 | Run scheduled data pipelines with Zyra | + R2, and `zyra-run.yml` and the scheduled `zyra-scheduler.yml` (8.6) | Runs never start |
-| Keep current events and video suggestions coming in | The scheduled `import-events.yml` and `refresh-video-sources.yml` | Nothing refreshes; press Run now on `/publish/feeds` by hand |
+| Keep current events and video suggestions coming in | The scheduled `import-events.yml` and `refresh-video-sources.yml` | Nothing refreshes; on `/publish/feeds`, press **Run all enabled feeds now** and **Index now** by hand |
 | Keep visitor analytics history in the portal | An analytics bucket (14.2), and the scheduled `analytics-export.yml` | The analytics tab stays empty |
 | Ship a branded desktop app | Signing keys and `release.yml` (Phase 15) | No installers, no update feed |
 
@@ -82,7 +83,7 @@ off until you turn each one on in the Actions tab. Reference B lists
 the secrets each workflow reads.
 
 `/setup` asks these questions before anything else and prints the
-plan they add up to, including the `npm run setup --with=` command
+plan they add up to, including the `npm run setup -- --with=` command
 for your choices. The same list drives `npm run setup`: `--with=`
 takes `r2`, `transcode`, `zyra`, `feeds` and `analytics`, and the run
 ends by naming the workflows to turn on and what it left out.
@@ -432,9 +433,12 @@ you cannot push to.
 > needs no remote. But its workflows run for upstream, never for your
 > node, so the capabilities that need GitHub Actions are off
 > ([What each capability needs](#what-each-capability-needs)). If you
-> deployed from a clone, you can add them later: fork, set the
-> workflow secrets and the Pages variables (8.6), turn the workflows
-> on, and redeploy. Nothing needs rebuilding.
+> deployed from a clone, you can add them later. Fork, point your
+> checkout at the fork (`git remote set-url origin
+> https://github.com/<W3>.git`) and push, so Phase 3's `wrangler.toml`
+> lives there. Then set the workflow secrets and the Pages variables
+> (8.6), turn the workflows on, and redeploy the same `dist/`: no
+> `VITE_*` value changes, so nothing needs rebuilding.
 
 **Record the result as `W3`** — `owner/repo`. It is the value the
 `/setup` console reads to retarget its documentation links at your
@@ -1624,11 +1628,13 @@ the content. Without the three bindings below, finalising a video
 upload returns 503 `github_dispatch_unconfigured` and rolls the
 dataset's transcoding state back. It does not degrade; it fails.
 
-Skip it for a node that publishes only images, tours or metadata.
-Skip it too for data-encoded video built by a Zyra pipeline, and for
-a mirror of the upstream catalog — those rows carry `vimeo:` refs
-and never touch this. As with 8.5 you can come back later, at the
-cost of another redeploy.
+Skip it for a node that publishes only single images, tours or
+metadata, and for a mirror of the upstream catalog, whose rows carry
+`vimeo:` refs and never touch this. Image sequences go through
+`transcode-hls.yml` too. A node running Zyra needs both halves even
+with no video uploads: Zyra runs are started by the same dispatch,
+and `zyra-run.yml` reads the same seven secrets. As with 8.5 you can
+come back later, at the cost of another redeploy.
 
 Publisher video uploads hand off to a GitHub Actions workflow that
 runs the ffmpeg 4K/1080p/720p 2:1 spherical HLS ladder, via
@@ -2403,7 +2409,7 @@ with `root_selector: "data"`.
 | Realtime streaming STT | `CF_ACCOUNT_ID`, `CF_AI_GATEWAY`, `CF_AIG_TOKEN` (**secret**), optional `VOICE_STREAM_MODEL`; `VITE_VOICE_WS_STREAMING=true` (build-time) | Opt-in. Without the three server variables, `/api/voice/stream` sends a JSON error frame and the client falls back to batch Whisper. Set up the gateway as described under this table first. See [`ORBIT_VOICE_PLAN.md`](ORBIT_VOICE_PLAN.md) §3. |
 | Wake word | `VITE_VOICE_WAKEWORD_MODEL_URL` (build-time) | [`ORBIT_WAKEWORD.md`](ORBIT_WAKEWORD.md) |
 | YouTube media suggestions | `YOUTUBE_API_KEY` (**secret**) | Absent = source stays off, nothing errors. [`YOUTUBE_API_KEY.md`](YOUTUBE_API_KEY.md) |
-| Current events / blog | none beyond Phase 8 | Feeds console at `/publish/feeds`. [`CURRENT_EVENTS_PLAN.md`](CURRENT_EVENTS_PLAN.md) |
+| Current events / blog | The blog: none beyond Phase 8. The events feed: the scheduled `import-events.yml` and `refresh-video-sources.yml` (Reference B), or a refresh by hand on `/publish/feeds` | Feeds console at `/publish/feeds`. [`CURRENT_EVENTS_PLAN.md`](CURRENT_EVENTS_PLAN.md) |
 
 **The realtime gateway must not keep logs.** Visitors' microphone
 audio and its transcripts pass through it, and an AI Gateway logs
@@ -2719,8 +2725,8 @@ so.
 | `transcode-hls.yml` | the seven Phase 8.6 GitHub secrets | no publisher video uploads |
 | `zyra-run.yml` | the same seven secrets as `transcode-hls.yml` | no Zyra workflows |
 | `zyra-scheduler.yml` *(scheduled, every 15 min)* | `TERRAVIZ_SERVER`, `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` | no Zyra workflows on a schedule |
-| `import-events.yml` *(scheduled, every 6 h)* | `TERRAVIZ_SERVER`, `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` | you refresh events by hand (Run now on `/publish/feeds`), or not at all |
-| `refresh-video-sources.yml` *(scheduled, every 12 h)* | `TERRAVIZ_SERVER`, `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` | no video sources in `/publish/feeds` |
+| `import-events.yml` *(scheduled, every 6 h)* | `TERRAVIZ_SERVER`, `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` | you refresh events by hand (**Run all enabled feeds now** on `/publish/feeds`, or `npm run terraviz -- import-events --server=https://<W2>` from a scheduler of your own), or not at all |
+| `refresh-video-sources.yml` *(scheduled, every 12 h)* | `TERRAVIZ_SERVER`, `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` | no video sources in `/publish/feeds`, or you index them by hand (**Index now**) |
 | `analytics-export.yml` *(scheduled, daily)* / `analytics-backfill.yml` | `TERRAVIZ_SERVER`, `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` | you skipped 14.2 |
 | `release.yml` / `desktop.yml` | `TAURI_SIGNING_PRIVATE_KEY` + `_PASSWORD`, 6× `APPLE_*` | web-only node |
 | `sync-weblate.yml` | `WEBLATE_TOKEN` | no translation pipeline of your own |
