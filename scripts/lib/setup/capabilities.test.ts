@@ -141,6 +141,15 @@ describe('planNode', () => {
     expect(planNode(['desktop'], 'yes').tier).toBe(3)
   })
 
+  // Zyra publishes through asset completion, which dispatches the
+  // transcode pipeline; a Zyra-only plan that left it off would leave
+  // every run's dataset stuck transcoding.
+  it('includes the transcode workflow for Zyra even without video uploads', () => {
+    const plan = planNode(['zyra'], 'yes')
+    expect(plan.workflows.map(w => w.file)).toContain('transcode-hls.yml')
+    expect(plan.have.map(c => c.id)).not.toContain('video')
+  })
+
   it('lists a workflow once however many capabilities share it', () => {
     const plan = planNode(['video', 'zyra', 'feeds', 'analytics', 'desktop'], 'yes')
     const files = plan.workflows.map(w => w.file)

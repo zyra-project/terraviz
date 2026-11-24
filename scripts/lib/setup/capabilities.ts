@@ -187,9 +187,16 @@ export const CAPABILITIES: readonly Capability[] = [
       'Fetch model output on a schedule and publish it as a dataset, with no one at the keyboard.',
     needs: ['backend', 'r2-public', 'github-actions', 'scheduled-workflows'],
     implies: ['publish', 'assets'],
+    // A run publishes its video or frames through asset completion,
+    // which hands them to the same transcode pipeline an upload uses.
     workflows: [
       { file: 'zyra-run.yml', trigger: 'dispatch', when: 'on each workflow run' },
       { file: 'zyra-scheduler.yml', trigger: 'schedule', when: 'every 15 minutes' },
+      {
+        file: 'transcode-hls.yml',
+        trigger: 'dispatch',
+        when: 'when a run publishes its video or frames',
+      },
     ],
     feature: 'zyra',
     tier: 2,
