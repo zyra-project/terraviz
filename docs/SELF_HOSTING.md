@@ -2683,7 +2683,7 @@ is [`scripts/lib/expected-bindings.ts`](../scripts/lib/expected-bindings.ts).
 | `ANALYTICS_R2` | R2 | 14.2 | Analytics archive |
 | `CF_ACCOUNT_ID` | plaintext | 14.2 / 14.5 | AE SQL API, voice gateway |
 | `ANALYTICS_SQL_TOKEN` | secret | 14.2 | AE SQL API |
-| `ANALYTICS_AE_DATASET` | plaintext | 14.2 | Renamed AE dataset |
+| `ANALYTICS_AE_DATASET` | plaintext | 14.2 | AE dataset the export queries; must match `ANALYTICS` (setup writes both) |
 | `CF_AI_GATEWAY` | plaintext | 14.5 | Realtime STT: a gateway of its own, Logs off |
 | `CF_AIG_TOKEN` | secret | 14.5 | Realtime STT |
 | `VOICE_STREAM_MODEL` | plaintext | 14.5 | STT model override |

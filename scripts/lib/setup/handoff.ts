@@ -268,6 +268,14 @@ export function buildHandoff(state: SetupState, opts: HandoffOptions = {}): Hand
           status: 'todo',
           source: 'a token with exactly Account → Account Analytics → Read',
         },
+        {
+          name: 'ANALYTICS_AE_DATASET',
+          status: 'done',
+          value: state.analyticsDataset.name,
+          why:
+            'the bindings step writes it with the ANALYTICS binding, so the ' +
+            'export queries the dataset telemetry goes to; re-run it if you rename one',
+        },
       ],
     })
   }

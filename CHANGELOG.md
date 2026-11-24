@@ -31,6 +31,15 @@ Fixes [#538](https://github.com/zyra-project/terraviz/issues/538).
   to write when the shell exports a `CATALOG_R2_BUCKET` naming a different
   bucket, and the handoff report asks for the value in the CLI's shell and
   the runners' GitHub secrets.
+- Setup writes `ANALYTICS_AE_DATASET` with the `ANALYTICS` binding for the same
+  reason: the 14.2 export queries by that variable and fell back to
+  `terraviz_events`, so a renamed dataset was exported by the wrong name.
+- Setup checks a `CATALOG_R2_BUCKET` the shell contradicts before any step that
+  uses the bucket name, not at the bindings step after two have run.
+- A viewer node's `/setup` plan prints a setup command scoped to a viewer
+  (`--only=pages,resources,wrangler-toml,migrations,bindings`), and the
+  interview asks the Access questions only when the access step runs. Zyra's
+  workflows include `transcode-hls.yml`, which every run's output goes through.
 - `npm run check:pages-bindings` now fails when the `CATALOG_R2` binding and
   `CATALOG_R2_BUCKET` name different buckets, and notes an environment whose
   values it cannot read.

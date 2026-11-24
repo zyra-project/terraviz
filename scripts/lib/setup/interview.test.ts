@@ -561,10 +561,12 @@ describe('handoff report', () => {
   })
 
   it('lists the analytics archive setup does not create', () => {
-    const text = renderHandoff(buildHandoff(state, { features: new Set(['analytics']) }))
+    const renamed: SetupState = { ...state, analyticsDataset: { name: 'node_events' } }
+    const text = renderHandoff(buildHandoff(renamed, { features: new Set(['analytics']) }))
     expect(text).toContain('ANALYTICS_R2')
     expect(text).toContain('ANALYTICS_SQL_TOKEN')
     expect(text).toContain('analytics-export.yml')
+    expect(text).toContain('ANALYTICS_AE_DATASET = node_events')
   })
 
   it('gives the Zyra runner the bucket credentials video gets', () => {

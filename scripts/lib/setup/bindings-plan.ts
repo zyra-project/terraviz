@@ -90,6 +90,20 @@ export const OPTIONAL_EXTRAS: ExpectedBinding[] = [
       'The R2 bucket name, matching the CATALOG_R2 binding. The S3-API ' +
       'paths read it and fall back to terraviz-assets when it is unset.',
   },
+  {
+    // The same split for Analytics Engine: the `ANALYTICS` binding
+    // names the dataset telemetry is written to, but the nightly
+    // export (Phase 14.2) queries the SQL API by the name in this
+    // variable and falls back to `terraviz_events` without it. A
+    // renamed dataset with this unset exports the wrong dataset, or
+    // fails the query. Written from the same state as the binding.
+    name: 'ANALYTICS_AE_DATASET',
+    type: 'plaintext',
+    environments: ['production', 'preview'],
+    hint:
+      'The Analytics Engine dataset name, matching the ANALYTICS binding. ' +
+      'The analytics export reads it and falls back to terraviz_events.',
+  },
 ]
 
 /**
@@ -237,6 +251,8 @@ function plaintextValue(name: string, state: SetupState): string | undefined {
       return state.r2PublicBase
     case 'CATALOG_R2_BUCKET':
       return state.r2Bucket.name
+    case 'ANALYTICS_AE_DATASET':
+      return state.analyticsDataset.name
     case 'GITHUB_OWNER':
       return state.githubOwner
     case 'GITHUB_REPO':

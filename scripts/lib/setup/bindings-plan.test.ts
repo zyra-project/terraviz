@@ -119,6 +119,20 @@ describe('planBindings', () => {
     }
   })
 
+  // The analytics export queries by ANALYTICS_AE_DATASET and falls
+  // back to terraviz_events; the binding alone left a renamed dataset
+  // exported by the wrong name.
+  it('writes ANALYTICS_AE_DATASET from the same name as the ANALYTICS binding', () => {
+    const renamed = applyEnvOverrides(provisionedState(), { TERRAVIZ_AE_DATASET: 'node_events' })
+    const plan = planBindings(renamed)
+    const byName = new Map(plan.resolutions.map(r => [r.name, r]))
+    expect(byName.get('ANALYTICS')?.payload).toEqual({ dataset: 'node_events' })
+    expect(byName.get('ANALYTICS_AE_DATASET')?.payload).toEqual({
+      type: 'plain_text',
+      value: 'node_events',
+    })
+  })
+
   it('writes CATALOG_R2_BUCKET for an unrenamed bucket too, so the name is explicit', () => {
     const bucket = planBindings(provisionedState()).resolutions.find(
       r => r.name === 'CATALOG_R2_BUCKET',
