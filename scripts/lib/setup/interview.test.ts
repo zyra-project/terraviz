@@ -7,6 +7,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   applyAnswer,
+  gateOpen,
   isAnswered,
   MANUAL_STEPS,
   pendingQuestions,
@@ -86,6 +87,15 @@ describe('pendingQuestions', () => {
       'staffEmailDomain',
       'trustedPublisherDomains',
     ])
+  })
+
+  // Zyra dispatches to the same repository video transcode does.
+  it('asks for the fork repo for Zyra as well as for video', () => {
+    const keys = (features: Set<'transcode' | 'zyra' | 'feeds'>) =>
+      pendingQuestions(defaultState(), {}, { features }).map(q => q.key)
+    expect(keys(new Set(['transcode']))).toContain('githubRepo')
+    expect(keys(new Set(['zyra']))).toContain('githubRepo')
+    expect(keys(new Set(['feeds']))).not.toContain('githubRepo')
   })
 
   it('skips what the environment already supplies', () => {
@@ -524,8 +534,53 @@ describe('handoff report', () => {
     expect(shellLine(undefined)).toContain('→')
   })
 
+  // A secret on a workflow that is off does nothing, and forks start
+  // with scheduled workflows off.
+  it('names each workflow the chosen features run, once', () => {
+    const text = renderHandoff(
+      buildHandoff(state, { features: new Set(['r2', 'transcode', 'zyra', 'feeds']) }),
+    )
+    for (const file of ['transcode-hls.yml', 'zyra-run.yml', 'zyra-scheduler.yml', 'import-events.yml']) {
+      expect(text.split(file).length - 1, file).toBe(1)
+    }
+    expect(text).toContain('scheduled workflows stay off')
+  })
+
+  it('lists the analytics archive setup does not create', () => {
+    const text = renderHandoff(buildHandoff(state, { features: new Set(['analytics']) }))
+    expect(text).toContain('ANALYTICS_R2')
+    expect(text).toContain('ANALYTICS_SQL_TOKEN')
+    expect(text).toContain('analytics-export.yml')
+  })
+
+  it('gives the Zyra runner the bucket credentials video gets', () => {
+    const text = renderHandoff(buildHandoff(state, { features: new Set(['zyra']) }))
+    const github = text.slice(text.indexOf('Secrets and variables'))
+    expect(github).toContain('R2_S3_ENDPOINT')
+  })
+
+  // How far the node goes, said up front instead of by a 503.
+  it('lists what the run left out, and which of it needs Actions', () => {
+    const text = renderHandoff(buildHandoff(state, { features: new Set(['r2']) }))
+    expect(text).toContain('Not set up by this run')
+    expect(text).not.toContain('--with=r2')
+    expect(text).toMatch(/--with=transcode\n\s+\(Upload videos; needs GitHub Actions/)
+  })
+
   it('does not ask for CATALOG_R2_BUCKET when the bucket kept its default name', () => {
     const text = renderHandoff(buildHandoff(state, { features: new Set(['r2', 'transcode']) }))
     expect(text).not.toContain('CATALOG_R2_BUCKET')
+  })
+})
+
+describe('gateOpen', () => {
+  it('opens on any of several features', () => {
+    expect(gateOpen(['transcode', 'zyra'], new Set(['zyra']))).toBe(true)
+    expect(gateOpen(['transcode', 'zyra'], new Set(['feeds']))).toBe(false)
+  })
+
+  it('opens an ungated item for everyone, and a gated one for no one by default', () => {
+    expect(gateOpen(undefined, undefined)).toBe(true)
+    expect(gateOpen('r2', undefined)).toBe(false)
   })
 })

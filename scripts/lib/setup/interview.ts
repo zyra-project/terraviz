@@ -27,6 +27,7 @@
  */
 
 import { requiredNodeLabel } from '../node-version'
+import type { SetupFeature } from './capabilities'
 import { validators, wrap, type Question } from './prompt'
 import { DEFAULT_NAMES, type SetupState } from './state'
 
@@ -44,8 +45,18 @@ export interface InterviewQuestion extends Question {
   key: AnswerKey
   /** Env var that supplies this without a prompt. */
   envVar: string
-  /** Skip unless the operator wants this optional feature. */
-  featureGate?: 'r2' | 'transcode'
+  /** Skip unless the operator wants one of these optional features. */
+  featureGate?: FeatureGate
+}
+
+/** One optional feature, or any of several. */
+export type FeatureGate = SetupFeature | readonly SetupFeature[]
+
+/** Is a gated question or step relevant to these features? */
+export function gateOpen(gate: FeatureGate | undefined, features?: ReadonlySet<SetupFeature>): boolean {
+  if (!gate) return true
+  const any = typeof gate === 'string' ? [gate] : gate
+  return any.some(f => features?.has(f) ?? false)
 }
 
 export const QUESTIONS: InterviewQuestion[] = [
@@ -145,13 +156,14 @@ export const QUESTIONS: InterviewQuestion[] = [
     envVar: 'GITHUB_REPO',
     label: 'Fork repo (owner/repo)',
     help: [
-      'Optional, needed only for publisher video uploads. The repo that',
-      'hosts transcode-hls.yml — your fork. The publisher API fires a',
-      'repository_dispatch at it when someone uploads a video.',
+      'Optional, needed for video uploads and Zyra workflows. The repo',
+      'that hosts transcode-hls.yml and zyra-run.yml — your fork. The',
+      'publisher API fires a repository_dispatch at it when someone',
+      'uploads a video or a Zyra workflow runs.',
     ],
     example: 'your-org/terraviz',
     optional: true,
-    featureGate: 'transcode',
+    featureGate: ['transcode', 'zyra'],
     validate: validators.repoSlug,
   },
 ]
@@ -203,7 +215,7 @@ export function isAnswered(
 
 export interface PendingOptions {
   /** Include questions gated on optional features. */
-  features?: Set<'r2' | 'transcode'>
+  features?: ReadonlySet<SetupFeature>
 }
 
 export function pendingQuestions(
@@ -212,7 +224,7 @@ export function pendingQuestions(
   opts: PendingOptions = {},
 ): InterviewQuestion[] {
   return QUESTIONS.filter(q => {
-    if (q.featureGate && !opts.features?.has(q.featureGate)) return false
+    if (!gateOpen(q.featureGate, opts.features)) return false
     return !isAnswered(q, state, env)
   })
 }
@@ -269,8 +281,8 @@ export interface ManualStep {
    * not asked to self-certify something checkable.
    */
   verification: 'detected' | 'self'
-  /** Only relevant if the operator wants this optional feature. */
-  featureGate?: 'r2' | 'transcode'
+  /** Only relevant if the operator wants one of these optional features. */
+  featureGate?: FeatureGate
 }
 
 export const MANUAL_STEPS: ManualStep[] = [
@@ -610,8 +622,8 @@ export function renderManualStep(step: ManualStep, index?: number): string {
   return lines.join('\n')
 }
 
-export function renderManualSteps(features: Set<'r2' | 'transcode'> = new Set()): string {
-  const steps = MANUAL_STEPS.filter(s => !s.featureGate || features.has(s.featureGate))
+export function renderManualSteps(features: ReadonlySet<SetupFeature> = new Set()): string {
+  const steps = MANUAL_STEPS.filter(s => gateOpen(s.featureGate, features))
   const out = [
     'Manual prerequisites — the parts no API can do for you.',
     '',

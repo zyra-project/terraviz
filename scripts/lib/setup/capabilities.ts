@@ -173,7 +173,7 @@ export const CAPABILITIES: readonly Capability[] = [
   },
   {
     id: 'zyra',
-    title: 'Run scheduled data pipelines (Zyra workflows)',
+    title: 'Run scheduled data pipelines with Zyra',
     summary:
       'Fetch model output on a schedule and publish it as a dataset, with no one at the keyboard.',
     needs: ['backend', 'r2-public', 'github-actions', 'scheduled-workflows'],

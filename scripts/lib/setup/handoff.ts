@@ -26,6 +26,7 @@
  * already has it.
  */
 
+import { CAPABILITIES, type SetupFeature } from './capabilities'
 import { wrap } from './prompt'
 import { DEFAULT_NAMES, type SetupState } from './state'
 
@@ -51,7 +52,7 @@ export interface HandoffGroup {
 
 export interface HandoffOptions {
   /** Features the operator opted into; gates whole groups. */
-  features?: Set<'r2' | 'transcode'>
+  features?: Set<SetupFeature>
   /**
    * True when a Git remote drives the build, false for Direct Upload,
    * undefined when the run never checked. The three cases put the
@@ -172,7 +173,8 @@ export function buildHandoff(state: SetupState, opts: HandoffOptions = {}): Hand
       why: 'the URL workflows POST results back to',
     },
   ]
-  if (features.has('transcode')) {
+  // Both runners write into the bucket through the S3 API.
+  if (features.has('transcode') || features.has('zyra')) {
     githubItems.push(
       { name: 'R2_S3_ENDPOINT', status: 'todo', source: 'the R2 API token you minted' },
       { name: 'R2_ACCESS_KEY_ID', status: 'todo', source: 'same' },
@@ -189,8 +191,50 @@ export function buildHandoff(state: SetupState, opts: HandoffOptions = {}): Hand
     items: githubItems,
   })
 
+  // ── Workflows ───────────────────────────────────────────────────
+  // A secret set on a workflow that is turned off does nothing. Forks
+  // start with Actions off and scheduled workflows stay off after
+  // that, so each one the chosen features run is named here.
+  const chosen = CAPABILITIES.filter(c => c.feature && features.has(c.feature))
+  const workflowItems: HandoffItem[] = []
+  for (const cap of chosen) {
+    for (const w of cap.workflows) {
+      if (workflowItems.some(i => i.name === w.file)) continue
+      workflowItems.push({ name: w.file, status: 'todo', why: `${cap.title} · ${w.when}` })
+    }
+  }
+  if (workflowItems.length > 0) {
+    groups.push({
+      destination: `GitHub${repo ? ` (${repo})` : ''} → Actions`,
+      intro:
+        'Turn each of these on. A fork starts with Actions off, and its ' +
+        'scheduled workflows stay off until you enable them one by one. A ' +
+        'workflow that is off never runs, and nothing on the node says so.',
+      items: workflowItems,
+    })
+  }
+
+  // ── Analytics archive (Phase 14.2) ──────────────────────────────
+  if (features.has('analytics')) {
+    groups.push({
+      destination: 'Cloudflare Pages → Settings → Variables and Secrets (Phase 14.2)',
+      intro:
+        'Setup does not create the analytics archive yet. The nightly ' +
+        'export has nowhere to write until these exist; then redeploy.',
+      items: [
+        { name: 'ANALYTICS_R2', status: 'todo', source: 'an R2 bucket of its own, bound under this name' },
+        { name: 'CF_ACCOUNT_ID', status: 'todo', value: state.accountId || undefined },
+        {
+          name: 'ANALYTICS_SQL_TOKEN',
+          status: 'todo',
+          source: 'a token with exactly Account → Account Analytics → Read',
+        },
+      ],
+    })
+  }
+
   // ── R2 credentials ──────────────────────────────────────────────
-  if (features.has('r2') || features.has('transcode')) {
+  if (features.has('r2') || features.has('transcode') || features.has('zyra')) {
     groups.push({
       destination: 'Your shell, then re-run `npm run setup -- --apply --only=bindings`',
       url: 'https://dash.cloudflare.com/?to=/:account/r2/api-tokens',
@@ -244,6 +288,24 @@ export function buildHandoff(state: SetupState, opts: HandoffOptions = {}): Hand
       why: 'the id is not secret; the matching secret is not stored anywhere',
     })
   }
+  // ── Left out ────────────────────────────────────────────────────
+  // What this run did not set up, so an operator can see how far the
+  // node goes rather than finding out from a 503 or a feed that never
+  // refreshes.
+  const leftOut = CAPABILITIES.filter(c => c.feature && !features.has(c.feature))
+  if (leftOut.length > 0) {
+    groups.push({
+      destination: 'Not set up by this run — re-run with --with=<feature> to add one',
+      items: leftOut.map(c => ({
+        name: `--with=${c.feature}`,
+        status: 'optional' as const,
+        why: c.needs.includes('github-actions')
+          ? `${c.title}; needs GitHub Actions in a repository you control`
+          : c.title,
+      })),
+    })
+  }
+
   if (recorded.length > 0) {
     groups.push({
       destination: 'Already handled — recorded in .terraviz-setup.json',

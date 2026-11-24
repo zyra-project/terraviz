@@ -1065,4 +1065,24 @@ describe('runSetup — handoff report', () => {
     expect(h.out()).toContain('Values you need to paste elsewhere')
     expect(h.out()).toContain('VITE_API_ORIGIN = https://a.example.org')
   })
+
+  // Zyra publishes frames into R2, so asking for it alone has to bring
+  // the bucket's credentials and the workflows it runs.
+  it('expands --with=zyra into the bucket and its workflows', async () => {
+    const h = harness({
+      argv: ['--only=bindings', '--with=zyra'],
+      files: { '.terraviz-setup.json': JSON.stringify({ hostname: 'a.example.org' }) },
+    })
+    await runSetup(h.deps)
+    expect(h.out()).toContain('r2/api-tokens')
+    expect(h.out()).toContain('zyra-run.yml')
+    expect(h.out()).toContain('zyra-scheduler.yml')
+    expect(h.out()).not.toContain('--with=zyra')
+    expect(h.out()).toContain('--with=feeds')
+  })
+
+  it('accepts every feature the capability manifest names', async () => {
+    const h = harness({ argv: ['--only=bindings', '--with=r2,transcode,zyra,feeds,analytics'] })
+    expect(await runSetup(h.deps)).toBe(0)
+  })
 })
