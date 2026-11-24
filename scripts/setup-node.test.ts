@@ -773,7 +773,10 @@ describe('runSetup — pages step', () => {
       env: { CLOUDFLARE_API_TOKEN: 'tok' },
       files: { '.terraviz-setup.json': state },
       fetchImpl: pagesFetch({
-        'POST /accounts/acct/pages/projects': { name: 'my-node' },
+        'POST /accounts/acct/pages/projects': {
+          name: 'my-node',
+          subdomain: 'my-node-3xq.pages.dev',
+        },
         'GET /accounts/acct/pages/projects/my-node/domains': [],
         'POST /accounts/acct/pages/projects/my-node/domains': {
           name: 'terraviz.example.org',
@@ -784,6 +787,9 @@ describe('runSetup — pages step', () => {
     expect(await runSetup(h.deps)).toBe(0)
     expect(h.out()).toContain('project  my-node  created')
     expect(h.out()).toContain('terraviz.example.org')
+    // The record comes from the project's own subdomain, which
+    // Cloudflare suffixes when the name is taken on pages.dev.
+    expect(h.out()).toContain('terraviz.example.org  CNAME  my-node-3xq.pages.dev')
   })
 
   // Direct Upload means Cloudflare never runs the build, so the
@@ -822,6 +828,7 @@ describe('runSetup — pages step', () => {
     })
     expect(await runSetup(h.deps)).toBe(0)
     expect(h.out()).not.toContain('Direct Upload')
+    expect(h.out()).not.toContain('CNAME')
   })
 })
 

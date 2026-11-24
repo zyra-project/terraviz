@@ -26,12 +26,15 @@
  *
  * ## Custom domains
  *
- * `POST …/domains` attaches the hostname. When the zone is on
- * Cloudflare DNS, Cloudflare provisions the CNAME itself, so there is
- * no DNS call to make here — which also keeps this step to an
- * account-scoped token with no zone write permission. The domain
- * comes back `pending` while certificates issue; that is normal and
- * is reported rather than waited on.
+ * `POST …/domains` attaches the hostname and nothing more. The
+ * dashboard's Set up a custom domain flow also creates the CNAME, but
+ * the API call does not, even on a zone that is on Cloudflare DNS: a
+ * fresh install sat at `pending` with "CNAME record not set" until an
+ * operator added the record by hand. This step still makes no DNS
+ * call, because doing so needs Zone → DNS → Edit, and the token the
+ * guide prescribes is already at Cloudflare's 10-permission cap. It
+ * prints the exact record instead (`cnameInstruction`), whenever the
+ * domain is not yet `active`.
  */
 
 import { CfApi, isAuthError, type CfError } from './cf-request'
@@ -153,6 +156,26 @@ export interface EnsureDomainResult {
   name: string
   created: boolean
   status?: string
+}
+
+/**
+ * The DNS record a custom domain needs, as lines to print, or `null`
+ * once the domain is `active`. `target` is the project's own
+ * `*.pages.dev` hostname, read from the project rather than built from
+ * its name, because Cloudflare suffixes the subdomain when the name is
+ * already taken on `pages.dev`.
+ *
+ * Pending is also the state while certificates issue, so the wording
+ * allows for a record that already exists.
+ */
+export function cnameInstruction(domain: EnsureDomainResult, target: string): string[] | null {
+  if (domain.status === 'active') return null
+  return [
+    'Attaching a domain through the API does not create its DNS record.',
+    'If the zone does not have it yet, add it (DNS → Records, proxied):',
+    `  ${domain.name}  CNAME  ${target}`,
+    'The domain stays pending until the record exists.',
+  ]
 }
 
 export async function ensureCustomDomain(

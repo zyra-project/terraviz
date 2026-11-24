@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildProjectBody,
   DEFAULT_BUILD_CONFIG,
+  cnameInstruction,
   ensureCustomDomain,
   ensurePagesProject,
   PagesProjectApi,
@@ -107,6 +108,34 @@ describe('ensureCustomDomain', () => {
     const res = await ensureCustomDomain(api, 'my-node', 'https://a.example.org/')
     expect(res).toEqual({ name: 'a.example.org', created: false, status: 'active' })
     expect(seen.some(s => s.startsWith('POST'))).toBe(false)
+  })
+})
+
+// The API attaches the domain without creating its DNS record, so the
+// operator has to be handed the record itself.
+describe('cnameInstruction', () => {
+  it('gives the exact record for a domain that is not active yet', () => {
+    const lines = cnameInstruction(
+      { name: 'a.example.org', created: true, status: 'pending' },
+      'my-node-3xq.pages.dev',
+    )
+    expect(lines).not.toBeNull()
+    expect(lines).toContain('  a.example.org  CNAME  my-node-3xq.pages.dev')
+  })
+
+  it('treats a domain with no reported status as not active', () => {
+    expect(
+      cnameInstruction({ name: 'a.example.org', created: true }, 'my-node.pages.dev'),
+    ).not.toBeNull()
+  })
+
+  it('says nothing once the domain is active', () => {
+    expect(
+      cnameInstruction(
+        { name: 'a.example.org', created: false, status: 'active' },
+        'my-node.pages.dev',
+      ),
+    ).toBeNull()
   })
 })
 
