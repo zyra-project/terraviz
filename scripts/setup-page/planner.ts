@@ -51,6 +51,13 @@ export const PLANNER_MARK = 'data-tv-planner'
 /** Where the operator's answers live in the browser. */
 export const PLANNER_STORAGE_KEY = 'terraviz-setup-planner-v1'
 
+/**
+ * Where the export's own runtime keeps its state, tier included. Read
+ * only, to start the tier buttons' `aria-pressed` in step; a test
+ * fails if the export stops using this key.
+ */
+export const EXPORT_STORAGE_KEY = 'terraviz-setup-console-v1'
+
 const esc = (s: string): string =>
   s
     .replace(/&/g, '&amp;')
@@ -116,19 +123,34 @@ const ACTIONS_OPTIONS: Array<{ value: 'yes' | 'no' | 'unsure'; label: string; hi
   { value: 'unsure', label: 'Not sure yet', hint: 'The plan flags what depends on it.' },
 ]
 
+/**
+ * Rules inline styles cannot express. The page's own stylesheet sets
+ * `input:focus{outline:none}` for its text fields, which leaves a
+ * native checkbox or radio with no focus indicator at all (WCAG
+ * 2.4.7), so focus is drawn on the control and on its card. An
+ * implied capability is `aria-disabled` rather than `disabled`, so it
+ * stays in the tab order with its "Included with" note; its card reads
+ * as inactive here.
+ */
+const PLANNER_STYLE =
+  `[${PLANNER_MARK}] input:focus-visible{outline:2px solid var(--tv-accent);outline-offset:2px}` +
+  `[${PLANNER_MARK}] label:has(input:focus-visible){border-color:var(--tv-accent)!important}` +
+  `[${PLANNER_MARK}] label:has(input[aria-disabled="true"]){opacity:.72;cursor:default}`
+
 /** The static half: the questions, rendered at build time. */
 export function plannerSection(): string {
   const actionsOptions = ACTIONS_OPTIONS.map(
     o => `<label for="tvp-actions-${o.value}" style="${OPTION}">
-      <input type="radio" name="tvp-actions" id="tvp-actions-${o.value}" value="${o.value}" data-tvp-actions="1" aria-describedby="tvp-actions-${o.value}-hint" style="margin:3px 0 0;flex:none;width:16px;height:16px;accent-color:var(--tv-accent)"/>
+      <input type="radio" name="tvp-actions" id="tvp-actions-${o.value}" value="${o.value}" data-tvp-actions="1" aria-labelledby="tvp-actions-${o.value}-label" aria-describedby="tvp-actions-${o.value}-hint" style="margin:3px 0 0;flex:none;width:16px;height:16px;accent-color:var(--tv-accent)"/>
       <span style="display:block">
-        <span style="display:block;font:600 13.5px/1.35 var(--tv-font-sans);color:var(--tv-text)">${esc(o.label)}</span>
+        <span id="tvp-actions-${o.value}-label" style="display:block;font:600 13.5px/1.35 var(--tv-font-sans);color:var(--tv-text)">${esc(o.label)}</span>
         <span id="tvp-actions-${o.value}-hint" style="display:block;font-size:12.5px;line-height:1.5;color:var(--tv-text-muted);margin:3px 0 0">${esc(o.hint)}</span>
       </span>
     </label>`,
   ).join('\n    ')
 
   return `<section ${PLANNER_MARK}="1" data-noprint="1" aria-labelledby="tvp-title" style="margin:0 0 44px">
+  <style>${PLANNER_STYLE}</style>
   <div style="${EYEBROW};margin:0 0 12px">Step one · what this node will do</div>
   <h2 id="tvp-title" style="font:600 20px/1.3 var(--tv-font-sans);color:var(--tv-text);margin:0 0 10px">What do you want this node to do?</h2>
   <p style="${HELP}">Every node has ${esc(BASELINE.charAt(0).toLowerCase() + BASELINE.slice(1).replace(/\.$/, ''))}, with no publishing. Tick what you want on top, and say whether you can run GitHub Actions. The page works out your node type and what you will have to set up, before you start rather than halfway through.</p>
@@ -360,17 +382,20 @@ ${PLAN_LOGIC}
     }
 
     body.appendChild(el('h4', H, 'Then run'));
-    body.appendChild(el('pre', 'margin:0;padding:10px 12px;background:var(--tv-surface-code);border-radius:6px;overflow-x:auto;font:500 12.5px/1.5 var(--tv-font-mono);color:var(--tv-text)',
+    body.appendChild(el('pre', 'margin:0;padding:10px 12px;background:var(--tv-surface-code);border-radius:6px;white-space:pre-wrap;overflow-wrap:anywhere;font:500 12.5px/1.5 var(--tv-font-mono);color:var(--tv-text)',
       tvpCommand(plan.features)));
   }
 
   function paint(announce) {
+    // \`announce\` is the debounced announcer, or null for the first paint.
     var effective = closure(saved.caps);
     boxes.forEach(function (box) {
       var id = box.getAttribute('data-tvp-cap');
       var by = saved.caps.filter(function (other) { return other !== id && closure([other])[id]; });
       box.checked = !!effective[id];
-      box.disabled = by.length > 0;
+      // aria-disabled, not disabled: a disabled box leaves the tab
+      // order and takes its "Included with" note with it.
+      if (by.length) box.setAttribute('aria-disabled', 'true'); else box.removeAttribute('aria-disabled');
       var note = root.querySelector('[data-tvp-implied="' + id + '"]');
       if (note) note.textContent = by.length ? 'Included with: ' + by.map(function (o) { return byId[o].title; }).join(', ') : '';
       var blocked = root.querySelector('[data-tvp-blocked="' + id + '"]');
@@ -381,16 +406,64 @@ ${PLAN_LOGIC}
     radios.forEach(function (r) { r.checked = r.value === saved.actions; });
     var plan = tvpPlan(D, saved.caps, saved.actions || 'unsure');
     paintPlan(plan);
+    // Boxes ticked on the operator's behalf since the last paint: a
+    // sighted operator sees them change, so the announcement says so.
+    var added = Object.keys(effective).filter(function (id) {
+      return !lastEffective[id] && saved.caps.indexOf(id) === -1;
+    });
+    lastEffective = effective;
     if (announce && status) {
       var msg = 'Plan updated: Tier ' + plan.tier + ', ' + D.tiers[plan.tier] + '.';
+      if (added.length) msg += ' Also includes: ' + added.map(function (id) { return byId[id].title; }).join(', ') + '.';
       var n = plan.blocked.length || plan.atRisk.length;
       var choices = n === 1 ? '1 of your choices ' : n + ' of your choices ';
       if (plan.blocked.length) msg += ' ' + choices + (n === 1 ? 'needs' : 'need') + ' GitHub Actions you do not have.';
       else if (plan.atRisk.length) msg += ' ' + choices + (n === 1 ? 'depends' : 'depend') + ' on GitHub Actions.';
-      status.textContent = msg;
+      announce(msg);
     }
     return plan;
   }
+
+  // Arrowing through the radios changes the answer on every key, so
+  // the summary waits for a pause and is not repeated word for word.
+  var lastEffective = {};
+  var lastSaid = '';
+  var timer = null;
+  function announce(msg) {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(function () {
+      timer = null;
+      if (msg === lastSaid) return;
+      lastSaid = msg;
+      status.textContent = msg;
+    }, 500);
+  }
+
+  // The tier picker is the export's: it shows the selected tier by
+  // colour alone, and the plan tells people to use it as an override,
+  // so its pressed state is kept here. The export stores its tier
+  // under its own key; this reads it only to start in step.
+  var tierButtons = Array.prototype.slice.call(document.querySelectorAll('button[data-tier]'));
+  function pressTier(n) {
+    tierButtons.forEach(function (b) {
+      b.setAttribute('aria-pressed', String(Number(b.getAttribute('data-tier')) === n));
+    });
+  }
+  var startTier = 2;
+  try {
+    var exported = JSON.parse(localStorage.getItem(${JSON.stringify(EXPORT_STORAGE_KEY)}) || '{}');
+    if (exported.tier === 1 || exported.tier === 2 || exported.tier === 3) startTier = exported.tier;
+  } catch (e) {}
+  pressTier(startTier);
+  tierButtons.forEach(function (b) {
+    b.addEventListener('click', function () { pressTier(Number(b.getAttribute('data-tier'))); });
+  });
+
+  // An implied box stays focusable, so the toggle is refused here.
+  root.addEventListener('click', function (e) {
+    var t = e.target;
+    if (t && t.matches && t.matches('[data-tvp-cap][aria-disabled="true"]')) e.preventDefault();
+  });
 
   root.addEventListener('change', function (e) {
     var t = e.target;
@@ -404,14 +477,14 @@ ${PLAN_LOGIC}
       return;
     }
     persist();
-    var plan = paint(true);
+    var plan = paint(announce);
     // The export's own picker owns what a tier shows; drive it rather
     // than duplicate it.
     var button = document.querySelector('button[data-tier="' + plan.tier + '"]');
     if (button) button.click();
   });
 
-  paint(false);
+  paint(null);
 })();
 `
 }

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Zyra Project
 
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   CAPABILITIES,
@@ -12,6 +14,7 @@ import {
 import {
   applyPlanner,
   assertPlannerPresent,
+  EXPORT_STORAGE_KEY,
   PLAN_LOGIC,
   PLANNER_MARK,
   plannerData,
@@ -122,6 +125,13 @@ describe('plannerSection', () => {
 })
 
 describe('plannerRuntime', () => {
+  // The tier buttons' aria-pressed starts from the export's stored
+  // tier. An export that renamed its key would leave it out of step.
+  it('reads the storage key the export actually uses', () => {
+    const page = readFileSync(resolve(__dirname, '../../public/setup.html'), 'utf8')
+    expect(page).toContain(`const KEY = '${EXPORT_STORAGE_KEY}'`)
+  })
+
   it('is valid JavaScript', () => {
     expect(() => new Function(plannerRuntime())).not.toThrow()
   })
