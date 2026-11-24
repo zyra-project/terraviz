@@ -160,22 +160,45 @@ export interface EnsureDomainResult {
 
 /**
  * The DNS record a custom domain needs, as lines to print, or `null`
- * once the domain is `active`. `target` is the project's own
- * `*.pages.dev` hostname, read from the project rather than built from
- * its name, because Cloudflare suffixes the subdomain when the name is
- * already taken on `pages.dev`.
+ * once the domain is `active`. The target is the project's own
+ * `*.pages.dev` hostname as the API reports it, because Cloudflare
+ * suffixes the subdomain when the name is already taken on
+ * `pages.dev`. When the API leaves it out, the name-based guess is
+ * printed with a warning that it is one.
  *
- * Pending is also the state while certificates issue, so the wording
- * allows for a record that already exists.
+ * Pending (and initializing) is also the state while certificates
+ * issue, so the wording allows for a record that already exists. Any
+ * other status that is not active (`blocked`, `deactivated`, `error`)
+ * may have a cause a record will not fix, so it is named rather than
+ * explained away.
  */
-export function cnameInstruction(domain: EnsureDomainResult, target: string): string[] | null {
+export function cnameInstruction(
+  domain: EnsureDomainResult,
+  project: Pick<PagesProject, 'name' | 'subdomain'>,
+): string[] | null {
   if (domain.status === 'active') return null
-  return [
+  const target = project.subdomain || `${project.name}.pages.dev`
+  const lines = [
     'Attaching a domain through the API does not create its DNS record.',
-    'If the zone does not have it yet, add it (DNS → Records, proxied):',
+    'If the zone does not have it yet, add this record (proxied, on Cloudflare DNS):',
     `  ${domain.name}  CNAME  ${target}`,
-    'The domain stays pending until the record exists.',
   ]
+  if (!project.subdomain) {
+    lines.push(
+      "The API did not report the project's pages.dev hostname, so that one is a guess.",
+      "Check it on the project's overview page: Cloudflare adds a suffix when the name is taken.",
+    )
+  }
+  const status = domain.status
+  if (!status || status === 'pending' || status === 'initializing') {
+    lines.push('The domain stays pending until the record exists.')
+  } else {
+    lines.push(
+      `Its status is "${status}", which a missing record may not explain; ` +
+        "the project's Custom domains page says why.",
+    )
+  }
+  return lines
 }
 
 export async function ensureCustomDomain(

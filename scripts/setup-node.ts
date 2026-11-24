@@ -568,8 +568,7 @@ export async function runSetup(deps: SetupDeps): Promise<number> {
             `  domain   ${domain.name}  ${verb(domain.created)}` +
               `${domain.status ? ` (${domain.status})` : ''}\n`,
           )
-          const target = res.project.subdomain || `${res.project.name}.pages.dev`
-          const instruction = cnameInstruction(domain, target)
+          const instruction = cnameInstruction(domain, res.project)
           if (instruction) {
             deps.stdout.write(
               instruction.map((line, i) => `  ${i === 0 ? '!' : ' '} ${line}\n`).join(''),
