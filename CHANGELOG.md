@@ -41,6 +41,26 @@ Fixes [#538](https://github.com/zyra-project/terraviz/issues/538).
   server's own `VIDEO_PROXY_BASE`; the CSP hosts every node needs
   (`tiles.openfreemap.org` and two S3 hosts); and a troubleshooting entry
   for a block page from an account-level WAF rule.
+- `/setup` now opens on what the node should do (a checkbox per capability)
+  and whether you can run GitHub Actions in a repository you control, before
+  the node-type picker. The plan beneath says what you will have, what is not
+  possible without Actions and why, what to set up, which workflows to turn
+  on, and the `npm run setup --with=` command; the picker follows the answers.
+  The line that matters is Actions, not the tier: video uploads, Zyra, the
+  feeds, analytics history and desktop builds all run there, and a node
+  deployed from a clone of upstream has none of them.
+- `npm run setup --with=` takes `zyra`, `feeds` and `analytics` as well as
+  `r2` and `transcode`. The handoff names the workflows each runs, to turn on
+  in the Actions tab, and ends with the features the run left out.
+- `docs/SELF_HOSTING.md` has a capability table under "Pick your node type
+  first", says a clone of upstream cannot run the workflows, and lists
+  `zyra-run.yml`, `zyra-scheduler.yml`, `import-events.yml` and
+  `refresh-video-sources.yml` in Reference B. The `/setup` add-ons card no
+  longer says the events feed runs with nothing to turn on.
+- **Operators:** if you deployed from a clone of upstream, or never turned on
+  your fork's scheduled workflows, the events feed, Zyra schedules and the
+  analytics export have not been running. Turn them on in the Actions tab
+  (Reference B), or answer `/setup`'s questions to see what your node needs.
 - **Operators:** if you renamed the R2 bucket, run
   `npm run check:pages-bindings`. If it reports a mismatch, point the binding
   and `CATALOG_R2_BUCKET` at the bucket that holds your assets in both Pages

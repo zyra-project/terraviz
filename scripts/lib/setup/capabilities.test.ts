@@ -152,3 +152,34 @@ describe('expandFeatures', () => {
     expect([...expandFeatures(['feeds'])]).toEqual(['feeds'])
   })
 })
+
+// The guide carries the same facts by hand. These fail when it stops
+// naming a capability or a workflow the manifest lists.
+describe('docs/SELF_HOSTING.md', () => {
+  const guide = readFileSync(resolve(__dirname, '../../../docs/SELF_HOSTING.md'), 'utf8')
+  const between = (start: string, end: string): string => {
+    const from = guide.indexOf(start)
+    const to = guide.indexOf(end, from + start.length)
+    expect(from, start).toBeGreaterThan(-1)
+    expect(to, end).toBeGreaterThan(from)
+    return guide.slice(from, to)
+  }
+
+  it('names every capability and workflow in its capability table', () => {
+    const table = between('### What each capability needs', '## The worksheet')
+    for (const cap of CAPABILITIES) {
+      expect(table, cap.title).toContain(cap.title)
+      for (const w of cap.workflows) {
+        if (w.trigger !== 'manual') expect(table, w.file).toContain(w.file)
+      }
+    }
+    for (const feature of SETUP_FEATURES) expect(table, feature).toContain(`\`${feature}\``)
+  })
+
+  it('lists every workflow the manifest names in Reference B', () => {
+    const refB = between('# Reference B', '# Reference C')
+    for (const cap of CAPABILITIES) {
+      for (const w of cap.workflows) expect(refB, w.file).toContain(`\`${w.file}\``)
+    }
+  })
+})

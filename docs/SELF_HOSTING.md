@@ -55,6 +55,38 @@ exactly that reason.
 > first Tier 2 run. The bulk of the wall-clock is waiting on
 > deploys and DNS, not typing.
 
+### What each capability needs
+
+A tier says what a node gets. It does not say what each part needs,
+and the line that matters most is not the tier: it is **whether you
+can run GitHub Actions in a repository you control**. Video uploads,
+Zyra pipelines, the feeds, the analytics history and desktop builds
+all run as workflows in your copy of the repository (§0.2). A node
+deployed from a clone of upstream with Direct Upload gets the
+publisher portal and none of those. Video uploads then answer 503,
+and the rest fail silently.
+
+| If you want to… | It needs | Without GitHub Actions |
+|---|---|---|
+| Show the globe, the SOS catalog and Orbit | A deployed node (Phases 0–5, then 13) | Works |
+| Publish your own datasets, tours and blog posts | The publisher backend (Phases 2–11) | Works |
+| Upload images and other files | + an R2 public domain and S3 token (8.5) | Works |
+| Upload videos | + R2, and `transcode-hls.yml` (8.6) | Finishing an upload answers 503 |
+| Run scheduled data pipelines with Zyra | + R2, and `zyra-run.yml` and the scheduled `zyra-scheduler.yml` (8.6) | Runs never start |
+| Keep current events and video suggestions coming in | The scheduled `import-events.yml` and `refresh-video-sources.yml` | Nothing refreshes; press Run now on `/publish/feeds` by hand |
+| Keep visitor analytics history in the portal | An analytics bucket (14.2), and the scheduled `analytics-export.yml` | The analytics tab stays empty |
+| Ship a branded desktop app | Signing keys and `release.yml` (Phase 15) | No installers, no update feed |
+
+A fork starts with Actions off, and its **scheduled** workflows stay
+off until you turn each one on in the Actions tab. Reference B lists
+the secrets each workflow reads.
+
+`/setup` asks these questions before anything else and prints the
+plan they add up to, including the `npm run setup --with=` command
+for your choices. The same list drives `npm run setup`: `--with=`
+takes `r2`, `transcode`, `zyra`, `feeds` and `analytics`, and the run
+ends by naming the workflows to turn on and what it left out.
+
 ---
 
 ## The worksheet
@@ -209,6 +241,13 @@ questions to the interview, and the matching sections to the handoff
 report. So `--with=r2 --only=r2` both asks you for the public asset
 origin and then configures it; `--with=transcode` adds no step at
 all, it just includes the transcode secrets in the handoff.
+
+`--with=` takes `r2`, `transcode`, `zyra`, `feeds` and `analytics`
+([What each capability needs](#what-each-capability-needs)). Every one
+but `r2` runs GitHub Actions in your repository, so the handoff names
+the workflows to turn on for each. `transcode` and `zyra` bring `r2`
+with them, since both publish into the bucket. A run also ends by
+listing the features it left out.
 
 `r2` and `waf` are opt-in via `--only=r2` / `--only=waf`, not part of
 a default run. The rulesets API replaces a zone's whole custom-rule
@@ -383,9 +422,19 @@ the Cloudflare dashboard sidebar and in every dashboard URL.
 Everything after this assumes you are working from **your own copy**
 of `zyra-project/terraviz`, not from upstream. Phase 3 rewrites
 `wrangler.toml` with your resource IDs, Phase 5 points Cloudflare
-Pages at your remote, and Phase 8.6 runs the transcode workflow in
-your repo. None of that is possible against a repo you cannot push
-to.
+Pages at your remote, and every GitHub Actions workflow a node uses
+(video transcode, Zyra, the feeds, the analytics export, desktop
+releases) runs in your repo. None of that is possible against a repo
+you cannot push to.
+
+> **A clone of `zyra-project/terraviz` is not your own copy.** It
+> builds and deploys, and nothing complains, because Direct Upload
+> needs no remote. But its workflows run for upstream, never for your
+> node, so the capabilities that need GitHub Actions are off
+> ([What each capability needs](#what-each-capability-needs)). If you
+> deployed from a clone, you can add them later: fork, set the
+> workflow secrets and the Pages variables (8.6), turn the workflows
+> on, and redeploy. Nothing needs rebuilding.
 
 **Record the result as `W3`** — `owner/repo`. It is the value the
 `/setup` console reads to retarget its documentation links at your
@@ -2656,7 +2705,10 @@ not just a redeploy.
 # Reference B — CI/CD workflow matrix
 
 Workflows travel with the fork; the secrets that make them run do
-not.
+not, and neither does their switch. A fork starts with Actions off,
+and each *scheduled* workflow stays off until you turn it on in the
+Actions tab. One left off never runs, and nothing on the node says
+so.
 
 | Workflow | Needs | Drop it if… |
 |---|---|---|
@@ -2665,7 +2717,11 @@ not.
 | `poster.yml` | same, plus `terraviz-poster` rename; envs `poster-*` | no poster sub-site |
 | `visual-report.yml` | smoke/report/diff: nothing. Optional report deploy: the two Cloudflare secrets + a `terraviz-visual` project; optional `vars.VISUAL_DEPLOY_URL` | **keep** the gating jobs; drop only the deploy step |
 | `transcode-hls.yml` | the seven Phase 8.6 GitHub secrets | no publisher video uploads |
-| `analytics-export.yml` / `analytics-backfill.yml` | `TERRAVIZ_SERVER`, `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` | you skipped 14.2 |
+| `zyra-run.yml` | the same seven secrets as `transcode-hls.yml` | no Zyra workflows |
+| `zyra-scheduler.yml` *(scheduled, every 15 min)* | `TERRAVIZ_SERVER`, `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` | no Zyra workflows on a schedule |
+| `import-events.yml` *(scheduled, every 6 h)* | `TERRAVIZ_SERVER`, `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` | you refresh events by hand (Run now on `/publish/feeds`), or not at all |
+| `refresh-video-sources.yml` *(scheduled, every 12 h)* | `TERRAVIZ_SERVER`, `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` | no video sources in `/publish/feeds` |
+| `analytics-export.yml` *(scheduled, daily)* / `analytics-backfill.yml` | `TERRAVIZ_SERVER`, `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` | you skipped 14.2 |
 | `release.yml` / `desktop.yml` | `TAURI_SIGNING_PRIVATE_KEY` + `_PASSWORD`, 6× `APPLE_*` | web-only node |
 | `sync-weblate.yml` | `WEBLATE_TOKEN` | no translation pipeline of your own |
 | `codeql.yml`, `mobile.yml` | nothing | **keep** — fork-safe |
