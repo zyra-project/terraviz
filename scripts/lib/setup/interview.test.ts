@@ -491,4 +491,21 @@ describe('handoff report', () => {
     const text = renderHandoff(buildHandoff(state, { features: new Set(['r2', 'transcode']) }))
     expect(text).not.toMatch(/SECRET\s*=/)
   })
+
+  // The CLI and the transcode runner fall back to terraviz-assets on
+  // their own; the Pages variable the bindings step writes is not
+  // theirs to read.
+  it('asks for CATALOG_R2_BUCKET in the shell and on GitHub when the bucket was renamed', () => {
+    const renamed: SetupState = { ...state, r2Bucket: { name: 'node-assets' } }
+    const text = renderHandoff(
+      buildHandoff(renamed, { features: new Set(['r2', 'transcode']) }),
+    )
+    const lines = text.split('\n').filter(l => l.includes('CATALOG_R2_BUCKET = node-assets'))
+    expect(lines).toHaveLength(2)
+  })
+
+  it('does not ask for CATALOG_R2_BUCKET when the bucket kept its default name', () => {
+    const text = renderHandoff(buildHandoff(state, { features: new Set(['r2', 'transcode']) }))
+    expect(text).not.toContain('CATALOG_R2_BUCKET')
+  })
 })

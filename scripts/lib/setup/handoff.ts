@@ -27,7 +27,7 @@
  */
 
 import { wrap } from './prompt'
-import type { SetupState } from './state'
+import { DEFAULT_NAMES, type SetupState } from './state'
 
 export type HandoffStatus = 'done' | 'todo' | 'optional'
 
@@ -71,6 +71,21 @@ export function buildHandoff(state: SetupState, opts: HandoffOptions = {}): Hand
   const groups: HandoffGroup[] = []
   const site = state.hostname ? `https://${state.hostname}` : null
   const features = opts.features ?? new Set()
+  // The bindings step writes CATALOG_R2_BUCKET to Pages, but the CLI
+  // and the transcode runner read their own copy, and without one
+  // they address terraviz-assets. Only a renamed bucket needs it.
+  const bucket = state.r2Bucket.name
+  const bucketItem = (writers: string, status: HandoffStatus): HandoffItem[] =>
+    bucket === DEFAULT_NAMES.r2Bucket
+      ? []
+      : [
+          {
+            name: 'CATALOG_R2_BUCKET',
+            status,
+            value: bucket,
+            why: `without it, ${writers} ${DEFAULT_NAMES.r2Bucket}, not your bucket`,
+          },
+        ]
 
   // ── Build variables ─────────────────────────────────────────────
   // VITE_* are baked in at build time. Changing one later needs a
@@ -157,6 +172,7 @@ export function buildHandoff(state: SetupState, opts: HandoffOptions = {}): Hand
       { name: 'R2_ACCESS_KEY_ID', status: 'todo', source: 'same' },
       { name: 'R2_SECRET_ACCESS_KEY', status: 'todo', source: 'same' },
     )
+    githubItems.push(...bucketItem('the transcode runner writes to', 'todo'))
   }
   groups.push({
     destination: `GitHub${repo ? ` (${repo})` : ''} → Settings → Secrets and variables → Actions`,
@@ -190,6 +206,10 @@ export function buildHandoff(state: SetupState, opts: HandoffOptions = {}): Hand
           status: has(opts.available, 'R2_SECRET_ACCESS_KEY') ? 'done' : 'todo',
           source: 'shown once at creation',
         },
+        ...bucketItem(
+          'upload and migrate-r2-* write to',
+          has(opts.available, 'CATALOG_R2_BUCKET') ? 'done' : 'todo',
+        ),
       ],
     })
   }

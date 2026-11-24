@@ -74,6 +74,21 @@ export const OPTIONAL_EXTRAS: ExpectedBinding[] = [
       'ACCESS_AUD\'s value if the publisher app covers it, or none if ' +
       'no app does (SELF_HOSTING.md 6.4). Export it, or set it in the dashboard.',
   },
+  {
+    // The `CATALOG_R2` binding names the bucket for the Worker's own
+    // R2 calls, but every S3-API path (presigned uploads, public-URL
+    // signing, the thumbnail job) reads the name from this variable
+    // and falls back to `terraviz-assets` without it. Written from the
+    // same state as the binding, always, so the two cannot disagree:
+    // a renamed bucket with this unset sends those paths to a bucket
+    // the node may not own. `check-pages-bindings` flags a mismatch.
+    name: 'CATALOG_R2_BUCKET',
+    type: 'plaintext',
+    environments: ['production', 'preview'],
+    hint:
+      'The R2 bucket name, matching the CATALOG_R2 binding. The S3-API ' +
+      'paths read it and fall back to terraviz-assets when it is unset.',
+  },
 ]
 
 /** Cloudflare's per-binding payload shapes, keyed by binding type. */
@@ -189,6 +204,8 @@ function plaintextValue(name: string, state: SetupState): string | undefined {
       return state.accessFeedbackAud
     case 'R2_PUBLIC_BASE':
       return state.r2PublicBase
+    case 'CATALOG_R2_BUCKET':
+      return state.r2Bucket.name
     case 'GITHUB_OWNER':
       return state.githubOwner
     case 'GITHUB_REPO':
