@@ -149,6 +149,9 @@ const STEPS = [
 ] as const
 type Step = (typeof STEPS)[number]
 
+/** Steps that use the R2 bucket's name, and so must agree on it. */
+const BUCKET_STEPS: readonly Step[] = ['resources', 'wrangler-toml', 'bindings', 'r2']
+
 /**
  * Steps a bare run performs. `waf` is excluded deliberately: it
  * rewrites the zone's custom-rule list, and the rulesets API replaces
@@ -546,6 +549,24 @@ export async function runSetup(deps: SetupDeps): Promise<number> {
   deps.stdout.write(`  state:   ${opts.statePath}\n`)
   deps.stdout.write(`  project: ${state.pagesProject}\n\n`)
 
+  // ── Bucket name ─────────────────────────────────────────────────
+  // Checked before any step, not in the bindings step: three steps use
+  // the bucket name before bindings writes CATALOG_R2_BUCKET (resources
+  // creates the bucket, wrangler-toml rewrites its binding, r2 sets its
+  // CORS and domain). Refusing at bindings left the first two already
+  // done against the wrong bucket, and `--only=wrangler-toml` never
+  // reached the check at all.
+  if (BUCKET_STEPS.some(step => opts.steps.has(step))) {
+    const bucketConflict = bucketEnvConflict(state, deps.env)
+    if (bucketConflict) {
+      if (opts.apply) {
+        deps.stderr.write(`  ✘ ${bucketConflict}\n\n`)
+        return 1
+      }
+      deps.stdout.write(`  ! ${bucketConflict} --apply will refuse.\n\n`)
+    }
+  }
+
   // Only known once the pages step has actually looked; undefined
   // means "we never checked", which the handoff report words
   // differently from either answer.
@@ -923,14 +944,6 @@ export async function runSetup(deps: SetupDeps): Promise<number> {
     const plan = planBindings(state, secrets, [...EXPECTED_BINDINGS, ...OPTIONAL_EXTRAS])
     deps.stdout.write(formatBindingsPlan(plan) + '\n\n')
 
-    const bucketConflict = bucketEnvConflict(state, deps.env)
-    if (bucketConflict) {
-      if (opts.apply) {
-        deps.stderr.write(`  ✘ ${bucketConflict}\n\n`)
-        return 1
-      }
-      deps.stdout.write(`  ! ${bucketConflict} --apply will refuse.\n\n`)
-    }
 
     // R2 / Vectorize / Analytics Engine / AI bindings address their
     // resource by name, so they "resolve" from defaults even on a

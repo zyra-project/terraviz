@@ -398,6 +398,44 @@ describe('runSetup — bindings step', () => {
     expect(h.errOut()).toContain('export TERRAVIZ_R2_BUCKET=node-assets')
   })
 
+  // The resources step creates the bucket and wrangler-toml rewrites
+  // its binding, both before bindings runs, so the check has to come
+  // first, and a run of either alone has to meet it.
+  it('refuses before any step that uses the bucket name, not at bindings', async () => {
+    const h = harness({
+      argv: ['--apply'],
+      env: { CLOUDFLARE_API_TOKEN: 'tok', CATALOG_R2_BUCKET: 'node-assets' },
+      files: { '.terraviz-setup.json': state },
+    })
+    expect(await runSetup(h.deps)).toBe(1)
+    expect(h.calls).toEqual([])
+    expect(h.out()).not.toContain('Phase 2')
+    expect(h.errOut()).toContain('export TERRAVIZ_R2_BUCKET=node-assets')
+  })
+
+  it('refuses a wrangler-toml run on its own', async () => {
+    const h = harness({
+      argv: ['--apply', '--only=wrangler-toml'],
+      env: { CATALOG_R2_BUCKET: 'node-assets' },
+      files: {
+        '.terraviz-setup.json': state,
+        'wrangler.toml': '[[r2_buckets]]\nbinding = "CATALOG_R2"\nbucket_name = "terraviz-assets"\n',
+      },
+    })
+    expect(await runSetup(h.deps)).toBe(1)
+    expect(h.writes.has('wrangler.toml')).toBe(false)
+  })
+
+  it('leaves a run that never touches the bucket alone', async () => {
+    const h = harness({
+      argv: ['--only=migrations'],
+      env: { CATALOG_R2_BUCKET: 'node-assets' },
+      files: { '.terraviz-setup.json': state },
+    })
+    await runSetup(h.deps)
+    expect(h.out()).not.toContain('--apply will refuse')
+  })
+
   it('warns about the same conflict on a dry run without failing it', async () => {
     const h = harness({
       argv: ['--only=bindings'],
